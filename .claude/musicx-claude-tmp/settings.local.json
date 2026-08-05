@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/roshan/Downloads/**)",
+      "Bash(pandoc -t markdown \"MusicX-Developer-Handoff.docx\")",
+      "Bash(pandoc -t markdown \"/Users/roshan/Downloads/MusicX-Developer-Handoff.docx\" -o \"/private/tmp/claude-501/-Users-roshan-Documents-MusicX-dev/ccc2ed72-7287-4bac-ae6c-17afe8eb667e/scratchpad/handoff.md\")",
+      "Bash(unzip -o -q \"/Users/roshan/Downloads/MusicX-Developer-Handoff.docx\" -d handoff_unpacked)"
+    ]
+  }
+}
