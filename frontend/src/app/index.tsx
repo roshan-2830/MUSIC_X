@@ -1,98 +1,46 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+import { useEffect, useState } from "react";
+import { ActivityIndicator, FlatList, Modal, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { fetchEvents, MusicEvent } from "../lib/api";
+import EventCard from "../components/event-card";
+import EventDetailView from "../components/event-detail";
 
 export default function HomeScreen() {
+  const [events, setEvents] = useState<MusicEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchEvents("mxs").then(setEvents).catch((e) => setError(String(e))).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <View style={styles.center}><ActivityIndicator color="#e8ff47" size="large" /></View>;
+  if (error) return <View style={styles.center}><Text style={styles.error}>Couldn't load events:{"\n"}{error}</Text></View>;
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <Text style={styles.logo}>MUSIC<Text style={styles.accent}>X</Text></Text>
+      <Text style={styles.sub}>Upcoming · {events.length} shows</Text>
+      <FlatList
+        data={events}
+        keyExtractor={(e) => e.id}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        renderItem={({ item }) => <EventCard event={item} onPress={() => setSelectedId(item.id)} />}
+      />
+      <Modal visible={!!selectedId} animationType="slide" onRequestClose={() => setSelectedId(null)}>
+        {selectedId ? <EventDetailView id={selectedId} onClose={() => setSelectedId(null)} /> : null}
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  container: { flex: 1, backgroundColor: "#0b0b0f", paddingHorizontal: 16 },
+  center: { flex: 1, backgroundColor: "#0b0b0f", alignItems: "center", justifyContent: "center", padding: 24 },
+  logo: { color: "#f4f4f6", fontSize: 24, fontWeight: "800", letterSpacing: 1, marginTop: 8 },
+  accent: { color: "#e8ff47" },
+  sub: { color: "#9a9aa6", fontSize: 14, marginBottom: 12 },
+  error: { color: "#ff6b6b", fontSize: 14, textAlign: "center" },
 });
