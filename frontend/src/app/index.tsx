@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { fetchEvents, MusicEvent } from "../lib/api";
 import EventCard from "../components/event-card";
 import EventDetailView from "../components/event-detail";
+import SearchBar from "../components/search-bar";
 
 export default function HomeScreen() {
   const [events, setEvents] = useState<MusicEvent[]>([]);
@@ -22,6 +23,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={["top"]}>
       <Text style={styles.logo}>MUSIC<Text style={styles.accent}>X</Text></Text>
       <Text style={styles.sub}>Upcoming · {events.length} shows</Text>
+      <SearchBar />
       <FlatList
         data={events}
         keyExtractor={(e) => e.id}

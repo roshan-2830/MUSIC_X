@@ -31,3 +31,9 @@ export async function fetchEvent(id: string): Promise<EventDetail> {
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
 }
+
+export async function searchEvents(q: string): Promise<MusicEvent[]> {
+  const res = await fetch(`${API_BASE_URL}/events/search?q=${encodeURIComponent(q)}`);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}

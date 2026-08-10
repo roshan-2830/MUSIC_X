@@ -14,6 +14,8 @@ from app.models.event_genre import EventGenre
 from app.models.genre import Genre
 from app.models.event_offer import EventOffer
 from app.schemas.event import EventListItem, EventDetail, ArtistOut, OfferOut
+from app.services.ingestion import search_and_ingest
+from app.services.scoring import score_events_by_ids
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -46,6 +48,23 @@ def list_events(
     else:
         q = q.order_by(nulls_last(Event.starts_at.asc()))
     return [_to_list_item(db, e) for e in q.limit(limit).all()]
+
+
+@router.get("/search", response_model=list[EventListItem])
+def search_events(
+    q: str = Query(..., min_length=1, description="Keyword: artist, city, or genre"),
+    db: Session = Depends(get_db),
+):
+    """Live search: query Ticketmaster by keyword, upsert + score the matches,
+    and return them in Ticketmaster's relevance order."""
+    ids = search_and_ingest(q)      # live Ticketmaster -> upsert -> event IDs
+    score_events_by_ids(ids)        # MXS score just these results (Deezer)
+    if not ids:
+        return []
+    events = db.query(Event).filter(Event.id.in_(ids)).all()
+    by_id = {e.id: e for e in events}
+    ordered = [by_id[i] for i in ids if i in by_id]   # keep relevance order
+    return [_to_list_item(db, e) for e in ordered]
 
 
 @router.get("/{event_id}", response_model=EventDetail)
