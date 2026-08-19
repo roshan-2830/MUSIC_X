@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     # Event data
     ticketmaster_api_key: str = ""
 
+    # Bandsintown — artist-tour focused, and the only free source that lists an
+    # artist's FESTIVAL appearances alongside their own headline dates. Their API
+    # returns 403 ("explicit deny") without a REGISTERED app_id, so this stays empty
+    # until one is issued; every Bandsintown call is skipped while it is blank.
+    bandsintown_app_id: str = ""
+
     # Spotify (added later, when Premium is available)
     spotify_client_id: str = ""
     spotify_client_secret: str = ""

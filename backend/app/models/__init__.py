@@ -14,6 +14,7 @@ from app.models.event_offer import EventOffer  # noqa: F401
 from app.models.event_highlight import EventHighlight  # noqa: F401
 from app.models.event_fact import EventFact  # noqa: F401
 from app.models.event_source import EventSource  # noqa: F401
+from app.models.event_change import EventChange  # noqa: F401
 
 # Festivals
 from app.models.festival import Festival  # noqa: F401

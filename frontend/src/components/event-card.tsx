@@ -1,4 +1,7 @@
+import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
 import { MusicEvent } from "../lib/api";
 import { coverColor, flagEmoji, formatDay } from "../lib/format";
 
@@ -9,10 +12,31 @@ const CONF: Record<string, string> = {
 };
 const confColor = (c: string) => (c === "high" ? "#7ef0b2" : c === "medium" ? "#f0d47e" : "#8a8a96");
 
-export default function EventCard({ event, onPress }: { event: MusicEvent; onPress: () => void }) {
+export default function EventCard({
+  event,
+  onPress,
+  reasonLabel,
+  reasonKind,
+}: {
+  event: MusicEvent;
+  onPress: () => void;
+  reasonLabel?: string;
+  reasonKind?: "artist" | "genre";
+}) {
   return (
     <Pressable style={styles.card} onPress={onPress}>
-      <View style={[styles.cover, { backgroundColor: coverColor(event.id + (event.city ?? "")) }]}>
+      <View style={styles.cover}>
+        {event.image_url ? (
+          <Image source={{ uri: event.image_url }} style={styles.fill} contentFit="cover" transition={150} />
+        ) : (
+          <View style={[styles.fill, { backgroundColor: coverColor(event.id + (event.city ?? "")) }]} />
+        )}
+        {reasonLabel ? (
+          <View style={styles.reasonPill}>
+            <Ionicons name={reasonKind === "genre" ? "musical-notes" : "heart"} size={11} color="#0b0b0f" />
+            <Text style={styles.reasonText} numberOfLines={1}>{reasonLabel}</Text>
+          </View>
+        ) : null}
         <Text style={styles.flag}>{flagEmoji(event.country)} {event.city ?? ""}</Text>
       </View>
 
@@ -41,7 +65,14 @@ export default function EventCard({ event, onPress }: { event: MusicEvent; onPre
 
 const styles = StyleSheet.create({
   card: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 16, overflow: "hidden", marginBottom: 14 },
-  cover: { height: 120, justifyContent: "flex-end", padding: 12 },
+  cover: { height: 150, justifyContent: "flex-end", padding: 12, overflow: "hidden" },
+  fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  reasonPill: {
+    position: "absolute", top: 12, left: 12, maxWidth: "80%",
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: "#e8ff47", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  reasonText: { color: "#0b0b0f", fontSize: 12, fontWeight: "800", flexShrink: 1 },
   flag: { color: "#fff", fontWeight: "800", fontSize: 14, textShadowColor: "rgba(0,0,0,0.6)", textShadowRadius: 6, textShadowOffset: { width: 0, height: 1 } },
   body: { padding: 14 },
   when: { color: "#9a9aa6", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.7 },

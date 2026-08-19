@@ -18,6 +18,7 @@ class Event(Base):
     # Core details
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)                 # optional; real feeds provide one
+    image_url = Column(String, nullable=True)                # event/artist artwork from the source
     starts_at = Column(DateTime(timezone=True), nullable=True)
     doors_at = Column(DateTime(timezone=True), nullable=True)  # NULL = "not published"
     timezone = Column(String, nullable=True)

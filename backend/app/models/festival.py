@@ -16,6 +16,7 @@ class Festival(Base):
     id = Column(Uuid, primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
     about = Column(Text, nullable=True)                     # festivals have a real 'about'
+    image_url = Column(String, nullable=True)               # banner from the source (Ticketmaster)
 
     city_id = Column(Uuid, ForeignKey("cities.id"), nullable=True)
     starts_on = Column(Date, nullable=True)

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, String, Float, ForeignKey, Uuid
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Uuid
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -14,5 +14,6 @@ class Venue(Base):
     city_id = Column(Uuid, ForeignKey("cities.id"), nullable=True)
     lat = Column(Float, nullable=True)
     lng = Column(Float, nullable=True)
+    capacity = Column(Integer, nullable=True)   # max capacity (from Wikidata), for the Venue MXS signal
 
     city = relationship("City")

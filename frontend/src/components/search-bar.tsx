@@ -12,7 +12,7 @@ export default function SearchBar() {
       onPress={() => router.push("/search")}
     >
       <Ionicons name="search" size={18} color="#9a9aa6" />
-      <Text style={styles.placeholder}>Search artists, cities, genres…</Text>
+      <Text style={styles.placeholder}>Search artists, concerts, festivals…</Text>
     </Pressable>
   );
 }

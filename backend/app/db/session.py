@@ -9,7 +9,13 @@ db_url = settings.database_url.replace("postgresql://", "postgresql+psycopg://",
 
 # The engine manages the actual connections to Postgres.
 # pool_pre_ping checks a connection is alive before using it (avoids stale-connection errors).
-engine = create_engine(db_url, pool_pre_ping=True)
+# prepare_threshold=None disables psycopg server-side prepared statements — required for
+# Supabase's connection pooler, which otherwise raises "another command is already in progress".
+engine = create_engine(
+    db_url,
+    pool_pre_ping=True,
+    connect_args={"prepare_threshold": None},
+)
 
 # A factory that creates new database sessions.
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

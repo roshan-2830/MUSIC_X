@@ -13,7 +13,7 @@ class Profile(Base):
 
     display_name = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
-    home_city_id = Column(Uuid, ForeignKey("cities.id"), nullable=True)  # user-picked, never GPS
+    home_city_id = Column(Uuid, ForeignKey("cities.id"), nullable=True)  # user-picked or GPS-detected nearest city
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
