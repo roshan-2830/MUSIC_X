@@ -226,8 +226,23 @@ export default function SearchScreen() {
     }
   }
 
+  // Load the list from the feed, and RE-load whenever it changes.
+  //
+  // This must not live in the mount effect. expo-router can deliver an empty params
+  // object on the first render and fill it in on the next, so `feed` initialises to ""
+  // and a mount-time load falls through to the generic browse — which returned exactly
+  // 200 unrelated concerts for "Recommended for you". Keying off params.feed means we
+  // load once the router has actually told us which list was tapped.
   useEffect(() => {
-    loadBrowse();
+    const incoming = params.feed ?? "";
+    setFeed(incoming);
+    if (incoming === "soon") setF({ ...EMPTY, when: "week" });
+    else if (incoming === "rated") setF({ ...EMPTY, sort: "rating" });
+    loadBrowse(incoming);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.feed]);
+
+  useEffect(() => {
     getFestivals(100).then(setFestAll).catch(() => {});
     getFollows()
       .then((list) => {

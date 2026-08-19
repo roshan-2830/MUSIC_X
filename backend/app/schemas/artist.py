@@ -38,6 +38,19 @@ class BulkFollowIn(BaseModel):
     artists: list[FollowArtistIn]
 
 
+class SimilarArtist(BaseModel):
+    """An artist genuinely linked to this one, with the link stated in plain English
+    so a reader can check it rather than trust it."""
+    # Null for a Last.fm suggestion we have never ingested (Diljit Dosanjh, AP Dhillon).
+    # Those are often the most useful results, and the artist page opens by NAME, so a
+    # missing local id costs nothing.
+    id: UUID | None = None
+    name: str
+    image_url: str | None = None
+    reason: str          # e.g. "Also on the bill at Lowlands 2026"
+    shared: int = 0      # how many distinct links we found
+
+
 class ArtistDetail(BaseModel):
     """Everything the artist page shows — all real, no fabricated stats."""
     id: UUID
@@ -56,3 +69,5 @@ class ArtistDetail(BaseModel):
     # is a real date they are playing, but it is not a ticketed show of their own, so
     # it is kept separate from upcoming_shows rather than mixed in.
     festivals: list[FestivalOut] = []
+    # Empty when nothing qualifies — the section simply does not render.
+    similar: list[SimilarArtist] = []

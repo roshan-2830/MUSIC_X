@@ -11,14 +11,94 @@ from app.models.event import Event
 from app.models.event_artist import EventArtist
 from app.models.event_genre import EventGenre
 from app.models.festival import Festival
+from app.models.artist_similar import ArtistSimilar
 from app.models.festival_lineup import FestivalLineup
 from app.models.genre import Genre
-from app.schemas.artist import ArtistDetail, ArtistSearchResult
+from app.schemas.artist import ArtistDetail, ArtistSearchResult, SimilarArtist
 from app.api.routes.festivals import _cities_for, _to_out, _upcoming
-from app.services import deezer, wikidata, wikipedia
+from app.services import deezer, lastfm, wikidata, wikipedia
+from app.services.deezer import _norm
 from app.services.ingestion import ingest_artist_tour
+from app.services.similar import similar_combined
 
 router = APIRouter(prefix="/artists", tags=["artists"])
+
+
+SIMILAR_REFRESH_DAYS = 30
+
+
+def _store_similar(db: Session, artist_id, name: str, with_deezer_images: bool) -> bool:
+    """Fetch Last.fm similarity and cache it. Returns False if the lookup failed.
+
+    Rows are replaced wholesale, so an act Last.fm stops associating disappears rather
+    than lingering. `with_deezer_images` is the expensive half: photos for artists we do
+    not already hold cost one Deezer call each, so the first (inline) pass skips them and
+    a background pass fills them in.
+    """
+    rows, ok = lastfm.similar_artists_checked(name, limit=20)
+    if not ok:
+        return False
+
+    db.query(ArtistSimilar).filter_by(artist_id=artist_id, source="lastfm").delete()
+    today = date.today()
+
+    want = [r["name"] for r in rows]
+    held = {}
+    if want:
+        for a in db.query(Artist).filter(Artist.name.in_(want)).all():
+            if a.image_url:
+                held[_norm(a.name)] = a.image_url
+
+    for r in rows:
+        img = held.get(_norm(r["name"]))
+        if not img and with_deezer_images:
+            try:
+                img = deezer.artist_image(r["name"])
+            except Exception:
+                img = None
+        db.add(ArtistSimilar(artist_id=artist_id, name=r["name"], image_url=img,
+                             match=r["match"], source="lastfm", fetched_on=today))
+
+    a = db.get(Artist, artist_id)
+    if a:
+        a.similar_checked_on = today
+    return True
+
+
+def _fill_similar_images(artist_id) -> None:
+    """Background: photos for cached rows that do not have one yet (Deezer, one call
+    each). Separated from the Last.fm fetch so the section can appear on the FIRST open
+    without waiting on twenty image lookups."""
+    db = SessionLocal()
+    try:
+        rows = db.query(ArtistSimilar).filter_by(artist_id=artist_id, source="lastfm") \
+                 .filter(ArtistSimilar.image_url.is_(None)).all()
+        for r in rows:
+            try:
+                img = deezer.artist_image(r.name)
+            except Exception:
+                img = None
+            if img:
+                r.image_url = img
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _sync_similar(name: str, artist_id) -> None:
+    """Background: full monthly refresh — Last.fm plus photos."""
+    db = SessionLocal()
+    try:
+        if _store_similar(db, artist_id, name, with_deezer_images=True):
+            db.commit()
+        else:
+            db.rollback()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _sync_site(name: str, artist_id) -> None:
@@ -128,6 +208,25 @@ def artist_detail(
     if artist.website_url is None and artist.links_checked_on is None:
         background.add_task(_sync_site, artist.name, artist.id)
 
+    # Last.fm similarity, refreshed monthly. Cached in artist_similar, so the page reads
+    # it from our own DB and never waits on the network.
+    if lastfm.enabled():
+        cached = (db.query(ArtistSimilar.id)
+                    .filter_by(artist_id=artist.id, source="lastfm").first() is not None)
+        if not cached:
+            # First time we have ever seen this artist. A Last.fm call takes ~0.6s, so we
+            # pay it INLINE — otherwise the section is missing on the first open of every
+            # artist, which is exactly what happened when you tapped through from Karan
+            # Aujla to Diljit Dosanjh. Photos are left to the background pass, because
+            # twenty Deezer lookups is a different order of cost.
+            if _store_similar(db, artist.id, artist.name, with_deezer_images=False):
+                db.commit()
+            background.add_task(_fill_similar_images, artist.id)
+        elif artist.similar_checked_on is None or (
+            (date.today() - artist.similar_checked_on).days > SIMILAR_REFRESH_DAYS
+        ):
+            background.add_task(_sync_similar, artist.name, artist.id)
+
     # Upcoming shows: headliner OR line-up, exact (case-insensitive) name match.
     cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     upcoming = (Event.starts_at >= cutoff) | (Event.starts_at.is_(None))
@@ -185,6 +284,9 @@ def artist_detail(
     fest_cities = _cities_for(db, fests)
     festivals = [_to_out(f, fest_cities.get(f.city_id)) for f in fests]
 
+    # Similar artists — from shared bills and genres. Empty when nothing qualifies.
+    similar = [SimilarArtist(**x) for x in similar_combined(db, artist.id, artist.name)]
+
     city_count = len({s.city for s in shows if s.city})
     return ArtistDetail(
         id=artist.id,
@@ -199,4 +301,5 @@ def artist_detail(
         city_count=city_count,
         upcoming_shows=shows,
         festivals=festivals,
+        similar=similar,
     )

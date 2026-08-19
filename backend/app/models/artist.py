@@ -1,6 +1,7 @@
 import uuid
 
 from sqlalchemy import Column, Date, String, Text, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.session import Base
 
@@ -25,3 +26,12 @@ class Artist(Base):
     links_checked_on = Column(Date, nullable=True)
     # When we last pulled this artist's full tour from the seller by attraction id.
     tour_synced_on = Column(Date, nullable=True)
+    # When we last asked Last.fm for similar artists. Only stamped on a lookup that
+    # COMPLETED, so a timeout is retried rather than frozen as "nothing similar".
+    similar_checked_on = Column(Date, nullable=True)
+
+    # Crowd genre tags from Last.fm, strongest first. This is the genre source that
+    # replaced Spotify's stripped `genres` field; it also feeds event_genres, which had
+    # coverage on only 485 of 4,708 events before this existed.
+    tags = Column(JSONB, nullable=True)
+    tags_checked_on = Column(Date, nullable=True)

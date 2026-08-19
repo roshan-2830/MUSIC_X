@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # until one is issued; every Bandsintown call is skipped while it is blank.
     bandsintown_app_id: str = ""
 
+    # Last.fm — similar artists and tags from 20 years of scrobbles. Free, instant
+    # self-serve key, and (unlike Bandsintown) reachable from this network. Note their
+    # terms: commercial use should be declared to partners@last.fm before launch.
+    lastfm_api_key: str = ""
+
     # Spotify (added later, when Premium is available)
     spotify_client_id: str = ""
     spotify_client_secret: str = ""

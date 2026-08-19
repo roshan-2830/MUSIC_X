@@ -20,6 +20,9 @@ import { coverColor, flagEmoji, formatDay } from "../lib/format";
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
 
+// How many tour dates to show before asking the reader if they want the rest.
+const SHOWS_PREVIEW = 4;
+
 function ShowRow({ e, onPress }: { e: MusicEvent; onPress: () => void }) {
   return (
     <Pressable style={styles.row} onPress={onPress}>
@@ -54,6 +57,8 @@ export default function ArtistDetail({
   const [loading, setLoading] = useState(true);
   const [followId, setFollowId] = useState<string | null>(null); // artist id if following, else null
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [peekArtist, setPeekArtist] = useState<string | null>(null);
+  const [showAllDates, setShowAllDates] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -176,9 +181,27 @@ export default function ArtistDetail({
             Upcoming concerts{data.show_count ? ` · ${data.show_count}` : ""}
           </Text>
           {data.upcoming_shows.length ? (
-            data.upcoming_shows.map((e) => (
-              <ShowRow key={e.id} e={e} onPress={() => onSelectEvent?.(e.id)} />
-            ))
+            <>
+              {(showAllDates ? data.upcoming_shows : data.upcoming_shows.slice(0, SHOWS_PREVIEW)).map((e) => (
+                <ShowRow key={e.id} e={e} onPress={() => onSelectEvent?.(e.id)} />
+              ))}
+              {/* A full tour is 50+ dates — Weezer has 53 — which buries everything
+                  below it. Show a handful, and let the reader ask for the rest. */}
+              {data.upcoming_shows.length > SHOWS_PREVIEW ? (
+                <Pressable style={styles.moreBtn} onPress={() => setShowAllDates((v) => !v)}>
+                  <Text style={styles.moreBtnText}>
+                    {showAllDates
+                      ? "Show fewer"
+                      : `View all ${data.upcoming_shows.length} shows`}
+                  </Text>
+                  <Ionicons
+                    name={showAllDates ? "chevron-up" : "chevron-down"}
+                    size={15}
+                    color={ACCENT}
+                  />
+                </Pressable>
+              ) : null}
+            </>
           ) : (
             <View style={styles.empty}>
               <Ionicons name="notifications-outline" size={34} color={MUTED} />
@@ -194,7 +217,7 @@ export default function ArtistDetail({
 
         {/* Festivals they're billed on. Kept separate from their own shows above: a
             festival slot is a real date, but it isn't their own ticketed headline show. */}
-        {data.festivals.length ? (
+        {data.festivals?.length ? (
           <View style={styles.section}>
             <Text style={styles.secTitle}>
               Festival{data.festivals.length === 1 ? "" : "s"} they&rsquo;re playing
@@ -241,10 +264,36 @@ export default function ArtistDetail({
           </Pressable>
         </View>
 
+        {/* Similar artists — only ever from a link we can name. No link, no section. */}
+        {data.similar?.length ? (
+          <View style={styles.section}>
+            <Text style={styles.secTitle}>Similar artists</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.simScroll}>
+              {data.similar.map((sa) => (
+                <Pressable key={sa.id ?? sa.name} style={styles.simCard} onPress={() => setPeekArtist(sa.name)}>
+                  {sa.image_url ? (
+                    <Image source={{ uri: sa.image_url }} style={styles.simImg} contentFit="cover" transition={150} />
+                  ) : (
+                    <View style={[styles.simImg, { backgroundColor: coverColor(sa.id ?? sa.name) }]} />
+                  )}
+                  <Text style={styles.simName} numberOfLines={2}>{sa.name}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
       </ScrollView>
 
       <Modal visible={aboutOpen} animationType="slide" onRequestClose={() => setAboutOpen(false)}>
         <ArtistAbout data={data} onClose={() => setAboutOpen(false)} />
+      </Modal>
+
+      {/* tapping a similar artist opens their page on top of this one */}
+      <Modal visible={!!peekArtist} animationType="slide" onRequestClose={() => setPeekArtist(null)}>
+        {peekArtist ? (
+          <ArtistDetail name={peekArtist} onClose={() => setPeekArtist(null)} onSelectEvent={onSelectEvent} />
+        ) : null}
       </Modal>
     </SafeAreaView>
   );
@@ -281,6 +330,16 @@ const styles = StyleSheet.create({
   iconBtn: { width: 48, height: 48, borderRadius: 14, borderWidth: 1, borderColor: "#26262f", alignItems: "center", justifyContent: "center" },
 
   section: { paddingHorizontal: 20, paddingTop: 18 },
+  moreBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    marginTop: 10, paddingVertical: 12,
+    borderColor: "#26262f", borderWidth: 1, borderRadius: 12,
+  },
+  moreBtnText: { color: ACCENT, fontSize: 13.5, fontWeight: "800" },
+  simScroll: { gap: 12, paddingRight: 20 },
+  simCard: { width: 116, alignItems: "center" },
+  simImg: { width: 116, height: 116, borderRadius: 14, marginBottom: 8 },
+  simName: { color: "#f4f4f6", fontSize: 13.5, fontWeight: "700", lineHeight: 18, textAlign: "center" },
   secSub: { color: MUTED, fontSize: 13, marginTop: -8, marginBottom: 12 },
   fescroll: { gap: 12, paddingRight: 20 },
   secTitle: { color: "#f4f4f6", fontSize: 18, fontWeight: "800", marginBottom: 12 },

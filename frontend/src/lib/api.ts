@@ -221,7 +221,16 @@ export type ArtistDetail = {
   city_count: number;
   upcoming_shows: MusicEvent[];
   festivals: Festival[];   // festivals they're billed on, from the published line-up
-};
+  similar: SimilarArtist[]; // empty when no link is strong enough — section hides
+}
+
+export type SimilarArtist = {
+  id: string | null;   // null when Last.fm suggested an artist we haven't ingested
+  name: string;
+  image_url: string | null;
+  reason: string;   // e.g. "Also on the bill at Lowlands 2026"
+  shared: number;
+};;
 export async function getArtist(name: string): Promise<ArtistDetail> {
   const res = await fetch(`${API_BASE_URL}/artists/detail?name=${encodeURIComponent(name)}`);
   if (!res.ok) throw new Error(`API error ${res.status}`);
