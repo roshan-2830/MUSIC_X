@@ -1,4 +1,4 @@
-# Music X — session handoff (2026-08-24, end of day)
+# Music X — session handoff (2026-08-24, end of day, rev 2)
 
 Paste this whole file into a new chat to carry the context over.
 
@@ -31,6 +31,10 @@ Recent commits:
 
 | | |
 |---|---|
+| `c4f4fcd` | one toggle, one kind of search result |
+| `cb5e6a4` | search as you type, ranked by relevance |
+| `4f55b8e` | event page: genres on the artwork, a tappable line-up |
+| `053c470` | shelves show twelve artists, not one tour repeated |
 | `1a49b71` | the calendar shows only what you saved |
 | `5b252bd` | this handoff |
 | `bd14d43` | artist enrichment, one artist-identity path, Deezer fan-count fix, audience counts in UI |
@@ -47,17 +51,18 @@ artist enrichment (24h) — and only while the dev server is up.
 
 | | |
 |---|---|
-| events | 4,955 (3,668 upcoming, 3,117 scored) |
-| artists | 3,799 |
+| events | 5,055 (3,769 upcoming, 3,160 scored) |
+| artists | 4,462 |
 | festivals | 418 |
-| cities / venues | 885 / 1,893 |
-| event_facts | 47,726 (the provenance moat) |
-| event_changes | 36 |
-| artist_similar | 20,985 |
-| event_genres / genres | 6,414 / 552 |
+| cities / venues | 901 / 1,949 |
+| event_facts | 48,782 (the provenance moat) |
+| event_changes | 45 |
+| artist_similar | 21,065 |
+| event_genres / genres | 7,531 / 521 |
 | follows | 140 |
 | lastfm_accounts | 5 |
-| calendar_entries | 3 |
+| calendar_entries | 4 |
+| event_artists (line-ups) | 4,617 |
 
 **Frontend:** 3 screens (Home, Calendar, Search) + modals. Tab bar has 2 tabs; the mockup
 has 5. Missing tabs are Passport, Trips, Bucket List.
@@ -78,11 +83,13 @@ Coverage of the **1,476 artists with an upcoming show**, after one full run:
 
 | field | before | now |
 |---|---|---|
-| similar | 0.4% | **98.6%** |
-| photo | 1.4% | **71.1%** |
-| tags | 10.0% | **68.0%** |
-| popularity | 77.3% | 81.0% |
-| bio | 2.2% | 10.6% ← the one that stayed low, see below |
+| similar | 0.4% | **95%** |
+| photo | 1.4% | **69%** |
+| genre tags | 10.0% | **64%** |
+| bio | 2.2% | 10% ← the one that stayed low, see below |
+
+Downstream of the tags: **52% of upcoming events now carry a genre**, up from 10%. That
+feeds MXS's `context` component and Tier B genre recommendations, both starved until now.
 
 Design rules that must not be quietly loosened:
 
@@ -185,6 +192,64 @@ measured here as 753 → 788, a net increase that looked like success. **Rebuild
 prune LAST**, because the prune counts artists per genre and needs the links to exist.
 The docstring now says so.
 
+### Event page: genres on the artwork, a line-up you can tap through
+
+Genres moved from under the About paragraph onto the hero image, over a `LinearGradient`
+scrim — without it the chips vanished on pale photos. Tapping any artist in the line-up
+opens their page, nested the way the artist page nests its own similar-artists strip; a
+single-artist bill skips the sheet and goes straight through. Avatars show real photos,
+falling back to initials rather than borrowing another act's face.
+
+**The line-up was empty on 99% of events and the data was already being fetched.** It
+reads `event_artists`, and only `upsert_event` ever wrote those rows — the broad sweep,
+which produced almost the whole catalogue, wrote none. But the parser read
+`_embedded.attractions` and kept only `atts[0]` as headliner, discarding the bill. And
+`reverify_all_events` re-fetches every event by TM id nightly through that same parser, so
+those bills were downloaded and thrown away every night. `_batch_upsert_search` now writes
+them: **zero extra API calls, and it keeps filling itself nightly.** Bill coverage went
+1.1% → **47%** (1,758 of 3,769), with 607 events carrying a real support act.
+
+`EventDetail` also falls back to the headliner when no bill is stored — not a guess, since
+Ticketmaster named them and they are unarguably on the bill.
+
+### Listings that say they are not a ticket
+
+Reported as a Get-tickets button 404ing. The URL was Ticketmaster's OWN — their API still
+returns it, still says `status: onsale`, sale window open — and all five URL variants 404
+on their own site. There is no API signal to detect this; they serve stale data, and we
+cannot verify links server-side because Ticketmaster 401s every non-browser request.
+
+The real defect was upstream: `Diljit Dosanjh | Vinyl Room Upgrade (TICKET NOT INCLUDED)`
+is not a show. Both ingestion paths now skip listings that DECLARE no ticket is included
+(`ingestion.is_not_attendable`), and 18 rows were removed.
+
+**Only self-declaring phrases are matched, and the restraint is the point:** of 17 upcoming
+listings containing "hotel", EIGHT were real concerts at hotel-named venues — Derek Ryan at
+Castlecourt Hotel, Foster & Allen at Celtic Ross Hotel. "hotel" as a keyword would have
+deleted real shows. VIP Packages and Ticket+Hotel bundles are deliberately KEPT: those do
+include a ticket, so they are attendable, merely redundant packagings of one show.
+
+### Search: as you type, ranked by relevance, one toggle one kind
+
+The box only ran on submit — `onChangeText` stored the text, `onSubmitEditing` did the
+work. The backend was never the problem; `search-local` always matched on a substring.
+
+**Two debounces, and the split matters:** 250ms for our DB and the in-memory festival list
+(free, this is what feels live), 900ms for the live Ticketmaster supplement. Ticketmaster
+allows 5,000 calls a DAY and the sweep plus nightly re-verify spend most of it, so that one
+must never fire per keystroke. Both trailing, so continuous typing costs exactly one live
+call. Each pass carries a sequence number and discards its result if a later keystroke
+bumped it.
+
+**Ranked by WHERE the term matched**, then date within each band: title-starts-with, then
+title-contains, then artists on the bill, then city last. Date alone put Corona Capital
+SIXTH for "corona", behind a gospel tour in Corona, California. Also escaped the LIKE
+wildcards — a search for "50%" was matching the entire catalogue.
+
+**Each toggle now shows only its own kind.** Concerts rendered Artists + Concerts +
+Festivals; Festivals did the same. This also removed a Deezer request per keystroke, and
+fixed `nothing`, which required all three kinds to be empty and so hid "No results".
+
 ## Bugs I caused and fixed (both found by running it)
 
 1. **Similar-artist photos went blank.** `backfill_similar` writes the 20 names and stamps
@@ -254,6 +319,12 @@ platform-tools would let `adb logcat` confirm whether the process actually dies.
 ## Gotchas — read before debugging
 
 - **Run the app. `tsc` proves nothing here.** Seven bugs shipped through a clean typecheck.
+- **A long-running import holds the code it started with.** 4 deleted add-on listings came
+  back because `reverify_all_events` was mid-run with the pre-filter code in memory and
+  re-inserted them in its final write. A data cleanup during an import gets undone.
+- **Ticketmaster 401s every non-browser request**, so link liveness cannot be checked from
+  the server. Their API also serves events whose own pages have been pulled. Chrome
+  automation is the only way to confirm a 404.
 - **Opening an artist page CREATES a row.** `/artists/detail?name=X` is find-or-create, so
   tapping a Deezer search result used to mint a duplicate. Fixed, but remember the page is
   a write path, not a read.
@@ -276,12 +347,12 @@ platform-tools would let `adb logcat` confirm whether the process actually dies.
 
 ## What to do next
 
-**1. Bios land at ~10% while photos land at 71%.** `wikipedia.fetch_artist_bio` only
-accepts a page whose short description reads musical and isn't a disambiguation stub.
-That strictness is what stops the wrong namesake's biography appearing, so it was NOT
-loosened — but it is probably also rejecting artists who do have a real page. Sample 20
-of the rejects by hand before touching the filter. Nothing is stored wrongly and nothing
-is stamped, so a later run retries them for free.
+**1. Bios land at ~10% while everything else cleared 60%.**
+`wikipedia.fetch_artist_bio` only accepts a page whose short description reads musical and
+is not a disambiguation stub. That strictness is what stops the wrong namesake's biography
+appearing, so it was NOT loosened — but it is probably also rejecting artists who do have a
+real page. Sample 20 of the rejects by hand before touching the filter. Nothing is stored
+wrongly and nothing is stamped, so a later run retries them for free.
 
 **2. Ticketmaster billing strings are stored as artists** — e.g. `A.R. Rahman feat. Alka
 Yagnik; Udit Narayan; Sukhwinder Singh; Shankar Mahadevan; Shaan & Sehar`. Not
