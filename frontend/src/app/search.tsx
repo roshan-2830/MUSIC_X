@@ -310,7 +310,9 @@ export default function SearchScreen() {
     const t = term.toLowerCase();
     setSearched(true); setBrowsing(false); setError(null);
     setFestResults(festAll.filter((x) => x.name?.toLowerCase().includes(t) || (x.city ?? "").toLowerCase().includes(t)));
-    searchArtists(term).then((l) => { if (!stale()) setArtists(l); }).catch(() => {});
+    // No artist lookup here any more: Concerts and Festivals no longer render artists, and
+    // this fired a Deezer request on every keystroke to fill a list nobody sees.
+    setArtists([]);
 
     setLoading(true);
     try {
@@ -427,7 +429,13 @@ export default function SearchScreen() {
   }, [festAll, f]);
 
   const activeCount = (f.when ? 1 : 0) + (f.country ? 1 : 0) + (f.sort !== "soonest" ? 1 : 0);
-  const nothing = !loading && !browsing && artists.length === 0 && concerts.length === 0 && festResults.length === 0;
+  // Judged against the kind this toggle actually shows. It used to require all three to
+  // be empty, so "No results" never appeared on Concerts while an unrelated artist matched.
+  const nothing = !loading && !browsing && (
+    mode === "artists" ? artists.length === 0
+      : mode === "festivals" ? festResults.length === 0
+      : concerts.length === 0
+  );
 
   function FestivalRow({ fest }: { fest: Festival }) {
     return (
@@ -655,69 +663,46 @@ export default function SearchScreen() {
           )
         ) : (
           <View>
-            {/* ARTISTS */}
-            {artists.length ? (
-              <>
-                <Text style={styles.groupHead}>Artists</Text>
-                {artists.slice(0, 6).map((a) => {
-                  const following = !!followed[a.name.toLowerCase()];
-                  return (
-                    <View key={`${a.name}-${a.deezer_id}`} style={styles.row}>
-                      <Pressable style={styles.artistTap} onPress={() => setSelectedArtist(a.name)}>
-                        {a.image_url ? (
-                          <Image source={{ uri: a.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
+            {/* One toggle, one kind. A search on Concerts used to render Artists, then
+                Concerts, then Festivals — three answers to a question that named one of
+                them. The toggles exist precisely to say which you meant, so honouring them
+                is what makes the choice mean anything. Nothing is lost: the same term is
+                still one tap away under the other two. */}
+            {mode === "festivals" ? (
+              festResults.length ? (
+                <>
+                  <Text style={styles.groupHead}>Festivals</Text>
+                  {festResults.slice(0, 8).map((fest) => (
+                    <View key={fest.id} style={styles.row}>
+                      <View style={styles.thumb}>
+                        {fest.image_url ? (
+                          <Image source={{ uri: fest.image_url }} style={styles.tileFill} contentFit="cover" transition={150} />
                         ) : (
-                          <View style={[styles.avatar, styles.avatarFallback]}><Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text></View>
+                          <View style={[styles.tileFill, { backgroundColor: tileColor(fest.id) }]} />
                         )}
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
-                          {audienceLine(a) ? (
-                            <Text style={styles.rowSub} numberOfLines={1}>{audienceLine(a)}</Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                      <Pressable style={[styles.followBtn, following && styles.followingBtn]} onPress={() => toggleFollow(a)} hitSlop={6}>
-                        <Text style={following ? styles.followingText : styles.followText}>{following ? "Following" : "Follow"}</Text>
-                      </Pressable>
+                      </View>
+                      <View style={styles.rowText}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>{fest.name}</Text>
+                        <Text style={styles.rowSub} numberOfLines={1}>
+                          {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
+                        </Text>
+                      </View>
                     </View>
-                  );
-                })}
-              </>
-            ) : null}
-
-            {/* CONCERTS */}
-            <Text style={styles.groupHead}>Concerts</Text>
-            {loading ? (
-              <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
-            ) : concerts.length ? (
-              concerts.map((e) => <EventRow key={e.id} e={e} />)
+                  ))}
+                </>
+              ) : null
             ) : (
-              <Text style={styles.groupEmpty}>No concerts found</Text>
-            )}
-
-            {/* FESTIVALS */}
-            {festResults.length ? (
               <>
-                <Text style={styles.groupHead}>Festivals</Text>
-                {festResults.slice(0, 8).map((fest) => (
-                  <View key={fest.id} style={styles.row}>
-                    <View style={styles.thumb}>
-                      {fest.image_url ? (
-                        <Image source={{ uri: fest.image_url }} style={styles.tileFill} contentFit="cover" transition={150} />
-                      ) : (
-                        <View style={[styles.tileFill, { backgroundColor: tileColor(fest.id) }]} />
-                      )}
-                    </View>
-                    <View style={styles.rowText}>
-                      <Text style={styles.rowTitle} numberOfLines={1}>{fest.name}</Text>
-                      <Text style={styles.rowSub} numberOfLines={1}>
-                        {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
+                {/* No header over an empty list: the "No results" box below already says it,
+                    and a lone CONCERTS heading above nothing reads like a failed load. */}
+                {loading || concerts.length ? <Text style={styles.groupHead}>Concerts</Text> : null}
+                {loading ? (
+                  <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
+                ) : (
+                  concerts.map((e) => <EventRow key={e.id} e={e} />)
+                )}
               </>
-            ) : null}
+            )}
 
             {nothing ? (
               <View style={styles.centerBox}>
@@ -804,7 +789,6 @@ const styles = StyleSheet.create({
   errText: { color: "#ff6b6b", fontSize: 13, textAlign: "center", marginTop: 6 },
 
   groupHead: { color: MUTED, fontSize: 12, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 18, marginBottom: 6 },
-  groupEmpty: { color: MUTED, fontSize: 14, paddingVertical: 10 },
 
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
   artistTap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, minWidth: 0 },
