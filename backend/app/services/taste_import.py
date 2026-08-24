@@ -22,10 +22,10 @@ both the account row and the profile it built.
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.artist import Artist
+from app.services import artist_lookup
 from app.models.lastfm_account import LastfmAccount
 from app.models.taste_profile import TasteProfile
 from app.services import deezer, lastfm
@@ -50,19 +50,18 @@ def _artist_rows(db: Session, names: list) -> list:
     """
     if not names:
         return []
-    wanted = {_norm(n): n for n in names if n and n.strip()}
-    found = {}
-    for a in db.query(Artist).filter(func.lower(Artist.name).in_([n.lower() for n in wanted.values()])).all():
-        found[_norm(a.name)] = a
-    ordered = []
-    for key, display in wanted.items():
-        a = found.get(key)
-        if a is None:
-            a = Artist(name=display)
-            db.add(a)
-            found[key] = a
+    # Shared find-or-create. This used to normalise names only WITHIN the incoming batch
+    # while querying the database case-insensitively, so Last.fm sending 'AR Rahman' found
+    # nothing (the DB held 'A.R. Rahman') and created a second artist. That is the exact
+    # row a user then followed twice.
+    mapping = artist_lookup.get_or_create_many(db, names)
+    ordered, seen = [], set()
+    for n in names:
+        a = mapping.get((n or "").strip())
+        if a is None or id(a) in seen:
+            continue
+        seen.add(id(a))
         ordered.append(a)
-    db.flush()
     return ordered
 
 

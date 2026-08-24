@@ -15,7 +15,7 @@ import {
   MusicEvent,
   unfollowArtist,
 } from "../lib/api";
-import { coverColor, flagEmoji, formatDay } from "../lib/format";
+import { coverColor, flagEmoji, formatDay, audienceLine } from "../lib/format";
 
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
@@ -154,6 +154,16 @@ export default function ArtistDetail({
             <Text style={styles.statL}>Genres</Text>
           </View>
         </View>
+
+        {/* Audience — each number labelled with the service it came from, because Deezer
+            counts followers and Last.fm counts distinct listeners. Hidden entirely when we
+            could not confidently identify this artist on either, rather than showing a 0. */}
+        {audienceLine(data) ? (
+          <View style={styles.audience}>
+            <Ionicons name="people-outline" size={13} color={MUTED} />
+            <Text style={styles.audienceText}>{audienceLine(data)}</Text>
+          </View>
+        ) : null}
 
         {/* Actions */}
         <View style={styles.actions}>
@@ -320,6 +330,8 @@ const styles = StyleSheet.create({
   statBorder: { borderLeftWidth: 1, borderLeftColor: "#26262f", paddingLeft: 16 },
   statN: { color: "#f4f4f6", fontSize: 22, fontWeight: "900", letterSpacing: -0.5 },
   statL: { color: MUTED, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  audience: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 20, paddingBottom: 14, marginTop: -6 },
+  audienceText: { color: MUTED, fontSize: 12, fontWeight: "600" },
 
   actions: { flexDirection: "row", gap: 10, paddingHorizontal: 20, marginBottom: 8 },
   followBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48, borderRadius: 14, backgroundColor: ACCENT },

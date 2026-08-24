@@ -266,6 +266,10 @@ export type ArtistDetail = {
   wiki_url: string | null;      // the exact page the bio came from, or null
   website_url: string | null;   // the artist's own site, or null
   genres: string[];
+  // Audience size from two services that measure different things — Deezer counts
+  // followers, Last.fm counts distinct listeners. Never combined into one number.
+  deezer_fans: number | null;
+  lastfm_listeners: number | null;
   show_count: number;
   city_count: number;
   upcoming_shows: MusicEvent[];

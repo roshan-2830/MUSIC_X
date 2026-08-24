@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.city import City
 from app.models.venue import Venue
 from app.models.artist import Artist
+from app.services import artist_lookup
 from app.models.genre import Genre
 from app.models.event import Event
 from app.models.event_artist import EventArtist
@@ -490,16 +491,11 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
 
     # --- 4. headliner artists by name ---
     want_artists = {p["head_name"] for p in parsed if p["head_name"]}
-    artist_map = {}
-    if want_artists:
-        for a in db.query(Artist).filter(Artist.name.in_(list(want_artists))).all():
-            artist_map[a.name] = a
-        for nm in want_artists:
-            if nm not in artist_map:
-                a = Artist(name=nm)
-                db.add(a)
-                artist_map[nm] = a
-        db.flush()
+    # Shared find-or-create, matching on the normalised name. This used to filter on
+    # Artist.name.in_(...) — case-SENSITIVE — which is where most of the duplicate artists
+    # came from: Ticketmaster billing 'headliners' inconsistently, so 'Men at Work' and
+    # 'Men At Work' arrived as two names and became two rows.
+    artist_map = artist_lookup.get_or_create_many(db, want_artists) if want_artists else {}
 
     # --- 5. existing Event rows in one query ---
     existing_ids = [existing_src[p["tm_id"]] for p in parsed if p["tm_id"] in existing_src]
@@ -785,16 +781,11 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
 
     # --- 3. artists for every line-up: one read, one create pass ---
     want_artists = {n for p in parsed for n in p["attractions"]}
-    artist_map = {}
-    if want_artists:
-        for a in db.query(Artist).filter(Artist.name.in_(list(want_artists))).all():
-            artist_map[a.name] = a
-        for nm in want_artists:
-            if nm not in artist_map:
-                a = Artist(name=nm)
-                db.add(a)
-                artist_map[nm] = a
-        db.flush()
+    # Shared find-or-create, matching on the normalised name. This used to filter on
+    # Artist.name.in_(...) — case-SENSITIVE — which is where most of the duplicate artists
+    # came from: Ticketmaster billing 'line-ups' inconsistently, so 'Men at Work' and
+    # 'Men At Work' arrived as two names and became two rows.
+    artist_map = artist_lookup.get_or_create_many(db, want_artists) if want_artists else {}
 
     # --- 4. write festivals (ids assigned up front → no flush inside the loop) ---
     today = date.today()

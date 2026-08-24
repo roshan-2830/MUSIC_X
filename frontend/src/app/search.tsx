@@ -31,6 +31,7 @@ import {
   searchEventsLocal,
   unfollowArtist,
 } from "../lib/api";
+import { audienceLine } from "../lib/format";
 
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
@@ -516,7 +517,12 @@ export default function SearchScreen() {
                             <Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text>
                           </View>
                         )}
-                        <Text style={[styles.rowTitle, { flex: 1 }]} numberOfLines={1}>{a.name}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
+                          {audienceLine(a) ? (
+                            <Text style={styles.rowSub} numberOfLines={1}>{audienceLine(a)}</Text>
+                          ) : null}
+                        </View>
                       </Pressable>
                       <Pressable
                         style={[styles.followBtn, styles.followingBtn]}
@@ -554,7 +560,12 @@ export default function SearchScreen() {
                             <Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text>
                           </View>
                         )}
-                        <Text style={[styles.rowTitle, { flex: 1 }]} numberOfLines={1}>{a.name}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
+                          {audienceLine(a) ? (
+                            <Text style={styles.rowSub} numberOfLines={1}>{audienceLine(a)}</Text>
+                          ) : null}
+                        </View>
                       </Pressable>
                       <Pressable style={[styles.followBtn, following && styles.followingBtn]} onPress={() => toggleFollow(a)} hitSlop={6}>
                         <Text style={following ? styles.followingText : styles.followText}>
@@ -602,7 +613,12 @@ export default function SearchScreen() {
                         ) : (
                           <View style={[styles.avatar, styles.avatarFallback]}><Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text></View>
                         )}
-                        <Text style={[styles.rowTitle, { flex: 1 }]} numberOfLines={1}>{a.name}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
+                          {audienceLine(a) ? (
+                            <Text style={styles.rowSub} numberOfLines={1}>{audienceLine(a)}</Text>
+                          ) : null}
+                        </View>
                       </Pressable>
                       <Pressable style={[styles.followBtn, following && styles.followingBtn]} onPress={() => toggleFollow(a)} hitSlop={6}>
                         <Text style={following ? styles.followingText : styles.followText}>{following ? "Following" : "Follow"}</Text>

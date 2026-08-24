@@ -66,6 +66,13 @@ class ArtistDetail(BaseModel):
     wiki_url: str | None = None
     website_url: str | None = None
     genres: list[str] = []
+    # Audience size, from the two sources that measure different populations: Deezer
+    # counts followers, Last.fm counts distinct listeners. Never summed and never
+    # averaged into one "popularity" number — they are different measurements, and the
+    # UI labels which is which so a reader knows what they are looking at. Null means we
+    # could not confidently identify this artist on that service, shown as absent.
+    deezer_fans: int | None = None
+    lastfm_listeners: int | None = None
     show_count: int = 0
     city_count: int = 0
     upcoming_shows: list[EventListItem] = []

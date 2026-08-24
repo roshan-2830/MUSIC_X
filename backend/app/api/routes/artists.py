@@ -16,7 +16,7 @@ from app.models.festival_lineup import FestivalLineup
 from app.models.genre import Genre
 from app.schemas.artist import ArtistDetail, ArtistSearchResult, SimilarArtist
 from app.api.routes.festivals import _cities_for, _to_out, _upcoming
-from app.services import deezer, lastfm, wikidata, wikipedia
+from app.services import artist_lookup, deezer, lastfm, wikidata, wikipedia
 from app.services.deezer import _norm
 from app.services.ingestion import ingest_artist_tour
 from app.services.similar import similar_combined
@@ -169,13 +169,9 @@ def artist_detail(
     Wikipedia (both cached to the row), and returns their upcoming shows + genres +
     honest counts."""
     clean = name.strip()
-    artist = (
-        db.query(Artist).filter(func.lower(Artist.name) == clean.lower()).order_by(Artist.id).first()
-    )
-    if not artist:
-        artist = Artist(name=clean)
-        db.add(artist)
-        db.flush()
+    # Shared find-or-create: matches on the normalised name, so opening 'AR Rahman' finds
+    # the existing 'A.R. Rahman' instead of creating a second artist beside it.
+    artist = artist_lookup.get_or_create(db, clean)
 
     # Enrich on-demand — only fetch what we don't already have; cache to the row.
     if not artist.image_url:
@@ -211,8 +207,9 @@ def artist_detail(
     # Last.fm similarity, refreshed monthly. Cached in artist_similar, so the page reads
     # it from our own DB and never waits on the network.
     if lastfm.enabled():
-        cached = (db.query(ArtistSimilar.id)
-                    .filter_by(artist_id=artist.id, source="lastfm").first() is not None)
+        held = (db.query(ArtistSimilar.id, ArtistSimilar.image_url)
+                  .filter_by(artist_id=artist.id, source="lastfm").all())
+        cached = bool(held)
         if not cached:
             # First time we have ever seen this artist. A Last.fm call takes ~0.6s, so we
             # pay it INLINE — otherwise the section is missing on the first open of every
@@ -226,6 +223,15 @@ def artist_detail(
             (date.today() - artist.similar_checked_on).days > SIMILAR_REFRESH_DAYS
         ):
             background.add_task(_sync_similar, artist.name, artist.id)
+        elif any(url is None for _id, url in held):
+            # Rows are fresh but some have no photo. That is the normal state for a strip
+            # written by services/enrichment.backfill_similar, which fills NAMES for every
+            # artist with an upcoming date but does not pay twenty Deezer lookups each to
+            # decorate them. Without this branch those strips stayed photoless until the
+            # 30-day refresh, because `cached` was True and `similar_checked_on` was today
+            # — so neither branch above fired and the only thing that fills photos never
+            # ran. Measured on Foo Fighters: 20 names, 0 photos, no path to a photo.
+            background.add_task(_fill_similar_images, artist.id)
 
     # Upcoming shows: headliner OR line-up, exact (case-insensitive) name match.
     cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -297,6 +303,8 @@ def artist_detail(
         wiki_url=artist.wiki_url,
         website_url=artist.website_url,
         genres=genres,
+        deezer_fans=artist.deezer_fans,
+        lastfm_listeners=artist.lastfm_listeners,
         show_count=len(shows),
         city_count=city_count,
         upcoming_shows=shows,

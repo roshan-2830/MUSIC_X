@@ -20,6 +20,7 @@ import {
   searchArtists,
   unfollowArtist,
 } from "../lib/api";
+import { audienceLine } from "../lib/format";
 
 
 const ACCENT = "#e8ff47";
@@ -165,6 +166,9 @@ export default function FollowArtists({
                 )}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+                  {audienceLine(item) ? (
+                    <Text style={styles.audienceText} numberOfLines={1}>{audienceLine(item)}</Text>
+                  ) : null}
                 </View>
                 <Pressable
                   style={[styles.followBtn, styles.followingBtn]}
@@ -205,6 +209,9 @@ export default function FollowArtists({
                   <Text style={styles.name} numberOfLines={1}>
                     {item.name}
                   </Text>
+                  {audienceLine(item) ? (
+                    <Text style={styles.audienceText} numberOfLines={1}>{audienceLine(item)}</Text>
+                  ) : null}
                 </View>
                 <Pressable
                   style={[styles.followBtn, isFollowing && styles.followingBtn]}
@@ -274,6 +281,7 @@ const styles = StyleSheet.create({
   avatarFallback: { alignItems: "center", justifyContent: "center" },
   avatarInitial: { color: MUTED, fontSize: 20, fontWeight: "800" },
   name: { color: "#f4f4f6", fontSize: 16, fontWeight: "700" },
+  audienceText: { color: MUTED, fontSize: 12, fontWeight: "600", marginTop: 2 },
   followBtn: {
     borderRadius: 999,
     paddingHorizontal: 18,

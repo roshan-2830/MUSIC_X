@@ -325,20 +325,10 @@ def _get_or_create_artist(db: Session, name: str, image_url: str | None) -> Arti
     same name (case-insensitive) — so following 'Coldplay' points at the row ingestion
     already links to events — otherwise create one. Backfill a missing image."""
     name = name.strip()
-    artist = (
-        db.query(Artist)
-        .filter(func.lower(Artist.name) == name.lower())
-        .order_by(Artist.id)
-        .first()
-    )
-    if artist:
-        if image_url and not artist.image_url:
-            artist.image_url = image_url
-        return artist
-    artist = Artist(name=name, image_url=image_url)
-    db.add(artist)
-    db.flush()  # populate artist.id without ending the transaction
-    return artist
+    # Shared find-or-create. Matching used to be case-insensitive only, so following
+    # 'AR Rahman' created a row beside the existing 'A.R. Rahman' and the same act showed
+    # up twice in the Following list, with the same photo, and no way to tell them apart.
+    return artist_lookup.get_or_create(db, name, image_url)
 
 
 def _ingest_artist_shows(name: str) -> None:

@@ -1,26 +1,33 @@
-"""In-app scheduler. Two recurring jobs while the server is up:
+"""In-app scheduler. Three recurring jobs while the server is up:
 
   • sweep_catalogue   — every few hours: broad DISCOVERY of new shows (any artist) + festivals
   • refresh_catalogue — daily: re-check + re-score followed / known artists
+  • enrich_catalogue  — daily: fill artist pages (photo, bio, tags, similar, popularity)
 
-NOTE: both only fire while the backend process is running. On your Mac that means
+NOTE: these only fire while the backend process is running. On your Mac that means
 "while the dev server is on". For true always-on scheduling the backend must be
 deployed to a host that never sleeps — then these same jobs keep working unchanged."""
 import os
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.services.enrichment import enrich_all
 from app.services.refresh import refresh_catalogue, sweep_catalogue
 
 # Broad discovery sweep cadence (default every 3h) and the deeper daily refresh (default 24h).
 SWEEP_INTERVAL_HOURS = float(os.getenv("SWEEP_INTERVAL_HOURS", "3"))
 REFRESH_INTERVAL_HOURS = float(os.getenv("REFRESH_INTERVAL_HOURS", "24"))
+# Artist-page enrichment: daily, and bounded per stage. These are free community APIs
+# (Deezer, Wikipedia, Last.fm), so the limit is about being a good citizen rather than
+# about cost — a run that completes beats one that gets throttled halfway.
+ENRICH_INTERVAL_HOURS = float(os.getenv("ENRICH_INTERVAL_HOURS", "24"))
+ENRICH_LIMIT = int(os.getenv("ENRICH_LIMIT", "300"))
 
 scheduler = BackgroundScheduler(timezone="UTC")
 
 
 def start_scheduler() -> None:
-    """Register both recurring jobs and start the scheduler (idempotent)."""
+    """Register all recurring jobs and start the scheduler (idempotent)."""
     if scheduler.running:
         return
     scheduler.add_job(
@@ -41,8 +48,20 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        enrich_all,
+        trigger="interval",
+        hours=ENRICH_INTERVAL_HOURS,
+        id="enrich_catalogue",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        kwargs={"limit": ENRICH_LIMIT},
+    )
     scheduler.start()
-    print(f"[scheduler] started — sweep every {SWEEP_INTERVAL_HOURS}h, refresh every {REFRESH_INTERVAL_HOURS}h")
+    print(f"[scheduler] started — sweep every {SWEEP_INTERVAL_HOURS}h, "
+          f"refresh every {REFRESH_INTERVAL_HOURS}h, "
+          f"enrich every {ENRICH_INTERVAL_HOURS}h (limit {ENRICH_LIMIT}/stage)")
 
 
 def trigger_refresh_now(limit: int | None = None) -> None:
@@ -55,3 +74,11 @@ def trigger_refresh_now(limit: int | None = None) -> None:
 def trigger_sweep_now() -> None:
     """Kick off a one-off broad discovery sweep immediately (manual trigger endpoint)."""
     scheduler.add_job(sweep_catalogue, id="sweep_now", replace_existing=True)
+
+
+def trigger_enrich_now(limit: int | None = None) -> None:
+    """Kick off a one-off artist enrichment immediately (manual trigger endpoint)."""
+    scheduler.add_job(
+        enrich_all, id="enrich_now", replace_existing=True,
+        kwargs={"limit": limit or ENRICH_LIMIT},
+    )
