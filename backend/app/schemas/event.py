@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.festival import FestivalOut
+
 
 class EventListItem(BaseModel):
     id: UUID
@@ -20,12 +22,28 @@ class EventListItem(BaseModel):
     price_from_currency: str | None
 
 
+class CalendarEvent(EventListItem):
+    """An event as the Calendar page needs it: not just what it is, but where it sits in
+    this user's plans. The tag is resolved server-side because that is where the saves,
+    follows and booking flags already live."""
+    saved: bool                 # in their calendar
+    booked: bool                # they have a ticket for it
+    tag_kind: str | None        # cancelled | postponed | ticket | plan | following | city
+    genres: list[str] = []      # up to two, for the card footer
+
+
+class CalendarPayload(BaseModel):
+    """Both kinds of thing that can sit on a date, for one window of time."""
+    events: list[CalendarEvent]
+    festivals: list["FestivalOut"]
+
+
 class RecommendedEvent(EventListItem):
     """An upcoming event matched to the user's taste, with a plain-English reason.
     A match is either by a followed/listened artist, or by a genre the user loves."""
     reason: str                 # full line, e.g. "Because you follow Coldplay"
     reason_label: str           # short pill text: the artist name or the genre
-    reason_kind: str            # "artist" | "genre"
+    reason_kind: str            # "artist" (followed) | "listened" (Last.fm) | "genre"
 
 
 class ArtistOut(BaseModel):

@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -22,6 +22,7 @@ import {
   fetchEvents,
   followArtist,
   getFestivals,
+  FollowedArtist,
   getFollows,
   getRecommended,
   MusicEvent,
@@ -183,13 +184,19 @@ export default function SearchScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     type?: string; feed?: string; label?: string; city_id?: string; country?: string;
+    focus?: string;
   }>();
   // held in state, not read straight from the params, so the chip can be cleared
   const [feed, setFeed] = useState(params.feed ?? "");
   const feedLabel = params.label || FEED_LABELS[params.feed ?? ""] || "";
-  const [mode, setMode] = useState<"concerts" | "festivals">(
-    params.type === "festivals" ? "festivals" : "concerts"
+  const [mode, setMode] = useState<"concerts" | "festivals" | "artists">(
+    params.type === "festivals" ? "festivals" : params.type === "artists" ? "artists" : "concerts"
   );
+  // Everyone the user follows. Shown in Artists mode when the box is empty, so this
+  // screen is where you both browse your artists AND find new ones — the same shape as
+  // Concerts and Festivals. NOT de-duplicated: this is the surface where near-duplicates
+  // ("AR Rahman" beside "A.R. Rahman") get unfollowed, so hiding them would trap them.
+  const [myArtists, setMyArtists] = useState<FollowedArtist[]>([]);
   const [q, setQ] = useState("");
   const [raw, setRaw] = useState<MusicEvent[]>([]);
   const [artists, setArtists] = useState<ArtistSearchResult[]>([]);
@@ -226,6 +233,18 @@ export default function SearchScreen() {
     }
   }
 
+  // Same trap as `feed` below: expo-router can hand over an empty params object on the
+  // first render and fill it in on the next, so reading params.type ONLY in the useState
+  // initialiser left mode stuck on "concerts". That is why "See all" on the artists row
+  // landed here showing concerts. Keyed on params.type so it corrects itself the moment
+  // the router tells us — and this covers the festivals "View All" too, which had the
+  // same latent bug.
+  useEffect(() => {
+    if (params.type === "artists") setMode("artists");
+    else if (params.type === "festivals") setMode("festivals");
+    else if (params.type) setMode("concerts");
+  }, [params.type]);
+
   // Load the list from the feed, and RE-load whenever it changes.
   //
   // This must not live in the mount effect. expo-router can deliver an empty params
@@ -242,15 +261,20 @@ export default function SearchScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.feed]);
 
-  useEffect(() => {
-    getFestivals(100).then(setFestAll).catch(() => {});
+  const loadFollows = useCallback(() => {
     getFollows()
       .then((list) => {
         const m: Record<string, string> = {};
         list.forEach((a) => (m[a.name.toLowerCase()] = a.id));
         setFollowed(m);
+        setMyArtists(list);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getFestivals(100).then(setFestAll).catch(() => {});
+    loadFollows();
   }, []);
 
   function clearFeed() {
@@ -263,6 +287,11 @@ export default function SearchScreen() {
     const term = q.trim();
     if (!term) { loadBrowse(); return; }
     setFeed("");        // a typed search replaces whatever feed we arrived from
+    if (mode === "artists") {
+      setLoading(true);
+      searchArtists(term).then(setArtists).catch(() => setArtists([])).finally(() => setLoading(false));
+      return;
+    }
     const t = term.toLowerCase();
     setSearched(true); setBrowsing(false); setError(null);
     // fast, local/light sources first
@@ -290,16 +319,23 @@ export default function SearchScreen() {
   }
 
   async function toggleFollow(a: ArtistSearchResult) {
+    // whatever happens, re-read the follows afterwards so Artists mode stays truthful
+    const refresh = () => loadFollows();
     const key = a.name.toLowerCase();
     const id = followed[key];
     if (id) {
       setFollowed((m) => { const n = { ...m }; delete n[key]; return n; });
-      if (id !== "pending") unfollowArtist(id).catch(() => {});
+      // Drop it from the visible list straight away. Without this the row stayed on
+      // screen after a successful unfollow, so it looked broken — and a second tap fell
+      // through to the else-branch and re-followed the artist.
+      setMyArtists((prev) => prev.filter((x) => x.name.toLowerCase() !== key));
+      if (id !== "pending") unfollowArtist(id).catch(() => {}).finally(refresh);
     } else {
       setFollowed((m) => ({ ...m, [key]: "pending" }));
       try {
         const saved = await followArtist({ name: a.name, deezer_id: a.deezer_id, image_url: a.image_url });
         setFollowed((m) => ({ ...m, [key]: saved.id }));
+        refresh();
       } catch {
         setFollowed((m) => { const n = { ...m }; delete n[key]; return n; });
       }
@@ -395,7 +431,7 @@ export default function SearchScreen() {
             onChangeText={setQ}
             onSubmitEditing={runSearch}
             returnKeyType="search"
-            autoFocus
+            autoFocus={params.focus === "1" || !params.feed}
             placeholder="Artists, concerts, festivals, cities…"
             placeholderTextColor={MUTED}
             autoCapitalize="none"
@@ -415,6 +451,9 @@ export default function SearchScreen() {
           <Pressable style={[styles.segBtn, mode === "festivals" && styles.segBtnOn]} onPress={() => setMode("festivals")}>
             <Text style={[styles.segText, mode === "festivals" && styles.segTextOn]}>Festivals</Text>
           </Pressable>
+          <Pressable style={[styles.segBtn, mode === "artists" && styles.segBtnOn]} onPress={() => setMode("artists")}>
+            <Text style={[styles.segText, mode === "artists" && styles.segTextOn]}>Artists</Text>
+          </Pressable>
         </View>
       </View>
 
@@ -433,7 +472,9 @@ export default function SearchScreen() {
         </View>
       ) : null}
 
-      {/* concert filters — only meaningful while browsing or for the concerts group */}
+      {/* Concert filters. Hidden in Artists mode: sorting people by "soonest first" or
+          "lowest price" means nothing, and a date filter on an artist is nonsense. */}
+      {mode !== "artists" ? (
       <View style={styles.filterBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow} keyboardShouldPersistTaps="handled">
           <FilterDropdown icon="swap-vertical" title="Sort by" placeholder="Sort" defaultValue="soonest"
@@ -449,6 +490,7 @@ export default function SearchScreen() {
           ) : null}
         </ScrollView>
       </View>
+      ) : null}
 
       {/* body */}
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
@@ -456,6 +498,79 @@ export default function SearchScreen() {
           <View style={styles.centerBox}>
             <Ionicons name="cloud-offline-outline" size={40} color={MUTED} />
             <Text style={styles.errText}>Couldn’t load:{"\n"}{error}</Text>
+          </View>
+        ) : mode === "artists" ? (
+          /* ARTISTS MODE — your follows, or search results once you type */
+          <View>
+            {q.trim().length < 2 ? (
+              myArtists.length ? (
+                <>
+                  <Text style={styles.groupHead}>Following · {myArtists.length}</Text>
+                  {myArtists.map((a) => (
+                    <View key={a.id} style={styles.row}>
+                      <Pressable style={styles.artistTap} onPress={() => setSelectedArtist(a.name)}>
+                        {a.image_url ? (
+                          <Image source={{ uri: a.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
+                        ) : (
+                          <View style={[styles.avatar, styles.avatarFallback]}>
+                            <Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text>
+                          </View>
+                        )}
+                        <Text style={[styles.rowTitle, { flex: 1 }]} numberOfLines={1}>{a.name}</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.followBtn, styles.followingBtn]}
+                        hitSlop={6}
+                        onPress={() =>
+                          toggleFollow({ name: a.name, image_url: a.image_url, deezer_id: null, fans: null })
+                        }>
+                        <Text style={styles.followingText}>Following</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </>
+              ) : (
+                <View style={styles.centerBox}>
+                  <Ionicons name="musical-notes-outline" size={40} color={MUTED} />
+                  <Text style={styles.dim}>
+                    You&rsquo;re not following anyone yet — search above and we&rsquo;ll track their shows worldwide.
+                  </Text>
+                </View>
+              )
+            ) : loading ? (
+              <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
+            ) : artists.length ? (
+              <>
+                <Text style={styles.groupHead}>Results</Text>
+                {artists.map((a) => {
+                  const following = !!followed[a.name.toLowerCase()];
+                  return (
+                    <View key={`${a.name}-${a.deezer_id}`} style={styles.row}>
+                      <Pressable style={styles.artistTap} onPress={() => setSelectedArtist(a.name)}>
+                        {a.image_url ? (
+                          <Image source={{ uri: a.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
+                        ) : (
+                          <View style={[styles.avatar, styles.avatarFallback]}>
+                            <Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text>
+                          </View>
+                        )}
+                        <Text style={[styles.rowTitle, { flex: 1 }]} numberOfLines={1}>{a.name}</Text>
+                      </Pressable>
+                      <Pressable style={[styles.followBtn, following && styles.followingBtn]} onPress={() => toggleFollow(a)} hitSlop={6}>
+                        <Text style={following ? styles.followingText : styles.followText}>
+                          {following ? "Following" : "Follow"}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </>
+            ) : (
+              <View style={styles.centerBox}>
+                <Ionicons name="sad-outline" size={40} color={MUTED} />
+                <Text style={styles.dim}>No artist matches “{q.trim()}”.</Text>
+              </View>
+            )}
           </View>
         ) : browsing ? (
           mode === "festivals" ? (

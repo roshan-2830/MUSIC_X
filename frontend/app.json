@@ -21,7 +21,7 @@
       "package": "com.roshan_0608.MusicX_dev"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [

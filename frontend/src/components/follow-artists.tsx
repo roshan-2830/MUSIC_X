@@ -14,11 +14,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   ArtistSearchResult,
+  FollowedArtist,
   followArtist,
   getFollows,
   searchArtists,
   unfollowArtist,
 } from "../lib/api";
+
 
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
@@ -39,6 +41,10 @@ export default function FollowArtists({
   const [loading, setLoading] = useState(false);
   // lowercased artist name -> local follow id ("pending" while the POST is in flight)
   const [followed, setFollowed] = useState<Record<string, string>>({});
+  // The follows themselves, so this screen can LIST them. Previously only the name->id
+  // map was kept, which is why an empty search box showed nothing at all — the screen
+  // was built for onboarding (search and follow) and never showed what you already had.
+  const [mine, setMine] = useState<FollowedArtist[]>([]);
   const followCount = Object.keys(followed).length;
 
   // Load who they already follow, so those show as "Following".
@@ -48,6 +54,11 @@ export default function FollowArtists({
       const m: Record<string, string> = {};
       list.forEach((a) => (m[a.name.toLowerCase()] = a.id));
       setFollowed(m);
+      // NOT deduped, unlike the Home row. This is the screen where you manage follows,
+      // so it has to show every one — including the near-duplicates ("AR Rahman" next to
+      // "A.R. Rahman") and the credit lines, because hiding them means you can never
+      // unfollow them.
+      setMine(list);
     } catch {}
   }, []);
 
@@ -132,7 +143,41 @@ export default function FollowArtists({
       {loading ? (
         <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
       ) : q.trim().length < 2 ? (
-        <Text style={styles.hint}>Search for an artist to get started.</Text>
+        mine.length ? (
+          <FlatList
+            data={mine}
+            keyExtractor={(a) => a.id}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: 16 }}
+            ListHeaderComponent={
+              <Text style={styles.groupHead}>
+                Following · {mine.length}
+              </Text>
+            }
+            renderItem={({ item }) => (
+              <View style={styles.row}>
+                {item.image_url ? (
+                  <Image source={{ uri: item.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarFallback]}>
+                    <Text style={styles.avatarInitial}>{item.name[0]?.toUpperCase()}</Text>
+                  </View>
+                )}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+                </View>
+                <Pressable
+                  style={[styles.followBtn, styles.followingBtn]}
+                  onPress={() => toggle({ name: item.name, image_url: item.image_url, deezer_id: null, fans: null })}
+                >
+                  <Text style={styles.followingText}>Following</Text>
+                </Pressable>
+              </View>
+            )}
+          />
+        ) : (
+          <Text style={styles.hint}>Search for an artist to get started.</Text>
+        )
       ) : (
         <FlatList
           data={results}
@@ -214,6 +259,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   input: { flex: 1, color: "#f4f4f6", fontSize: 15, padding: 0 },
+  groupHead: {
+    color: MUTED, fontSize: 12, fontWeight: "800", letterSpacing: 0.8,
+    textTransform: "uppercase", paddingHorizontal: 20, paddingBottom: 8, paddingTop: 4,
+  },
   hint: { color: MUTED, fontSize: 14, textAlign: "center", paddingVertical: 28, lineHeight: 20 },
   row: {
     flexDirection: "row",

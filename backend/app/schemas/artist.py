@@ -12,6 +12,10 @@ class ArtistOut(BaseModel):
     id: UUID
     name: str
     image_url: str | None = None
+    # Cached popularity, so the client can pick the biggest when the same artist has been
+    # followed under two spellings ("A.R. Rahman" and "AR Rahman").
+    deezer_fans: int | None = None
+    lastfm_listeners: int | None = None
 
 
 class ArtistSearchResult(BaseModel):

@@ -4,12 +4,15 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { MusicEvent } from "../lib/api";
 import { coverColor, flagEmoji, formatDay } from "../lib/format";
+import { useSaves } from "../lib/saves";
 
 const CONF: Record<string, string> = {
   high: "checked & confirmed",
   medium: "mostly confirmed",
   low: "not confirmed yet",
 };
+const ACCENT = "#e8ff47";
+
 const confColor = (c: string) => (c === "high" ? "#7ef0b2" : c === "medium" ? "#f0d47e" : "#8a8a96");
 
 export default function EventCard({
@@ -23,6 +26,9 @@ export default function EventCard({
   reasonLabel?: string;
   reasonKind?: "artist" | "genre";
 }) {
+  const { isSaved, toggle } = useSaves();
+  const saved = isSaved(event.id);
+
   return (
     <Pressable style={styles.card} onPress={onPress}>
       <View style={styles.cover}>
@@ -37,6 +43,19 @@ export default function EventCard({
             <Text style={styles.reasonText} numberOfLines={1}>{reasonLabel}</Text>
           </View>
         ) : null}
+        <Pressable
+          style={styles.save}
+          onPress={() => toggle(event)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={saved ? "Remove from calendar" : "Save to calendar"}
+        >
+          <Ionicons
+            name={saved ? "bookmark" : "bookmark-outline"}
+            size={18}
+            color={saved ? ACCENT : "#fff"}
+          />
+        </Pressable>
         <Text style={styles.flag}>{flagEmoji(event.country)} {event.city ?? ""}</Text>
       </View>
 
@@ -67,8 +86,12 @@ const styles = StyleSheet.create({
   card: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 16, overflow: "hidden", marginBottom: 14 },
   cover: { height: 150, justifyContent: "flex-end", padding: 12, overflow: "hidden" },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  save: {
+    position: "absolute", top: 10, right: 10,
+    backgroundColor: "rgba(0,0,0,0.38)", borderRadius: 999, padding: 7,
+  },
   reasonPill: {
-    position: "absolute", top: 12, left: 12, maxWidth: "80%",
+    position: "absolute", top: 12, left: 12, maxWidth: "72%",
     flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: "#e8ff47", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
   },

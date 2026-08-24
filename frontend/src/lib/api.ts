@@ -173,6 +173,47 @@ export async function unsaveEvent(eventId: string): Promise<void> {
   if (!res.ok) throw new Error(`API error ${res.status}`);
 }
 
+// Saved festivals. Same table and same promise as a saved show, so the Calendar tab
+// merges the two into one list — see lib/saves.tsx.
+export async function getSavedFestivals(): Promise<Festival[]> {
+  const res = await fetch(`${API_BASE_URL}/me/saves/festivals`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+export async function saveFestival(festivalId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/me/saves/festivals/${festivalId}`, { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+}
+// ---- the Calendar page ----
+// One window of time in one of two scopes. The grid, the strip and the agenda all read
+// this same payload, so a dot and the card under it can never disagree.
+export type CalendarEvent = MusicEvent & {
+  saved: boolean;
+  booked: boolean;
+  // cancelled | postponed | ticket | plan | following | city
+  tag_kind: string | null;
+  genres: string[];
+};
+export type CalendarPayload = { events: CalendarEvent[]; festivals: Festival[] };
+
+export async function getCalendar(
+  mode: "mine" | "city",
+  start: string,   // YYYY-MM-DD, inclusive
+  end: string      // YYYY-MM-DD, inclusive
+): Promise<CalendarPayload> {
+  const res = await fetch(
+    `${API_BASE_URL}/me/calendar?mode=${mode}&start=${start}&end=${end}`,
+    { headers: await authHeaders() }
+  );
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+export async function unsaveFestival(festivalId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/me/saves/festivals/${festivalId}`, { method: "DELETE", headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+}
+
 // ---- taste / followed artists ----
 // A real artist from the global (Deezer) catalogue — what the follow screen shows.
 export type ArtistSearchResult = {
@@ -182,7 +223,15 @@ export type ArtistSearchResult = {
   fans: number | null;
 };
 // A followed artist, as stored in our own DB (has a stable local id).
-export type FollowedArtist = { id: string; name: string; image_url: string | null };
+export type FollowedArtist = {
+  id: string;
+  name: string;
+  image_url: string | null;
+  // Cached popularity — lets the artists row pick the biggest when the same act has
+  // been followed under two spellings ("A.R. Rahman" and "AR Rahman").
+  deezer_fans: number | null;
+  lastfm_listeners: number | null;
+};
 // An upcoming event matched to the user's taste. The match is by a followed/listened
 // artist ("artist") or by a genre the user loves ("genre").
 export type RecommendedEvent = MusicEvent & {
@@ -299,6 +348,7 @@ export type Festival = {
   price_from_currency: string | null;
   mxs: number | null;
   confidence: string | null;
+  saved?: boolean;                    // calendar endpoint only: already in your calendar
   match_count?: number | null;        // "for you" only: followed artists on the bill
   matched_artists?: string[] | null;  // their names
 };
@@ -406,4 +456,56 @@ export async function updateNotificationPrefs(
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
+}
+
+// ---- Last.fm: connecting a listening history ----
+export type LastfmStatus = {
+  connected: boolean;
+  username?: string;
+  realname?: string | null;
+  image_url?: string | null;
+  playcount?: number | null;
+  last_synced_at?: string | null;
+  core_artists?: number;
+  total_artists?: number;
+  genres?: string[];
+};
+
+export type LastfmConnectResult = {
+  ok: boolean;
+  username: string;
+  realname: string | null;
+  playcount: number | null;
+  artists_imported: number;
+  core_artists: number;
+  genres: string[];
+  // strongest first — what the confirmation screen shows
+  artists: { name: string; image_url: string | null; playcount: number }[];
+};
+
+export async function getLastfmStatus(): Promise<LastfmStatus> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/me/lastfm`, { headers: await authHeaders() });
+    if (!res.ok) return { connected: false };
+    return res.json();
+  } catch {
+    return { connected: false };
+  }
+}
+
+/** Throws with the server's own message ("no such user", "couldn't reach Last.fm") so the
+ *  screen can show the real reason rather than a generic failure. */
+export async function connectLastfm(username: string): Promise<LastfmConnectResult> {
+  const res = await fetch(`${API_BASE_URL}/me/lastfm`, {
+    method: "POST",
+    headers: { ...(await authHeaders()), "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || "Couldn’t connect that account");
+  return body;
+}
+
+export async function disconnectLastfm(): Promise<void> {
+  await fetch(`${API_BASE_URL}/me/lastfm`, { method: "DELETE", headers: await authHeaders() });
 }

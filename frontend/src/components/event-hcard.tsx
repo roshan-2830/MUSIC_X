@@ -3,6 +3,7 @@ import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { MusicEvent } from "../lib/api";
+import { useSaves } from "../lib/saves";
 
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
@@ -33,6 +34,8 @@ export default function EventHCard({
   reasonLabel?: string;
   reasonKind?: "artist" | "genre";
 }) {
+  const { isSaved, toggle } = useSaves();
+  const saved = isSaved(event.id);
   const sub = `${fmtDay(event.starts_at)}${event.city ? ` · ${event.city}` : ""}`;
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -51,6 +54,19 @@ export default function EventHCard({
         {event.mxs != null ? (
           <View style={styles.mxsBadge}><Text style={styles.mxsText}>{event.mxs.toFixed(1)}</Text></View>
         ) : null}
+        <Pressable
+          style={styles.save}
+          onPress={() => toggle(event)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={saved ? "Remove from calendar" : "Save to calendar"}
+        >
+          <Ionicons
+            name={saved ? "bookmark" : "bookmark-outline"}
+            size={15}
+            color={saved ? "#e8ff47" : "#fff"}
+          />
+        </Pressable>
       </View>
       <Text style={styles.title} numberOfLines={2}>{event.title}</Text>
       <Text style={styles.sub} numberOfLines={1}>{sub}</Text>
@@ -62,6 +78,10 @@ const styles = StyleSheet.create({
   card: { width: 152, marginRight: 14 },
   cover: { width: 152, height: 152, borderRadius: 12, overflow: "hidden", marginBottom: 8 },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
+  save: {
+    position: "absolute", bottom: 8, right: 8,
+    backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999, padding: 6,
+  },
   mxsBadge: { position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
   mxsText: { color: ACCENT, fontSize: 13, fontWeight: "800" },
   reasonPill: {

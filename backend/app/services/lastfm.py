@@ -197,3 +197,138 @@ def artist_tags(name: str, limit: int = 10):
         if len(out) >= limit:
             break
     return out, True
+
+
+def artist_listeners(name: str):
+    """(listeners, playcount, lookup_completed) for one artist.
+
+    `listeners` is the number of distinct people who have ever scrobbled them. It is a
+    different population from Deezer's follower count and on a different scale, so the
+    two are never added together — MXS ranks each source against its own distribution
+    (see services/scoring.py).
+
+    Why it matters: Deezer knows almost nothing about small acts, which is why 87% of
+    our catalogue has no rating. Measured 2026-08-18, Fight From Within has 264 Deezer
+    fans and 10,127 Last.fm listeners — 38x the coverage on exactly the artists where
+    scoring currently fails.
+    """
+    if not enabled() or not name or name.strip().upper() in ("TBA", "VARIOUS"):
+        return None, None, True
+    try:
+        r = httpx.get(BASE, params={
+            "method": "artist.getinfo", "artist": name,
+            "api_key": settings.lastfm_api_key, "format": "json", "autocorrect": 1,
+        }, headers=_HEADERS, timeout=25)
+        if r.status_code != 200:
+            return None, None, False
+        data = r.json()
+    except Exception:
+        return None, None, False
+
+    if "error" in data:
+        return (None, None, True) if data.get("error") == 6 else (None, None, False)
+
+    stats = ((data.get("artist") or {}).get("stats") or {})
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    return _int(stats.get("listeners")), _int(stats.get("playcount")), True
+
+
+# ---------------------------------------------------------------------------
+# A user's own listening — the taste source Spotify never let us have
+#
+# Spotify's taste endpoints needed OAuth, a Premium account, and capped us at five
+# testers before returning 403 anyway. Last.fm needs a USERNAME and nothing else:
+# profiles are public by default, so `user.getTopArtists` answers with an API key alone.
+#
+# That also means a username is NOT proof of identity — anyone could type anyone's. It is
+# fine for importing public taste and must never be treated as a login.
+# ---------------------------------------------------------------------------
+
+# A year is the sweet spot: long enough to describe someone, recent enough to still be
+# true. "overall" reaches back a decade and buries what they listen to now.
+TOP_PERIOD = "12month"
+
+
+def _get(method: str, **params):
+    """(payload, ok). ok=False means we could not complete the call at all."""
+    if not enabled():
+        return None, False
+    try:
+        r = httpx.get(BASE, params={
+            "method": method, "api_key": settings.lastfm_api_key,
+            "format": "json", **params,
+        }, headers=_HEADERS, timeout=25)
+        # Last.fm answers "no such user" with HTTP 404 AND a JSON body {"error": 6}, so
+        # the body has to be parsed before the status is judged — otherwise a typo'd
+        # username looks identical to the network being down, and we would tell someone
+        # to try again later when they simply misspelled their name.
+        data = r.json()
+    except Exception:
+        return None, False
+    if "error" in data:
+        # 6 = no such user, which IS an answer. Anything else is a failure on our side.
+        return (None, True) if data.get("error") == 6 else (None, False)
+    if r.status_code != 200:
+        return None, False
+    return data, True
+
+
+def user_exists(username: str):
+    """(profile_or_None, ok). None with ok=True means Last.fm has no such user."""
+    if not username or not username.strip():
+        return None, True
+    data, ok = _get("user.getinfo", user=username.strip())
+    if not ok or not data:
+        return None, ok
+    u = data.get("user") or {}
+    if not u.get("name"):
+        return None, True
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    return {
+        "username": u.get("name"),
+        "realname": (u.get("realname") or "").strip() or None,
+        "playcount": _int(u.get("playcount")),
+        "country": (u.get("country") or "").strip() or None,
+        "image_url": next((i.get("#text") for i in reversed(u.get("image") or [])
+                           if i.get("#text")), None),
+    }, True
+
+
+def user_top_artists(username: str, limit: int = 100, period: str = TOP_PERIOD):
+    """[{"name", "playcount"}] strongest first. Falls back to all-time for a dormant
+    account, so someone who stopped scrobbling last year still gets a real profile."""
+    for p in (period, "overall"):
+        data, ok = _get("user.gettopartists", user=username.strip(), limit=limit, period=p)
+        if not ok:
+            return [], False
+        rows = ((data or {}).get("topartists") or {}).get("artist") or []
+        out = []
+        for a in rows:
+            nm = (a.get("name") or "").strip()
+            if not nm:
+                continue
+            try:
+                plays = int(a.get("playcount") or 0)
+            except (TypeError, ValueError):
+                plays = 0
+            out.append({"name": nm, "playcount": plays})
+        if out:
+            return out, True
+    return [], True
+
+
+def user_top_tags(username: str, limit: int = 30):
+    """The genres this listener actually reaches for, as they tagged them themselves."""
+    data, ok = _get("user.gettoptags", user=username.strip(), limit=limit)
+    if not ok:
+        return [], False
+    rows = ((data or {}).get("toptags") or {}).get("tag") or []
+    return [g for g in ((_canonical(t.get("name") or "")) for t in rows) if g], True

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, Date, String, Text, Uuid
+from sqlalchemy import Column, Date, Integer, String, Text, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 
 from app.db.session import Base
@@ -35,3 +35,10 @@ class Artist(Base):
     # coverage on only 485 of 4,708 events before this existed.
     tags = Column(JSONB, nullable=True)
     tags_checked_on = Column(Date, nullable=True)
+
+    # Popularity, cached so MXS reads the database instead of calling two APIs per
+    # artist while scoring. Two separate columns, never summed: Deezer counts followers,
+    # Last.fm counts distinct listeners — different populations on different scales.
+    deezer_fans = Column(Integer, nullable=True)
+    lastfm_listeners = Column(Integer, nullable=True)
+    popularity_checked_on = Column(Date, nullable=True)

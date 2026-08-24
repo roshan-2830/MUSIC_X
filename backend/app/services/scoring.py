@@ -61,34 +61,85 @@ def _calibrate(pct: float) -> float:
 # ---------- components (return None when we have no real signal) ----------
 
 def _artist_stature(db, ev, cache):
-    names = [
-        n for (n,) in db.query(Artist.name)
+    """Artist stature. ONE source decides the ranking; the other only fills gaps.
+
+    Deezer and Last.fm disagree about popularity by 16 percentage points on average, and
+    by more than 20 points on 190 of the 724 artists where we hold both (measured
+    2026-08-18). The disagreement is not noise, it is a population difference: Last.fm's
+    users have always been rock and metal listeners, so Korn ranks at the 98th percentile
+    there and the 13th on Deezer. Rush, Mogwai and Europe show the same 85-90 point gap.
+
+    Percentile-ranking fixes the SCALE difference between followers and listeners. It does
+    not fix that. So two rules:
+
+      1. **Deezer decides whenever it knows the artist.** Every artist ranked against the
+         same crowd, so ratings stay comparable to each other.
+      2. **Last.fm is a fallback, not a tiebreak.** It scores artists Deezer has never
+         heard of — 108 of them here, previously unrateable — and those carry lower
+         confidence, because we are ranking them against a different population and we
+         know it.
+
+    An earlier version took the BEST of the two rankings. That inflated dual-source
+    artists by 8 points on average (60.8% vs 52.8% averaged) for no reason other than
+    having had two draws. Taking the max of two samples is not a measurement.
+    """
+    rows = (
+        db.query(Artist)
         .join(EventArtist, EventArtist.artist_id == Artist.id)
         .filter(EventArtist.event_id == ev.id).order_by(EventArtist.sort_order).all()
-    ]
-    if not names and ev.headliner_artist_id:
+    )
+    if not rows and ev.headliner_artist_id:
         a = db.get(Artist, ev.headliner_artist_id)
         if a:
-            names = [a.name]
-    names = [n for n in names if n and n.strip().upper() not in ("TBA", "VARIOUS")]
-    if not names:
+            rows = [a]
+    rows = [a for a in rows if a.name and a.name.strip().upper() not in ("TBA", "VARIOUS")]
+    if not rows:
         return None
-    fans = []
-    for n in names[:6]:
-        if n not in cache:
-            cache[n] = artist_fans(n) or 0
-        if cache[n] > 0:
-            fans.append(cache[n])
-    if not fans:
+
+    dz, lf = [], []
+    for a in rows[:6]:
+        if a.deezer_fans is None and a.name not in cache:
+            cache[a.name] = artist_fans(a.name) or 0     # fallback for un-enriched acts
+        d = a.deezer_fans if a.deezer_fans is not None else cache.get(a.name, 0)
+        if d and d > 0:
+            dz.append(d)
+        if a.lastfm_listeners and a.lastfm_listeners > 0:
+            lf.append(a.lastfm_listeners)
+
+    if not dz and not lf:
         return None
-    top = max(fans)
-    raw = math.log10(top)
-    strong = sum(1 for f in fans if f >= 50_000)
-    if strong > 1:
-        raw += min(0.4, 0.15 * (strong - 1))
-    reason = f"{_fmt(top)} fans" + (f" · {len(fans)} acts with a following" if len(fans) > 1 else "")
-    return {"raw": raw, "provisional": _fans_to_score(top),
-            "confidence": "high" if top >= 5_000 else "low", "reason": reason}
+
+    top_dz, top_lf = (max(dz) if dz else None), (max(lf) if lf else None)
+    # A bill with several sizeable acts is a bigger night than one act plus support.
+    strong = sum(1 for f in (dz or lf) if f >= 50_000)
+    bump = min(0.4, 0.15 * (strong - 1)) if strong > 1 else 0.0
+
+    # Deezer decides when it knows the artist. Last.fm only when Deezer does not.
+    if top_dz:
+        source, best, unit = "deezer", top_dz, "fans"
+    else:
+        source, best, unit = "lastfm", top_lf, "listeners"
+
+    label = "Deezer" if source == "deezer" else "Last.fm"
+    reason = f"{_fmt(best)} {unit} on {label}"
+    if len(rows) > 1:
+        reason += f" · {len(rows)} acts billed"
+
+    # A fallback ranking is ranked against a different crowd, so it never claims high
+    # confidence however big the number is.
+    if source == "deezer":
+        confidence = "high" if best >= 5_000 else "low"
+    else:
+        confidence = "medium" if best >= 5_000 else "low"
+        reason += " (Deezer has no data — ranked separately)"
+
+    return {
+        "source": source,
+        "raw": math.log10(best) + bump,
+        "provisional": _fans_to_score(best),
+        "confidence": confidence,
+        "reason": reason,
+    }
 
 
 def _venue_component(db, ev):
@@ -122,7 +173,9 @@ def _collect(db, ev, cache):
     comps = {}
     a = _artist_stature(db, ev, cache)
     if a:
-        comps["artist"] = {"weight": WEIGHTS["artist"], "raw": a["raw"], "confidence": a["confidence"], "reason": a["reason"]}
+        comps["artist"] = {"weight": WEIGHTS["artist"], "raw": a["raw"],
+                           "confidence": a["confidence"], "reason": a["reason"],
+                           "source": a["source"]}
     v = _venue_component(db, ev)
     if v:
         comps["venue"] = {"weight": WEIGHTS["venue"], "raw": v["raw"], "confidence": v["confidence"], "reason": v["reason"]}
@@ -154,15 +207,28 @@ def score_all_events():
                 continue
             blended.append((ev, comps))
 
-        # sorted raws per continuous component (for percentile ranking)
-        ranked = {name: sorted(c[name]["raw"] for _, c in blended if name in c and "raw" in c[name])
-                  for name in ("artist", "venue")}
+        # Percentile-rank each continuous component against its own cohort. The artist
+        # component has two possible cohorts, and an artist sits in exactly ONE of them:
+        # those Deezer knows, and those only Last.fm knows. They are never mixed, and an
+        # artist is never ranked twice and given the better result.
+        ranked = {"venue": sorted(c["venue"]["raw"] for _, c in blended if "venue" in c)}
+        by_source = {}
+        for _, c in blended:
+            a = c.get("artist")
+            if a:
+                by_source.setdefault(a["source"], []).append(a["raw"])
+        for src in by_source:
+            by_source[src].sort()
 
         rows = []  # (ev, comps, blend_pct)
         for ev, comps in blended:
             parts = []
             for name, c in comps.items():
-                c["pct"] = _pct(ranked[name], c["raw"]) if "raw" in c else c["pct"]
+                if name == "artist":
+                    c["pct"] = _pct(by_source[c["source"]], c["raw"])
+                    c["ranked_against"] = c["source"]
+                elif "raw" in c:
+                    c["pct"] = _pct(ranked[name], c["raw"])
                 parts.append((c["pct"], c["weight"]))
             wsum = sum(w for _, w in parts)
             rows.append((ev, comps, sum(p * w for p, w in parts) / wsum))
@@ -179,7 +245,8 @@ def score_all_events():
                 "percentile": round(opct * 100),
                 "components": {
                     name: {"score": round(c["pct"] * 10, 1), "weight": c["weight"],
-                           "confidence": c["confidence"], "reason": c["reason"]}
+                           "confidence": c["confidence"], "reason": c["reason"],
+                           **({"ranked_against": c["ranked_against"]} if c.get("ranked_against") else {})}
                     for name, c in comps.items()
                 },
                 "missing": [k for k in ("rarity", "venue", "production", "context") if k not in comps],
@@ -208,7 +275,8 @@ def score_events_by_ids(ids: list) -> int:
                 ev.mxs_breakdown = {
                     "scored": True, "final": ev.mxs, "provisional": True,
                     "components": {"artist": {"score": a["provisional"], "weight": WEIGHTS["artist"],
-                                              "confidence": a["confidence"], "reason": a["reason"]}},
+                                              "confidence": a["confidence"], "reason": a["reason"],
+                                              "source": a["source"]}},
                     "reasons": [a["reason"]],
                 }
                 scored += 1

@@ -2,8 +2,11 @@ import uuid
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends
-from sqlalchemy import func, nulls_last
+from datetime import date as date_cls, timedelta
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import and_, func, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from app.api.routes.events import _to_list_item, _to_list_items
@@ -16,16 +19,22 @@ from app.models.event import Event
 from app.models.event_artist import EventArtist
 from app.models.event_genre import EventGenre
 from app.models.follow import Follow
+from app.models.venue import Venue
 from app.models.genre import Genre
+from app.models.festival import Festival
+from app.models.lastfm_account import LastfmAccount
 from app.models.profile import Profile
 from app.models.taste_profile import TasteProfile
+from app.api.routes.festivals import _cities_for, _to_out as _festival_out
 from app.schemas.artist import ArtistOut, BulkFollowIn, FollowArtistIn
-from app.schemas.event import EventListItem, RecommendedEvent
+from app.schemas.festival import FestivalOut
+from app.schemas.event import CalendarEvent, CalendarPayload, EventListItem, RecommendedEvent
 from app.schemas.profile import ProfileOut, ProfileUpdate
 from app.services.deezer import _norm
 from app.services.ingestion import search_and_ingest
 from app.services.scoring import score_events_by_ids
 from app.services.taste import bucketize, genre_weights
+from app.services.taste_import import disconnect_lastfm, import_lastfm
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -105,6 +114,208 @@ def unsave_event(event_id: UUID, user_id: str = Depends(get_current_user_id), db
     uid = uuid.UUID(user_id)
     db.query(CalendarEntry).filter_by(user_id=uid, event_id=event_id).delete()
     db.commit()
+
+
+# ---- Saved festivals -----------------------------------------------------------
+# Same table, same promise as a saved show. Declared before /saves/{event_id} would be
+# ambiguous only if the paths were the same depth — they are not, but keeping these
+# together makes the pair obvious to the next reader.
+
+@router.get("/saves/festivals", response_model=list[FestivalOut])
+def list_saved_festivals(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """The user's saved festivals, soonest first."""
+    uid = uuid.UUID(user_id)
+    fests = (
+        db.query(Festival)
+        .join(CalendarEntry, CalendarEntry.festival_id == Festival.id)
+        .filter(CalendarEntry.user_id == uid, CalendarEntry.is_suggestion.is_(False))
+        .order_by(nulls_last(Festival.starts_on.asc()))
+        .all()
+    )
+    cities = _cities_for(db, fests)
+    return [_festival_out(f, cities.get(f.city_id) if f.city_id else None) for f in fests]
+
+
+@router.post("/saves/festivals/{festival_id}", status_code=204)
+def save_festival(festival_id: UUID, user_id: str = Depends(get_current_user_id),
+                  db: Session = Depends(get_db)):
+    uid = uuid.UUID(user_id)
+    if not db.get(Festival, festival_id):
+        raise HTTPException(404, "Festival not found")
+    exists = db.query(CalendarEntry).filter_by(user_id=uid, festival_id=festival_id).first()
+    if not exists:
+        db.add(CalendarEntry(user_id=uid, festival_id=festival_id,
+                             state="interested", is_suggestion=False))
+        db.commit()
+
+
+@router.delete("/saves/festivals/{festival_id}", status_code=204)
+def unsave_festival(festival_id: UUID, user_id: str = Depends(get_current_user_id),
+                    db: Session = Depends(get_db)):
+    uid = uuid.UUID(user_id)
+    db.query(CalendarEntry).filter_by(user_id=uid, festival_id=festival_id).delete()
+    db.commit()
+
+
+# ---- The Calendar page --------------------------------------------------------
+# One window of time, in one of two scopes. The month grid, the 14-day strip and the
+# agenda all read this same payload, so what a dot means and what a card says can never
+# drift apart.
+
+def _followed_ids(db: Session, uid) -> tuple[set, set]:
+    """(followed artist ids, followed city ids)."""
+    arts, cits = set(), set()
+    for f in db.query(Follow).filter(Follow.user_id == uid).all():
+        (arts if f.followable_type == "artist" else cits).add(f.followable_id)
+    return arts, cits
+
+
+@router.get("/calendar", response_model=CalendarPayload)
+def calendar(
+    start: date_cls = Query(..., description="first day shown, inclusive"),
+    end: date_cls = Query(..., description="last day shown, inclusive"),
+    mode: str = Query("mine", pattern="^(mine|city)$"),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Everything sitting on a date between `start` and `end`.
+
+    mode=mine — what this person has a stake in: saved shows, plus anything by an artist
+                or in a city they follow. Festivals only if saved.
+    mode=city — what is on in their home city, whoever is playing: both the concerts and
+                the festivals held there.
+    """
+    uid = uuid.UUID(user_id)
+    if end < start:
+        raise HTTPException(400, "end must not be before start")
+    if (end - start).days > 400:
+        raise HTTPException(400, "window too wide (max 400 days)")
+
+    # starts_at is a timestamp, so the upper bound is the start of the day after `end`.
+    lo, hi = start, end + timedelta(days=1)
+    window = and_(Event.starts_at >= lo, Event.starts_at < hi)
+
+    saved_event_ids = {
+        r[0] for r in db.query(CalendarEntry.event_id)
+        .filter(CalendarEntry.user_id == uid, CalendarEntry.event_id.isnot(None)).all()
+    }
+    booked_event_ids = {
+        r[0] for r in db.query(CalendarEntry.event_id)
+        .filter(CalendarEntry.user_id == uid, CalendarEntry.event_id.isnot(None),
+                CalendarEntry.booked.is_(True)).all()
+    }
+    saved_festival_ids = {
+        r[0] for r in db.query(CalendarEntry.festival_id)
+        .filter(CalendarEntry.user_id == uid, CalendarEntry.festival_id.isnot(None)).all()
+    }
+    followed_artists, followed_cities = _followed_ids(db, uid)
+    lineup_matches: set = set()
+    followed_city_venue_ids = {
+        r[0] for r in db.query(Venue.id).filter(Venue.city_id.in_(followed_cities)).all()
+    } if followed_cities else set()
+
+    prof = db.get(Profile, uid)
+
+    q = db.query(Event).filter(Event.merged_into.is_(None), window)
+    if mode == "mine":
+        by_lineup = (
+            db.query(EventArtist.event_id)
+            .filter(EventArtist.artist_id.in_(followed_artists)).subquery()
+            if followed_artists else None
+        )
+        clauses = []
+        if saved_event_ids:
+            clauses.append(Event.id.in_(saved_event_ids))
+        if followed_artists:
+            clauses.append(Event.headliner_artist_id.in_(followed_artists))
+            clauses.append(Event.id.in_(db.query(by_lineup.c.event_id)))
+            # The same set the tagger needs: an artist you follow can be on the bill
+            # without headlining, and a card with no tag gives no reason for being here.
+            lineup_matches = {r[0] for r in db.query(by_lineup.c.event_id).all()}
+        if followed_cities:
+            clauses.append(Event.venue_id.in_(
+                db.query(Venue.id).filter(Venue.city_id.in_(followed_cities))
+            ))
+        if not clauses:
+            # Nothing followed and nothing saved: an empty month is the honest answer,
+            # not the whole catalogue.
+            events = []
+        else:
+            events = q.filter(or_(*clauses)).all()
+    else:
+        events = (
+            q.join(Venue, Venue.id == Event.venue_id)
+             .filter(Venue.city_id == prof.home_city_id).all()
+            if prof and prof.home_city_id else []
+        )
+
+    # Up to two genres per event, for the card footer.
+    genres: dict = {}
+    if events:
+        for eid, gname in (
+            db.query(EventGenre.event_id, Genre.name)
+            .join(Genre, Genre.id == EventGenre.genre_id)
+            .filter(EventGenre.event_id.in_([e.id for e in events])).all()
+        ):
+            genres.setdefault(eid, []).append(gname)
+
+    def tag_for(ev) -> str | None:
+        """Narrow on purpose — one label, strongest claim first. A cancellation outranks
+        everything: it is the thing the person most needs to see."""
+        if ev.status == "cancelled":
+            return "cancelled"
+        if ev.status == "postponed":
+            return "postponed"
+        if ev.id in booked_event_ids:
+            return "ticket"
+        if ev.id in saved_event_ids:
+            return "plan"
+        if ev.headliner_artist_id in followed_artists or ev.id in lineup_matches:
+            return "following"
+        if ev.venue_id in followed_city_venue_ids:
+            return "city"
+        return None
+
+    items = _to_list_items(db, events)
+    out_events = [
+        CalendarEvent(
+            **item.model_dump(),
+            saved=ev.id in saved_event_ids,
+            booked=ev.id in booked_event_ids,
+            tag_kind=tag_for(ev),
+            genres=genres.get(ev.id, [])[:2],
+        )
+        for ev, item in zip(events, items)
+    ]
+    out_events.sort(key=lambda e: e.starts_at or datetime.max.replace(tzinfo=timezone.utc))
+
+    # A festival counts as "in the window" if any of its days fall inside it.
+    fq = db.query(Festival).filter(
+        Festival.merged_into.is_(None),
+        Festival.starts_on.isnot(None),
+        Festival.starts_on <= end,
+        func.coalesce(Festival.ends_on, Festival.starts_on) >= start,
+    )
+    if mode == "mine":
+        fests = fq.filter(Festival.id.in_(saved_festival_ids)).all() if saved_festival_ids else []
+    else:
+        # In the city scope, festivals are filtered to that city too. An earlier version
+        # showed every festival everywhere, on the theory that people travel for them —
+        # but with a real catalogue that meant 95 of the 97 festivals under "All in
+        # London" were not in London, and they buried the 56 shows that were. A tab that
+        # names a city has to mean it.
+        fests = (
+            fq.filter(Festival.city_id == prof.home_city_id).all()
+            if prof and prof.home_city_id else []
+        )
+    fcities = _cities_for(db, fests)
+    out_fests = []
+    for f in sorted(fests, key=lambda f: f.starts_on):
+        o = _festival_out(f, fcities.get(f.city_id) if f.city_id else None)
+        o.saved = f.id in saved_festival_ids
+        out_fests.append(o)
+
+    return CalendarPayload(events=out_events, festivals=out_fests)
 
 
 # ---- Followed artists — the taste graph that drives Recommended + alerts ----
@@ -256,7 +467,7 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
     )
     tp = db.query(TasteProfile).filter_by(user_id=uid).first()
     genre_w: dict = (tp.genre_weights if tp else None) or {}
-    if not followed and not genre_w:
+    if not followed and not genre_w and not (tp and tp.core_artist_ids):
         return []
 
     followed_norms: dict[str, str] = {}      # normalized name -> display name
@@ -283,11 +494,25 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
         .filter(Event.merged_into.is_(None), upcoming)
         .all()
     )
-    tier_a: dict = {}        # event_id -> (Event, artist display name)
+    # Artists from a connected Last.fm account. Kept separate from follows because the
+    # promise is different: a follow means "alert me", listening means "this is my taste".
+    # So these rank recommendations but never trigger a notification, and the reason says
+    # which one it was — "Because you follow X" vs "You listen to X".
+    listened_norms: dict[str, str] = {}
+    if tp and (tp.core_artist_ids or tp.adjacent_artist_ids):
+        ids = list(tp.core_artist_ids or []) + list(tp.adjacent_artist_ids or [])
+        for a in db.query(Artist).filter(Artist.id.in_(ids)).all():
+            listened_norms.setdefault(_norm(a.name), a.name)
+
+    tier_a: dict = {}        # event_id -> (Event, artist display name, kind)
     for ev, artist_name in lineup_rows + headliner_rows:
         n = _norm(artist_name)
-        if n in followed_norms and ev.id not in tier_a:
-            tier_a[ev.id] = (ev, followed_norms[n])
+        if ev.id in tier_a:
+            continue
+        if n in followed_norms:
+            tier_a[ev.id] = (ev, followed_norms[n], "artist")
+        elif n in listened_norms:
+            tier_a[ev.id] = (ev, listened_norms[n], "listened")
 
     # ---- Tier B: genre discovery, excluding anything already matched by artist ----
     tier_b: dict = {}        # event_id -> (Event, bucket, weight)
@@ -307,13 +532,19 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
                 tier_b[ev.id] = (ev, b, genre_w[b])
 
     # Tier A by date; Tier B by taste weight (desc), then date.
-    a_ordered = sorted(tier_a.values(), key=lambda p: p[0].starts_at or far_future)
+    # Followed artists lead, then the ones they merely listen to — a follow is a stronger
+    # statement than a play count. Each group by date within itself.
+    a_ordered = sorted(tier_a.values(),
+                       key=lambda p: (0 if p[2] == "artist" else 1, p[0].starts_at or far_future))
     b_ordered = sorted(tier_b.values(), key=lambda p: (-p[2], p[0].starts_at or far_future))
 
-    events = [ev for ev, _ in a_ordered] + [ev for ev, _, _ in b_ordered]
+    events = [ev for ev, _, _ in a_ordered] + [ev for ev, _, _ in b_ordered]
     meta: dict = {}          # event_id -> (kind, label, full reason)
-    for ev, name in a_ordered:
-        meta[ev.id] = ("artist", name, f"Because you follow {name}")
+    for ev, name, kind in a_ordered:
+        meta[ev.id] = (
+            ("artist", name, f"Because you follow {name}") if kind == "artist"
+            else ("listened", name, f"You listen to {name} on Last.fm")
+        )
     for ev, bucket, _w in b_ordered:
         meta[ev.id] = ("genre", bucket, f"Matches your {bucket} taste")
 
@@ -324,3 +555,53 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
             **item.model_dump(), reason=reason, reason_label=label, reason_kind=kind,
         ))
     return out
+
+# ---- Last.fm: the taste source Spotify stopped being --------------------------
+# A username is all this needs, because Last.fm profiles are public. That is also why the
+# username is never treated as a login: anyone could type anyone's.
+
+class LastfmConnectIn(BaseModel):
+    username: str
+
+
+@router.get("/lastfm")
+def lastfm_status(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Whether a Last.fm account is connected, and what it gave us."""
+    uid = uuid.UUID(user_id)
+    acct = db.get(LastfmAccount, uid)
+    if not acct:
+        return {"connected": False}
+    tp = db.query(TasteProfile).filter_by(user_id=uid).first()
+    weights = (tp.genre_weights if tp else None) or {}
+    return {
+        "connected": True,
+        "username": acct.username,
+        "realname": acct.realname,
+        "image_url": acct.image_url,
+        "playcount": acct.playcount,
+        "last_synced_at": acct.last_synced_at,
+        "core_artists": len(tp.core_artist_ids or []) if tp else 0,
+        "total_artists": (len(tp.core_artist_ids or []) + len(tp.adjacent_artist_ids or [])) if tp else 0,
+        "genres": sorted(weights, key=weights.get, reverse=True)[:8],
+    }
+
+
+@router.post("/lastfm")
+def lastfm_connect(body: LastfmConnectIn,
+                   user_id: str = Depends(get_current_user_id),
+                   db: Session = Depends(get_db)):
+    """Connect (or re-sync) a Last.fm account and build the taste profile from it."""
+    uid = uuid.UUID(user_id)
+    result = import_lastfm(db, uid, body.username)
+    if not result.get("ok"):
+        db.rollback()
+        raise HTTPException(status_code=400, detail=result.get("message", "Could not connect"))
+    db.commit()
+    return result
+
+
+@router.delete("/lastfm", status_code=204)
+def lastfm_disconnect(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+    """Disconnect and delete the profile it built — nothing is kept behind."""
+    disconnect_lastfm(db, uuid.UUID(user_id))
+    db.commit()

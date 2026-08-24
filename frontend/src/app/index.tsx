@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -9,7 +9,9 @@ import EventCard from "../components/event-card";
 import EventDetailView from "../components/event-detail";
 import EventHCard from "../components/event-hcard";
 import FestivalCard from "../components/festival-card";
-import FollowArtists from "../components/follow-artists";
+import ArtistDetail from "../components/artist-detail";
+import ArtistsRow from "../components/artists-row";
+import LastfmConnect from "../components/lastfm-connect";
 import NotificationBell from "../components/notification-bell";
 import NotificationsModal from "../components/notifications-modal";
 import SearchBar from "../components/search-bar";
@@ -60,17 +62,13 @@ export default function HomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [followOpen, setFollowOpen] = useState(false);
+  const [artistName, setArtistName] = useState<string | null>(null);
+  // bumped when the manage-artists screen closes, so the row re-reads the follows
+  const [followsKey, setFollowsKey] = useState(0);
   const [alertsOpen, setAlertsOpen] = useState(false);
   // bumping this re-checks the unread badge (after the inbox is closed)
   const [badgeKey, setBadgeKey] = useState(0);
   const [triedLocate, setTriedLocate] = useState(false);
-
-  // Close the manage-artists screen and refresh recommendations (in case they changed).
-  function closeFollow() {
-    setFollowOpen(false);
-    getRecommended().then(setRecommended).catch(() => {});
-  }
 
   // the global catalogue (loaded once)
   useEffect(() => {
@@ -82,10 +80,14 @@ export default function HomeScreen() {
     fetchEvents("date", 200).then(setSoonest).catch(() => setSoonest([]));
   }, []);
 
-  // personalised row — events matching the artists the user follows
-  useEffect(() => {
-    getRecommended().then(setRecommended).catch(() => setRecommended([]));
-  }, []);
+  // Recommended is derived from who they follow, so it has to move when the follow list
+  // does — following someone on the Search screen should change this row, not just the
+  // artists row. Refreshed on focus for the same reason: Home never unmounts.
+  useFocusEffect(
+    useCallback(() => {
+      getRecommended().then(setRecommended).catch(() => {});
+    }, [])
+  );
 
   // upcoming festivals (loaded once)
   useEffect(() => {
@@ -212,7 +214,9 @@ export default function HomeScreen() {
         </View>
         <View style={styles.headerActions}>
           <NotificationBell refreshKey={badgeKey} onPress={() => setAlertsOpen(true)} />
-          <Pressable style={styles.iconBtn} onPress={() => setFollowOpen(true)}>
+          <Pressable
+            style={styles.iconBtn}
+            onPress={() => router.push({ pathname: "/search", params: { type: "artists" } })}>
             <Ionicons name="musical-notes" size={20} color={ACCENT} />
           </Pressable>
           <Pressable style={styles.iconBtn} onPress={signOut}>
@@ -231,6 +235,20 @@ export default function HomeScreen() {
             <View style={{ paddingHorizontal: 16 }}>
               <SearchBar />
             </View>
+            <ArtistsRow
+              refreshKey={followsKey}
+              onOpenArtist={setArtistName}
+              onSeeAll={() => router.push({ pathname: "/search", params: { type: "artists" } })}
+              onAdd={() =>
+                router.push({ pathname: "/search", params: { type: "artists", focus: "1" } })
+              }
+            />
+            <LastfmConnect
+              onChanged={() => {
+                setFollowsKey((k) => k + 1);
+                getRecommended().then(setRecommended).catch(() => {});
+              }}
+            />
             {recommended.length ? (
               <View style={styles.section}>
                 <View style={styles.rowHead}>
@@ -343,9 +361,16 @@ export default function HomeScreen() {
         />
       </Modal>
 
-      <Modal visible={followOpen} animationType="slide" onRequestClose={closeFollow}>
-        <FollowArtists onDone={closeFollow} title="Your artists" />
+      <Modal visible={!!artistName} animationType="slide" onRequestClose={() => setArtistName(null)}>
+        {artistName ? (
+          <ArtistDetail
+            name={artistName}
+            onClose={() => { setArtistName(null); setFollowsKey((k) => k + 1); }}
+            onSelectEvent={(id) => { setArtistName(null); setSelectedId(id); }}
+          />
+        ) : null}
       </Modal>
+
     </SafeAreaView>
   );
 }
@@ -370,6 +395,5 @@ const styles = StyleSheet.create({
   sectionTitle: { color: "#f4f4f6", fontSize: 19, fontWeight: "800", paddingHorizontal: 16 },
   sectionSub: { color: MUTED, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 10 },
   hscroll: { paddingHorizontal: 16, paddingTop: 2 },
-  allTitle: { color: "#f4f4f6", fontSize: 19, fontWeight: "800", paddingHorizontal: 16, marginTop: 22, marginBottom: 10 },
   error: { color: "#ff6b6b", fontSize: 14, textAlign: "center" },
 });

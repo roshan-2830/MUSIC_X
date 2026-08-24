@@ -18,6 +18,7 @@ class FestivalOut(BaseModel):
     price_from_currency: str | None
     mxs: float | None
     confidence: str | None
+    saved: bool = False                       # in the caller's calendar (calendar endpoint only)
     # Only populated by the personalized "Festivals for you" endpoint:
     match_count: int | None = None            # how many of the user's followed artists are on the bill
     matched_artists: list[str] | None = None  # their names, for "feat. X, Y"

@@ -8,6 +8,7 @@ import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-c
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
 import AuthScreen from '@/components/auth-screen';
+import ConnectMusic from '@/components/connect-music';
 import FollowArtists from '@/components/follow-artists';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { ProfileProvider } from '@/lib/profile';
@@ -30,6 +31,7 @@ function Loader() {
 function SignedInApp({ userId }: { userId: string }) {
   const [ready, setReady] = useState(false);
   const [onboarding, setOnboarding] = useState(false);
+  const [skippedConnect, setSkippedConnect] = useState(false);
   const key = `${ONBOARDED_KEY}_${userId}`;
 
   useEffect(() => {
@@ -46,9 +48,16 @@ function SignedInApp({ userId }: { userId: string }) {
       AsyncStorage.setItem(key, 'true').catch(() => {});
       setOnboarding(false);
     };
+    // Connect a listening history FIRST — it is the shortest path to real
+    // recommendations. "Who do you love?" is the fallback for anyone who skips, since
+    // most people do not have a Last.fm account and must not be stuck at the door.
     return (
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        <FollowArtists onDone={finish} />
+        {skippedConnect ? (
+          <FollowArtists onDone={finish} />
+        ) : (
+          <ConnectMusic onDone={finish} onSkip={() => setSkippedConnect(true)} />
+        )}
       </SafeAreaProvider>
     );
   }
