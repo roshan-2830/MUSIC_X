@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -284,40 +284,96 @@ export default function SearchScreen() {
     loadBrowse("");
   }
 
-  async function runSearch() {
-    const term = q.trim();
-    if (!term) { loadBrowse(); return; }
+  // Every keystroke starts a new search, and a slow one must never overwrite a newer one.
+  // Each pass carries the sequence number it was started with and drops its own result if
+  // a later keystroke has since bumped it — otherwise typing "corona" fast can leave you
+  // looking at the results for "cor".
+  const searchSeq = useRef(0);
+
+  // The cheap half: our own database, the festival list already in memory, and Deezer's
+  // artist search. Nothing here costs Ticketmaster budget, so it can run while you type.
+  async function runLocalSearch(term: string, seq: number) {
+    const stale = () => seq !== searchSeq.current;
     setFeed("");        // a typed search replaces whatever feed we arrived from
     if (mode === "artists") {
       setLoading(true);
-      searchArtists(term).then(setArtists).catch(() => setArtists([])).finally(() => setLoading(false));
+      try {
+        const list = await searchArtists(term);
+        if (!stale()) setArtists(list);
+      } catch {
+        if (!stale()) setArtists([]);
+      } finally {
+        if (!stale()) setLoading(false);
+      }
       return;
     }
     const t = term.toLowerCase();
     setSearched(true); setBrowsing(false); setError(null);
-    // fast, local/light sources first
     setFestResults(festAll.filter((x) => x.name?.toLowerCase().includes(t) || (x.city ?? "").toLowerCase().includes(t)));
-    searchArtists(term).then(setArtists).catch(() => setArtists([]));
+    searchArtists(term).then((l) => { if (!stale()) setArtists(l); }).catch(() => {});
 
-    // 1) DB-first: show concerts we already have — near-instant.
     setLoading(true);
     try {
-      setRaw(await searchEventsLocal(term));
+      const local = await searchEventsLocal(term);
+      if (!stale()) setRaw(local);
     } catch {
-      setRaw([]);
+      if (!stale()) setRaw([]);
     } finally {
-      setLoading(false);
+      if (!stale()) setLoading(false);
     }
-    // 2) Then supplement with a live Ticketmaster search, merging any shows we didn't have.
-    searchEvents(term)
-      .then((live) => {
-        setRaw((prev) => {
-          const seen = new Set(prev.map((e) => e.id));
-          return [...prev, ...live.filter((e) => !seen.has(e.id))];
-        });
-      })
-      .catch(() => {});
   }
+
+  // The paid half: a live Ticketmaster search, which finds shows we have never ingested.
+  // Kept separate and on a longer delay because Ticketmaster's free tier is 5,000 calls a
+  // DAY and the discovery sweep plus the nightly re-verify already spend most of it. Per
+  // keystroke this would drain the quota in a single session of typing.
+  async function runLiveSearch(term: string, seq: number) {
+    if (mode === "artists") return;
+    try {
+      const live = await searchEvents(term);
+      if (seq !== searchSeq.current) return;
+      setRaw((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...live.filter((e) => !seen.has(e.id))];
+      });
+    } catch {
+      /* the local results already stand on their own */
+    }
+  }
+
+  // Pressing search still works, and skips both waits.
+  async function runSearch() {
+    const term = q.trim();
+    if (!term) { loadBrowse(); return; }
+    const seq = ++searchSeq.current;
+    await runLocalSearch(term, seq);
+    runLiveSearch(term, seq);
+  }
+
+  // Search as you type. Two delays on purpose:
+  //
+  //   250ms → the local pass, which is what makes it feel live. Typing "corona" surfaces
+  //           Corona Capital before you finish the word; the backend already matched on a
+  //           substring, so nothing had to change there — the screen simply never asked
+  //           until you pressed the search key.
+  //   900ms → the live Ticketmaster pass. Both are TRAILING, so continuous typing costs
+  //           exactly one live call at the end, the same as one press of search used to.
+  //
+  // Under two characters nothing runs: one letter matches a large slice of the catalogue,
+  // and Deezer's artist search rejects a single character anyway.
+  useEffect(() => {
+    const term = q.trim();
+    if (!term) {
+      if (!browsing) loadBrowse();
+      return;
+    }
+    if (term.length < 2) return;
+    const seq = ++searchSeq.current;
+    const localTimer = setTimeout(() => runLocalSearch(term, seq), 250);
+    const liveTimer = setTimeout(() => runLiveSearch(term, seq), 900);
+    return () => { clearTimeout(localTimer); clearTimeout(liveTimer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, mode]);
 
   async function toggleFollow(a: ArtistSearchResult) {
     // whatever happens, re-read the follows afterwards so Artists mode stays truthful

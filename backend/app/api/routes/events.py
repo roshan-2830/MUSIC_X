@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import nulls_last, or_
+from sqlalchemy import case, nulls_last, or_
 from sqlalchemy.orm import Session, aliased
 
 from app.db.session import get_db
@@ -133,14 +133,34 @@ def search_local(
     """Search events ALREADY in our database — INSTANT, no live Ticketmaster call.
     Matches by event title, artist (headliner or line-up), or city. The app shows these
     immediately, then supplements with a live search for anything not yet stored."""
-    term = f"%{q.strip()}%"
+    # Escape the LIKE wildcards, or a search for "50%" matches the entire catalogue.
+    raw = q.strip()
+    safe = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    term = f"%{safe}%"
+    starts = f"{safe}%"
     cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     upcoming = (Event.starts_at >= cutoff) | (Event.starts_at.is_(None))
 
     # One query: match title, city, headliner name, OR any line-up artist name.
     LineupArtist = aliased(Artist)
-    events = (
-        db.query(Event)
+
+    # Rank by WHERE the term matched, then by date inside each band. Date alone was the
+    # wrong order for a search box: typing "corona" put Corona Capital SIXTH, behind a
+    # gospel tour in Corona, California and a mariachi act called Banda Corona Del Rey,
+    # because those happen sooner. A search box is asked "find me this thing", not "what
+    # is on next" — so a title that begins with what you typed wins, then a title that
+    # contains it, then the artists on the bill, and a city match comes last because it is
+    # the loosest reading of what you meant.
+    rank = case(
+        (Event.title.ilike(starts, escape="\\"), 0),
+        (Event.title.ilike(term, escape="\\"), 1),
+        (or_(Artist.name.ilike(term, escape="\\"),
+             LineupArtist.name.ilike(term, escape="\\")), 2),
+        else_=3,
+    ).label("match_rank")
+
+    rows = (
+        db.query(Event, rank)
         .outerjoin(Venue, Event.venue_id == Venue.id)
         .outerjoin(City, Venue.city_id == City.id)
         .outerjoin(Artist, Event.headliner_artist_id == Artist.id)
@@ -149,18 +169,18 @@ def search_local(
         .filter(Event.merged_into.is_(None), upcoming)
         .filter(
             or_(
-                Event.title.ilike(term),
-                City.name.ilike(term),
-                Artist.name.ilike(term),
-                LineupArtist.name.ilike(term),
+                Event.title.ilike(term, escape="\\"),
+                City.name.ilike(term, escape="\\"),
+                Artist.name.ilike(term, escape="\\"),
+                LineupArtist.name.ilike(term, escape="\\"),
             )
         )
         .distinct()
-        .order_by(nulls_last(Event.starts_at.asc()))
+        .order_by(rank, nulls_last(Event.starts_at.asc()))
         .limit(limit)
         .all()
     )
-    return _to_list_items(db, events)
+    return _to_list_items(db, [r[0] for r in rows])
 
 
 @router.get("/{event_id}", response_model=EventDetail)
