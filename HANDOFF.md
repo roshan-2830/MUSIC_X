@@ -158,6 +158,33 @@ Scope label is now "Saved" with a bookmark icon; the eyebrow is the mockup's own
 because "follow an artist or save a show" became false the moment this scope stopped
 reading follows. `mode=city` is untouched — it never claimed the shows were yours.
 
+### Genres pruned, and the run order that silently undoes it
+
+The tagging backfill took `genres` from 121 rows to 788, because Last.fm crowd tags
+include artist names, countries, TV shows, record labels and private notes
+(`Seen Live X7`, `Guys I Would Fuck`, `Funk_Add_To_Lidarr_Batch_1`). Pruned to **521**
+while event coverage held at 53.2%, so no real coverage was traded away.
+
+`prune_single_artist_genres` is now **dry-run by default** and returns the full drop and
+keep lists, because its trade-off is real: a dry run showed it would have deleted 45
+genuine genres — `Baroque`, `Bebop`, `Riot Grrrl`, `Honky Tonk`, `Jungle`, `Ranchera`,
+`Stoner Doom`. `GENRE_WORDS` was written when 150 artists were tagged; at 1,003 it was
+too thin. Added ~35 missing HEADS (`bop`, `wop`, `tonk`, `grind`, `crust`, `grrrl`,
+`doom`, `phonk`, `baroque`, `quartet`…) — heads, not names, so one entry covers every
+genre built on it. Deliberately did NOT add `mod`: it is a substring of "modern" and
+would rescue `Modtoday` and friends. False deletions went 45 → ~6.
+
+**`JUNK_MARKERS` + `publishable()` are new**, and they exist because a genre word can
+RESCUE junk: `Funk_Add_To_Lidarr_Batch_1` survived on "funk". `publishable()` is applied
+where tags become genre rows, in both the live path and the rebuild, while `artist.tags`
+keeps the raw Last.fm answer — provenance and publication are different promises.
+
+**RUN ORDER, and it is silent when wrong:** `reapply_cached_tags` CREATES any genre it
+does not hold, from the cached tags. Running it after the prune puts everything back —
+measured here as 753 → 788, a net increase that looked like success. **Rebuild first,
+prune LAST**, because the prune counts artists per genre and needs the links to exist.
+The docstring now says so.
+
 ## Bugs I caused and fixed (both found by running it)
 
 1. **Similar-artist photos went blank.** `backfill_similar` writes the 20 names and stamps
@@ -202,31 +229,24 @@ reading follows. `mode=city` is untouched — it never claimed the shows were yo
 
 ## What to do next
 
-**1. `genres` went from 121 rows to 552** in one tagging run, and crowd tags include
-artist names, venue names, place names and private notes — an unbounded set.
-`tagging.prune_single_artist_genres(db)` exists for exactly this and has NOT been run
-since the backfill. It drops genres claimed by only one artist AND not resembling a genre
-name, and `tagging.reapply_cached_tags(db)` rebuilds the event links afterwards with no
-API calls. Run the prune, then eyeball what it dropped before committing.
-
-**2. Bios land at ~10% while photos land at 71%.** `wikipedia.fetch_artist_bio` only
+**1. Bios land at ~10% while photos land at 71%.** `wikipedia.fetch_artist_bio` only
 accepts a page whose short description reads musical and isn't a disambiguation stub.
 That strictness is what stops the wrong namesake's biography appearing, so it was NOT
 loosened — but it is probably also rejecting artists who do have a real page. Sample 20
 of the rejects by hand before touching the filter. Nothing is stored wrongly and nothing
 is stamped, so a later run retries them for free.
 
-**3. Ticketmaster billing strings are stored as artists** — e.g. `A.R. Rahman feat. Alka
+**2. Ticketmaster billing strings are stored as artists** — e.g. `A.R. Rahman feat. Alka
 Yagnik; Udit Narayan; Sukhwinder Singh; Shankar Mahadevan; Shaan & Sehar`. Not
 duplicates, so `dedupe.py` correctly leaves them, but they look like junk in search. A
 cleanup would split on `feat.` / `;` / ` and ` and attach the real artists to the event.
 
-**4. Accented duplicates are a known gap.** `artist_lookup.key` strips punctuation but
+**3. Accented duplicates are a known gap.** `artist_lookup.key` strips punctuation but
 NOT accents, because the key must match what Postgres computes and `unaccent` is not
 installed. So `Beyoncé` and `Beyonce` would still become two rows. Every duplicate
 actually measured was case or punctuation.
 
-**5. The three missing tabs** — Passport, Trips, Bucket List — backed by ten tables no
+**4. The three missing tabs** — Passport, Trips, Bucket List — backed by ten tables no
 code touches: `passport_entries`, `saved_trips`, `trip_stops`, `travel_legs`,
 `hotel_bookings`, `bucket_list`, `reviews`, `review_likes`, `referrals`,
 `dismissed_suggestions`.

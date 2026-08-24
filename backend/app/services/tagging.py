@@ -49,6 +49,11 @@ def apply_artist_tags(db: Session, artist: Artist) -> dict:
     if not tags:
         return {"artist": artist.name, "ok": True, "tags": 0, "events_tagged": 0}
 
+    # The raw tags stay on the artist row; only publishable ones become genres.
+    tags = publishable(tags)
+    if not tags:
+        return {"artist": artist.name, "ok": True, "tags": 0, "events_tagged": 0}
+
     ids = _genre_ids(db, tags)
 
     # Their events: as headliner or anywhere in the line-up.
@@ -116,7 +121,86 @@ def backfill_tags(limit: int = 200, only_upcoming: bool = True) -> dict:
         db.close()
 
 
-def prune_single_artist_genres(db: Session, min_artists: int = 2) -> dict:
+# Ticketmaster's own taxonomy stays whatever its coverage — it is a real published
+# vocabulary, not a crowd tag, and some of its buckets are legitimately rare.
+protected = {
+    "Alternative", "Ballads/Romantic", "Blues", "Classical", "Community/Civic",
+    "Country", "Dance/Electronic", "Extreme", "Fairs & Festivals", "Folk",
+    "Hip-Hop/Rap", "Jazz", "Latin", "Magic & Illusion", "Metal", "Multimedia",
+    "Pop", "R&B", "Reggae", "Religious", "Rock", "Theatre", "World",
+}
+
+# Single-artist alone is too blunt at this data volume: with 150 artists tagged, real
+# sub-genres legitimately have only one act, and the first run took "Pirate Metal",
+# "Christian Rock" and "Acoustic" along with the junk. So a tag also has to look
+# nothing like a genre before we drop it. Almost every real genre name contains one
+# of these heads; "Pittsburgh", "Greatest Ever" and "Sailing" contain none.
+GENRE_WORDS = (
+    "rock", "pop", "metal", "jazz", "punk", "soul", "folk", "blues", "rap", "hop",
+    "house", "techno", "trance", "core", "wave", "indie", "electro", "reggae",
+    "country", "classic", "ambient", "funk", "disco", "gospel", "latin", "acoustic",
+    "orchestr", "symphon", "choir", "opera", "ska", "grunge", "emo", "dub", "garage",
+    "gaze", "psych", "prog", "alt", "dance", "swing", "bhangra", "desi", "punjabi",
+    "afro", "kpop", "k pop", "j pop", "salsa", "cumbia", "reggaeton", "worship",
+    "christian", "instrumental", "experimental", "industrial", "hardcore", "tempo",
+    "bass", "drill", "grime", "chanson", "flamenco", "celtic", "bluegrass", "americana",
+    # Added 2026-08-24 after reading what a dry run would actually delete. The first list
+    # was written when 150 artists were tagged; at 1,003 it was throwing away 45 real
+    # genres — Baroque, Bebop, Riot Grrrl, Honky Tonk, Jungle, Ranchera, Stoner Doom.
+    # These are HEADS, not names: "bop" covers bebop, post-bop and hard bop without
+    # anyone enumerating them, which is what makes this different from the blocklist the
+    # docstring rightly says can never keep up.
+    "bop", "wop", "tonk", "grind", "crust", "grrrl", "doom", "kore", "phonk",
+    "baroque", "quartet", "big band", "capella", "aor", "jungle", "ragga", "ranchera",
+    "regional mexican", "goth", "drone", "balearic", "batcave", "bolero", "bollywood",
+    "forro", "piseiro", "mpb", "turntabl", "volksmusik", "schlager", "entexno",
+    "estrada", "cantautor", "eurobeat", "spoken", "showtune", "musical", "theater",
+    "romantic", "crossover", "brass", "world", "chh",
+    # A second pass over what the improved filter still dropped. NOT added: "mod" — the
+    # Mod revival is a real genre, but "mod" is a substring of "modern", so it would
+    # rescue 'Modtoday' and every other junk tag containing it. One real genre lost is
+    # cheaper than a head that lets junk back in.
+    "ccm", "twee", "hauntolog", "8bit", "8 bit", "hands up",
+)
+
+# Junk that a genre word alone cannot catch, because it CONTAINS one. Checked before the
+# genre-word test and overrides it: 'Funk_Add_To_Lidarr_Batch_1' survived on "funk", and
+# it is a music-manager import queue, not a genre. Mechanical strings only — this is not
+# where names or places go, those are handled by the one-artist test.
+JUNK_MARKERS = (
+    "_", "seen live", "add to", "batch", "lidarr", "nonstreamable", "rutracker",
+)
+
+
+def looks_like_junk(name: str) -> bool:
+    """A mechanical string that a genre word would otherwise rescue."""
+    low = (name or "").lower()
+    return any(j in low for j in JUNK_MARKERS)
+
+
+def publishable(tags: list) -> list:
+    """The tags we are willing to turn into genre rows.
+
+    `artist.tags` keeps whatever Last.fm said, because that is the provenance record and
+    a taste profile reads it. `genres` is what we PUBLISH, which is a different promise —
+    so mechanical junk is filtered here, at the point of linking, rather than by editing
+    what the source told us.
+
+    Only the corpus-independent half of the filter can run here. "Claimed by one artist
+    only" needs the event links to already exist, which is why prune_single_artist_genres
+    has to run LAST, after any rebuild.
+    """
+    return [t for t in tags if t and not looks_like_junk(t)]
+
+
+def looks_like_a_genre(name: str) -> bool:
+    """Does this name contain any word a real genre almost always contains?"""
+    low = (name or "").lower()
+    return any(w in low for w in GENRE_WORDS)
+
+
+def prune_single_artist_genres(db: Session, min_artists: int = 2,
+                               dry_run: bool = True) -> dict:
     """Drop genres only ever claimed by ONE artist.
 
     This is the structural half of the filter, and it exists because a blocklist can
@@ -142,56 +226,44 @@ def prune_single_artist_genres(db: Session, min_artists: int = 2) -> dict:
         HAVING COUNT(DISTINCT a.id) < :m
     """), {"m": min_artists}).all()
 
-    # Ticketmaster's own taxonomy stays whatever its coverage — it is a real published
-    # vocabulary, not a crowd tag, and some of its buckets are legitimately rare.
-    protected = {
-        "Alternative", "Ballads/Romantic", "Blues", "Classical", "Community/Civic",
-        "Country", "Dance/Electronic", "Extreme", "Fairs & Festivals", "Folk",
-        "Hip-Hop/Rap", "Jazz", "Latin", "Magic & Illusion", "Metal", "Multimedia",
-        "Pop", "R&B", "Reggae", "Religious", "Rock", "Theatre", "World",
-    }
-    # Single-artist alone is too blunt at this data volume: with 150 artists tagged, real
-    # sub-genres legitimately have only one act, and the first run took "Pirate Metal",
-    # "Christian Rock" and "Acoustic" along with the junk. So a tag also has to look
-    # nothing like a genre before we drop it. Almost every real genre name contains one
-    # of these heads; "Pittsburgh", "Greatest Ever" and "Sailing" contain none.
-    GENRE_WORDS = (
-        "rock", "pop", "metal", "jazz", "punk", "soul", "folk", "blues", "rap", "hop",
-        "house", "techno", "trance", "core", "wave", "indie", "electro", "reggae",
-        "country", "classic", "ambient", "funk", "disco", "gospel", "latin", "acoustic",
-        "orchestr", "symphon", "choir", "opera", "ska", "grunge", "emo", "dub", "garage",
-        "gaze", "psych", "prog", "alt", "dance", "swing", "bhangra", "desi", "punjabi",
-        "afro", "kpop", "k pop", "j pop", "salsa", "cumbia", "reggaeton", "worship",
-        "christian", "instrumental", "experimental", "industrial", "hardcore", "tempo",
-        "bass", "drill", "grime", "chanson", "flamenco", "celtic", "bluegrass", "americana",
-    )
 
-    def looks_like_a_genre(name: str) -> bool:
-        low = name.lower()
-        return any(w in low for w in GENRE_WORDS)
+    def survives(name: str) -> bool:
+        if looks_like_junk(name):
+            return False              # overrides everything below
+        return name in protected or looks_like_a_genre(name)
 
-    doomed = [(r[0], r[1]) for r in rows
-              if r[1] not in protected and not looks_like_a_genre(r[1])]
+    doomed = [(r[0], r[1]) for r in rows if not survives(r[1])]
+    kept = [r[1] for r in rows if survives(r[1])]
     if not doomed:
-        return {"dropped": 0, "names": []}
+        return {"dropped": 0, "names": [], "kept_rare": kept, "dry_run": dry_run}
 
-    ids = [i for i, _ in doomed]
-    db.execute(text("DELETE FROM event_genres WHERE genre_id = ANY(:ids)"), {"ids": ids})
-    db.execute(text("DELETE FROM genres WHERE id = ANY(:ids)"), {"ids": ids})
-    return {"dropped": len(doomed), "names": [n for _, n in doomed][:25]}
+    # Dry run by default: this deletes rows, and the trade-off below means it will always
+    # take some real genres with the junk. Look at the list before committing to it.
+    if not dry_run:
+        ids = [i for i, _ in doomed]
+        db.execute(text("DELETE FROM event_genres WHERE genre_id = ANY(:ids)"), {"ids": ids})
+        db.execute(text("DELETE FROM genres WHERE id = ANY(:ids)"), {"ids": ids})
+    return {"dropped": len(doomed), "names": sorted(n for _, n in doomed),
+            "kept_rare": sorted(kept), "dry_run": dry_run}
 
 
 def reapply_cached_tags(db: Session) -> dict:
     """Re-link events to genres from tags already cached on artist rows.
 
     No network calls: `artist.tags` holds what Last.fm said, so the event links can be
-    rebuilt whenever the filter changes. Needed because tightening or loosening the
-    filter should not cost another 150 API requests.
+    rebuilt whenever the filter changes, without spending another API request per artist.
+
+    RUN ORDER MATTERS, and getting it wrong is silent. This CREATES any genre row it does
+    not hold, straight from the cached tags — so running it after
+    prune_single_artist_genres puts every pruned genre back. Measured 2026-08-24: prune
+    then rebuild took 753 genres to 788, a net increase, while looking like it had
+    worked. Rebuild first, prune LAST — the prune counts how many artists share a genre,
+    so it needs the links to exist before it can judge anything.
     """
     artists = db.query(Artist).filter(Artist.tags.isnot(None)).all()
     totals = {"artists": 0, "links": 0}
     for a in artists:
-        tags = [t for t in (a.tags or []) if t]
+        tags = publishable(a.tags or [])
         if not tags:
             continue
         ids = _genre_ids(db, tags)
