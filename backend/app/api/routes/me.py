@@ -180,10 +180,17 @@ def calendar(
 ):
     """Everything sitting on a date between `start` and `end`.
 
-    mode=mine — what this person has a stake in: saved shows, plus anything by an artist
-                or in a city they follow. Festivals only if saved.
+    mode=mine — ONLY what this person saved: bookmarked concerts and bookmarked festivals.
+                Nothing else. A calendar is a list of commitments, and an entry nobody put
+                there is not one. It used to also include anything by a followed artist or
+                in a followed city, which is how a calendar showed 22 shows against zero
+                saves — the eyebrow explained the split, but the page still read as a list
+                of plans. Those shows are not lost: Home's Recommended row is built from
+                exactly the same follow graph, which is the right place to DISCOVER a show,
+                as opposed to the place that says you are going to it.
     mode=city — what is on in their home city, whoever is playing: both the concerts and
-                the festivals held there.
+                the festivals held there. Unchanged — this scope never claimed the shows
+                were yours, it says whose city it is in the label.
     """
     uid = uuid.UUID(user_id)
     if end < start:
@@ -216,32 +223,20 @@ def calendar(
 
     prof = db.get(Profile, uid)
 
+    # Events with a followed artist anywhere on the bill, not just headlining. Needed by
+    # the tagger in BOTH modes: a support-act match used to render as a card with no
+    # reason shown, because the filter checked the whole bill and the tagger only checked
+    # headliners. Computed outside the mode branch so the city scope tags them too.
+    if followed_artists:
+        by_lineup = (db.query(EventArtist.event_id)
+                       .filter(EventArtist.artist_id.in_(followed_artists)).subquery())
+        lineup_matches = {r[0] for r in db.query(by_lineup.c.event_id).all()}
+
     q = db.query(Event).filter(Event.merged_into.is_(None), window)
     if mode == "mine":
-        by_lineup = (
-            db.query(EventArtist.event_id)
-            .filter(EventArtist.artist_id.in_(followed_artists)).subquery()
-            if followed_artists else None
-        )
-        clauses = []
-        if saved_event_ids:
-            clauses.append(Event.id.in_(saved_event_ids))
-        if followed_artists:
-            clauses.append(Event.headliner_artist_id.in_(followed_artists))
-            clauses.append(Event.id.in_(db.query(by_lineup.c.event_id)))
-            # The same set the tagger needs: an artist you follow can be on the bill
-            # without headlining, and a card with no tag gives no reason for being here.
-            lineup_matches = {r[0] for r in db.query(by_lineup.c.event_id).all()}
-        if followed_cities:
-            clauses.append(Event.venue_id.in_(
-                db.query(Venue.id).filter(Venue.city_id.in_(followed_cities))
-            ))
-        if not clauses:
-            # Nothing followed and nothing saved: an empty month is the honest answer,
-            # not the whole catalogue.
-            events = []
-        else:
-            events = q.filter(or_(*clauses)).all()
+        # Saved only. No follow-derived clauses: this scope answers "what am I going to",
+        # and the only honest source for that is what the person bookmarked.
+        events = q.filter(Event.id.in_(saved_event_ids)).all() if saved_event_ids else []
     else:
         events = (
             q.join(Venue, Venue.id == Event.venue_id)

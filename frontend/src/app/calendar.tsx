@@ -241,19 +241,13 @@ export default function CalendarScreen() {
   const festCount = items.filter((i) => i.kind === "fest").length;
   const ticketCount = payload.events.filter((e) => e.booked).length;
 
-  // Say plainly why these are here. "22 shows" over a list nobody saved reads as a list
-  // of commitments; most of them are only here because an artist is followed, and that
-  // difference is the whole question a calendar gets asked.
-  const savedCount = payload.events.filter((e) => e.saved).length + festCount;
-  const followedCount = total - savedCount;
+  // Everything in this scope is saved now, so the eyebrow no longer has to explain a
+  // split between "yours" and "an artist you follow" — it counts commitments and says how
+  // many are actually paid for, which is the next question a plan gets asked.
   const eyebrow = total === 0
-    ? "Nothing on"
+    ? "Nothing saved"
     : mode === "mine"
-      ? [
-          savedCount ? `${savedCount} saved` : null,
-          ticketCount ? `${ticketCount} with tickets` : null,
-          followedCount ? `${followedCount} from artists you follow` : null,
-        ].filter(Boolean).join(" · ")
+      ? `${total} saved · ${ticketCount ? `${ticketCount} with tickets` : "none booked yet"}`
       : `${total - festCount ? `${total - festCount} in ${homeCity ?? "your city"}` : "no local shows"}` +
         `${festCount ? ` · ${festCount} festival${festCount > 1 ? "s" : ""}` : ""}`;
 
@@ -293,7 +287,7 @@ export default function CalendarScreen() {
 
           {/* scope */}
           <View style={styles.seg}>
-            {([["mine", "star", "For you"], ["city", "location", `All in ${homeCity ?? "your city"}`]] as const)
+            {([["mine", "bookmark", "Saved"], ["city", "location", `All in ${homeCity ?? "your city"}`]] as const)
               .map(([k, icon, label]) => (
                 <Pressable
                   key={k}
@@ -540,11 +534,15 @@ function Empty({ mode, view, homeCity, monthName, jumpTarget, onJump, onSeeCity 
     <View style={styles.empty}>
       <Ionicons name="calendar-outline" size={34} color={MUTED} style={{ opacity: 0.45 }} />
       <Text style={styles.emptyT}>
-        {mode === "mine" ? `Nothing of yours ${where}` : `No shows in ${homeCity ?? "your city"} ${where}`}
+        {mode === "mine" ? `Nothing saved ${where}` : `No shows in ${homeCity ?? "your city"} ${where}`}
       </Text>
       <Text style={styles.emptyS}>
         {mode === "mine"
-          ? "Follow an artist or save a show and this fills up fast."
+          // Names the one action that fills this page. It used to say "follow an artist or
+          // save a show", which stopped being true when this scope became saved-only —
+          // following now changes Home, not here, and copy that promises otherwise sends
+          // someone off to follow ten artists and come back to the same empty month.
+          ? "Tap the bookmark on any concert or festival and it lands here."
           : "Try another month, or change your city from the home screen."}
       </Text>
       {jumpTarget ? (
