@@ -24,7 +24,7 @@ export type MusicEvent = {
   price_from_amount: number | null; price_from_currency: string | null;
   image_url: string | null;
 };
-export type ArtistOut = { name: string; is_headliner: boolean };
+export type ArtistOut = { name: string; is_headliner: boolean; image_url: string | null };
 export type OfferOut = { seller_name: string; url: string | null; is_official: boolean; is_face_value_resale: boolean };
 export type EventFact = {
   key: string;

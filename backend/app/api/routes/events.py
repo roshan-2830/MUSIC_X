@@ -170,7 +170,7 @@ def get_event(event_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     lineup = [
-        ArtistOut(name=a.name, is_headliner=ea.is_headliner)
+        ArtistOut(name=a.name, is_headliner=ea.is_headliner, image_url=a.image_url)
         for ea, a in (
             db.query(EventArtist, Artist)
             .join(Artist, EventArtist.artist_id == Artist.id)
@@ -178,6 +178,16 @@ def get_event(event_id: UUID, db: Session = Depends(get_db)):
             .order_by(EventArtist.sort_order).all()
         )
     ]
+    # Fall back to the headliner when no bill is stored. This is not a guess: the
+    # headliner is on `events` because Ticketmaster named them, and they are unarguably
+    # on the bill. Without it the Line-up section rendered on 39 of 3,692 events, because
+    # the broad sweep never wrote event_artists rows — so the honest, useful answer was
+    # sitting one column away the whole time. Support acts appear once a payload lists
+    # them; a line-up of one is a real answer, not a placeholder.
+    if not lineup and ev.headliner_artist_id:
+        head = db.get(Artist, ev.headliner_artist_id)
+        if head:
+            lineup = [ArtistOut(name=head.name, is_headliner=True, image_url=head.image_url)]
     genres = [
         name for (name,) in (
             db.query(Genre.name)

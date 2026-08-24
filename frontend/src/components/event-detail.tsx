@@ -1,9 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
+import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
 import { EventDetail, fetchEvent } from "../lib/api";
+import ArtistDetail from "./artist-detail";
 import { coverColor, flagEmoji, hashHue } from "../lib/format";
 import { useProfile } from "../lib/profile";
 import { useSaves } from "../lib/saves";
@@ -78,9 +80,16 @@ const CONF_LABEL: Record<string, string> = {
 };
 const confColor = (c?: string | null) => (c === "high" ? GREEN : c === "medium" ? "#f0d47e" : MUTED);
 
-function Avatar({ name, size = 34 }: { name: string; size?: number }) {
+function Avatar({ name, size = 34, imageUrl }: { name: string; size?: number; imageUrl?: string | null }) {
+  const box = { width: size, height: size, borderRadius: size / 2 };
+  // A real face when we hold one, initials when we do not. Never a stand-in photo: 29% of
+  // artists have no exact Deezer match, and a letter is honest where another act's face
+  // would be a claim we cannot back.
+  if (imageUrl) {
+    return <Image source={{ uri: imageUrl }} style={[styles.avatar, box]} contentFit="cover" transition={120} />;
+  }
   return (
-    <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: avatarColor(name) }]}>
+    <View style={[styles.avatar, box, { backgroundColor: avatarColor(name) }]}>
       <Text style={[styles.avatarText, { fontSize: size * 0.4 }]}>{initials(name)}</Text>
     </View>
   );
@@ -93,6 +102,9 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
   const [showWhy, setShowWhy] = useState(false);
   const [showTrust, setShowTrust] = useState(false);
   const [lineupOpen, setLineupOpen] = useState(false);
+  // The artist page opened from the line-up. Same nesting the artist page itself uses
+  // for its similar-artists strip, so tapping through feels identical wherever you are.
+  const [artistName, setArtistName] = useState<string | null>(null);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutLines, setAboutLines] = useState<number | null>(null);
   const { isSaved, toggle } = useSaves();
@@ -137,8 +149,25 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           <Pressable style={[styles.heroBtn, { right: 12 }]} onPress={onShare} hitSlop={8}>
             <Ionicons name="share-outline" size={20} color="#fff" />
           </Pressable>
+          {/* A scrim, so chips over a bright photo stay readable. Without it the genre
+              text sat directly on the artwork and vanished on pale images. */}
+          <LinearGradient
+            colors={["transparent", "rgba(11,11,15,0.35)", "rgba(11,11,15,0.92)"]}
+            style={styles.heroScrim}
+            pointerEvents="none"
+          />
           {!scheduled && (
             <View style={styles.statusBadge}><Text style={styles.statusText}>{ev.status.toUpperCase()}</Text></View>
+          )}
+          {/* Genres belong on the artwork: they say what KIND of night this is, which is
+              the first thing you want while looking at the picture — not a footnote below
+              a paragraph of prose. */}
+          {ev.genres.length > 0 && (
+            <View style={[styles.heroChips, !scheduled && { bottom: 46 }]}>
+              {ev.genres.slice(0, 3).map((g) => (
+                <View key={g} style={styles.heroChip}><Text style={styles.heroChipText}>{g}</Text></View>
+              ))}
+            </View>
           )}
         </View>
 
@@ -204,18 +233,29 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           {ev.lineup.length > 0 && (
             <>
               <Text style={styles.section}>Line-up</Text>
-              <Pressable style={styles.lineupCard} onPress={() => setLineupOpen(true)}>
+              {/* One artist means there is no list to choose from, so the card goes straight
+                  to their page. A real bill opens the full line-up first. */}
+              <Pressable
+                style={styles.lineupCard}
+                onPress={() =>
+                  ev.lineup.length > 1
+                    ? setLineupOpen(true)
+                    : setArtistName(ev.lineup[0].name)
+                }
+              >
                 <View style={styles.avStack}>
                   {ev.lineup.slice(0, 3).map((a, i) => (
                     <View key={i} style={{ marginLeft: i === 0 ? 0 : -12, zIndex: 3 - i }}>
-                      <Avatar name={a.name} />
+                      <Avatar name={a.name} imageUrl={a.image_url} />
                     </View>
                   ))}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.lineupTitle} numberOfLines={1}>{lineupTitle(ev)}</Text>
                   <Text style={styles.lineupSub}>
-                    {ev.lineup.length > 1 ? `${ev.lineup.length} artists · tap for full line-up` : "Tap for details"}
+                    {ev.lineup.length > 1
+                      ? `${ev.lineup.length} artists · tap for full line-up`
+                      : ev.lineup[0].is_headliner ? "Headliner · tap for their page" : "Tap for their page"}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={MUTED} />
@@ -242,14 +282,6 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           ) : aboutCredit(ev) ? (
             <Text style={styles.aboutSource}>ⓘ {aboutCredit(ev)}</Text>
           ) : null}
-
-          {ev.genres.length > 0 && (
-            <View style={styles.chips}>
-              {ev.genres.map((g) => (
-                <View key={g} style={styles.chip}><Text style={styles.chipText}>{g}</Text></View>
-              ))}
-            </View>
-          )}
 
           {isAbroad ? (
             <View style={styles.abroad}>
@@ -386,22 +418,37 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           <View style={styles.sheet}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Line-up</Text>
-            <Text style={styles.sheetSub}>{ev.title} · {ev.lineup.length} artist{ev.lineup.length > 1 ? "s" : ""}</Text>
+            <Text style={styles.sheetSub}>
+              {ev.title} · {ev.lineup.length} artist{ev.lineup.length > 1 ? "s" : ""} · tap an artist for their page
+            </Text>
             <ScrollView style={{ maxHeight: 400 }}>
               {ev.lineup.map((a, i) => (
-                <View key={i} style={styles.artistRow}>
-                  <Avatar name={a.name} size={40} />
+                <Pressable
+                  key={i}
+                  style={styles.artistRow}
+                  onPress={() => { setLineupOpen(false); setArtistName(a.name); }}
+                >
+                  <Avatar name={a.name} size={40} imageUrl={a.image_url} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.artistName}>{a.name}</Text>
                     <Text style={[styles.artistRole, a.is_headliner && styles.artistRoleHead]}>
                       {a.is_headliner ? "Headliner" : "Support"}
                     </Text>
                   </View>
-                </View>
+                  <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                </Pressable>
               ))}
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* The artist page, reached from the line-up. Rendered after the sheet so it stacks
+          above it, and onClose returns you to the event rather than dumping you home. */}
+      <Modal visible={!!artistName} animationType="slide" onRequestClose={() => setArtistName(null)}>
+        {artistName ? (
+          <ArtistDetail name={artistName} onClose={() => setArtistName(null)} />
+        ) : null}
       </Modal>
     </View>
   );
@@ -415,6 +462,10 @@ const styles = StyleSheet.create({
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
   hero: { width: "100%", height: 280 },
+  heroScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: 130 },
+  heroChips: { position: "absolute", left: 16, right: 16, bottom: 14, flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  heroChip: { backgroundColor: "rgba(11,11,15,0.62)", borderColor: "rgba(255,255,255,0.22)", borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
+  heroChipText: { color: "#f4f4f6", fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
   heroBtn: { position: "absolute", top: 44, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
   statusBadge: { position: "absolute", bottom: 14, left: 16, backgroundColor: "#ff6b6b", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   statusText: { color: "#fff", fontWeight: "800", fontSize: 12 },
@@ -454,9 +505,6 @@ const styles = StyleSheet.create({
   readMoreText: { color: ACCENT, fontSize: 14, fontWeight: "700" },
   aboutSource: { color: MUTED, fontSize: 11, marginTop: 8, fontStyle: "italic" },
 
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 },
-  chip: { backgroundColor: "#1b1b24", borderColor: "#26262f", borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
-  chipText: { color: "#c8c8d0", fontSize: 12, fontWeight: "600", textTransform: "capitalize" },
 
   abroad: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: "#1f1b10", borderColor: "#3a3320", borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 22 },
   abroadText: { color: "#e8d9a8", fontSize: 12.5, lineHeight: 18, flex: 1 },

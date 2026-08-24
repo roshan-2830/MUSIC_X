@@ -56,6 +56,10 @@ class RecommendedEvent(EventListItem):
 class ArtistOut(BaseModel):
     name: str
     is_headliner: bool
+    # The cached artist photo, so the line-up shows faces instead of initials. Null is
+    # normal and rendered as initials — 29% of artists have no exact Deezer match and we
+    # would rather show a letter than another act's face.
+    image_url: str | None = None
 
 
 class OfferOut(BaseModel):

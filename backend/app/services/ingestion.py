@@ -26,6 +26,40 @@ from app.services.ticketmaster import (artist_attraction, fetch_artist_events, f
                                        fetch_music_events, search_festivals, search_music_events)
 
 
+# Listings that SAY they are not a ticket to anything. Ticketmaster sells add-ons through
+# the same events endpoint as concerts, so parking permits and room upgrades arrive looking
+# like shows: 'Diljit Dosanjh | Vinyl Room Upgrade (TICKET NOT INCLUDED)', 'Parking permit
+# Weezer'. They also mint junk artists — 'Vinyl Room Access', 'Parkeerkaarten Arenapoort'.
+#
+# Only self-declaring phrases are listed here, and that restraint is the point. Measured
+# 2026-08-24: of 17 upcoming listings containing "hotel", EIGHT were real concerts at venues
+# named after hotels (Derek Ryan at Castlecourt Hotel, Foster & Allen at Celtic Ross Hotel),
+# so "hotel" as a keyword would have deleted real shows. 'VIP Package' and 'Ticket + Hotel
+# Bundle' are deliberately NOT here either: those DO include a ticket, so they are real
+# things a person can attend, merely redundant packagings of one show.
+#
+# The test is not "does this look like an add-on" but "does the seller state that no ticket
+# is included". That is a fact the listing asserts about itself, not a guess we make.
+NOT_A_TICKET = (
+    "ticket not included",
+    "no ticket included",
+    "does not include event ticket",
+    "does not include ticket",
+    "parking permit",
+)
+
+
+def is_not_attendable(title: str) -> bool:
+    """True when the listing itself says it is not a ticket to an event.
+
+    Such a listing cannot be attended, so it does not belong in a catalogue of shows —
+    and Ticketmaster pulls their pages while its own API still reports them `onsale`,
+    which is how one reached a user as a Get-tickets button leading to a 404.
+    """
+    low = (title or "").lower()
+    return any(m in low for m in NOT_A_TICKET)
+
+
 def _get_or_create(db, model, defaults=None, **filters):
     obj = db.query(model).filter_by(**filters).first()
     if obj:
@@ -188,6 +222,9 @@ def upsert_event(db: Session, e: dict, full: bool = True):
     tm_id, name = e.get("id"), e.get("name")
     if not tm_id or not name:
         return None, False
+    # Same rule as the batch path: a listing that says it is not a ticket is not a show.
+    if is_not_attendable(name):
+        return None, False
 
     emb = e.get("_embedded", {})
     dates = e.get("dates", {})
@@ -218,7 +255,7 @@ def upsert_event(db: Session, e: dict, full: bool = True):
     attractions = emb.get("attractions") or []
     headliner = None
     if attractions and attractions[0].get("name"):
-        headliner = _get_or_create(db, Artist, name=attractions[0]["name"])
+        headliner = artist_lookup.get_or_create(db, attractions[0]["name"])
 
     pr = (e.get("priceRanges") or [{}])[0]
 
@@ -278,7 +315,10 @@ def upsert_event(db: Session, e: dict, full: bool = True):
     for i, att in enumerate(attractions):
         if not att.get("name"):
             continue
-        artist = _get_or_create(db, Artist, name=att["name"])
+        # Shared find-or-create. This was _get_or_create(db, Artist, name=...), a
+        # filter_by on the exact string — the strictest match in the codebase, sitting in
+        # the path that writes line-ups. 'Weezer' and 'weezer' would have become two acts.
+        artist = artist_lookup.get_or_create(db, att["name"])
         if artist.id in seen_artists:
             continue
         seen_artists.add(artist.id)
@@ -423,6 +463,11 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
         tm_id, name = e.get("id"), e.get("name")
         if not tm_id or not name:
             continue
+        # An add-on that states it is not a ticket is not a show. Skipped here rather than
+        # filtered at read time, so it never reaches a feed, never mints an artist row, and
+        # cannot be resurrected by the nightly re-verify.
+        if is_not_attendable(name):
+            continue
         emb = e.get("_embedded", {})
         dates = e.get("dates", {})
         v = (emb.get("venues") or [{}])[0]
@@ -438,6 +483,11 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
             "lat": _num(loc.get("latitude")), "lng": _num(loc.get("longitude")),
             "venue_name": v.get("name"),
             "head_name": atts[0]["name"] if atts and atts[0].get("name") else None,
+            # The FULL bill, in Ticketmaster's own order — headliner first. This was
+            # discarded and only atts[0] was kept, which is why 3,653 of 3,692 upcoming
+            # events had no line-up at all: only upsert_event wrote one, and the broad
+            # sweep produced almost the entire catalogue. The payload always had this.
+            "bill": [a["name"] for a in atts if a.get("name")],
             "starts_at": _parse_start(dates), "timezone": dates.get("timezone"),
             "status": _map_status(dates),
             "price_amt": _price_from(pr), "price_cur": pr.get("currency"),
@@ -490,7 +540,8 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
         db.flush()
 
     # --- 4. headliner artists by name ---
-    want_artists = {p["head_name"] for p in parsed if p["head_name"]}
+    want_artists = {n for p in parsed for n in p["bill"]} | {
+        p["head_name"] for p in parsed if p["head_name"]}
     # Shared find-or-create, matching on the normalised name. This used to filter on
     # Artist.name.in_(...) — case-SENSITIVE — which is where most of the duplicate artists
     # came from: Ticketmaster billing 'headliners' inconsistently, so 'Men at Work' and
@@ -542,6 +593,31 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
 
     for eid, tmid, url in new_sources:
         db.add(EventSource(event_id=eid, source="ticketmaster", source_event_id=tmid, source_url=url))
+
+    # --- 6b. line-ups. The bill was already in every payload and was being thrown away,
+    # so the nightly deep re-verify re-fetched all 3,692 events and still left the
+    # Line-up section empty on 99% of them. Writing it here costs no extra request:
+    # reverify_all_events feeds this same function with authoritative by-id payloads.
+    #
+    # Only touched when the source actually listed a bill — an empty `attractions` means
+    # Ticketmaster published no support acts, which is not the same as us not knowing, so
+    # existing rows are left alone rather than deleted.
+    billed = [p for p in parsed if p["bill"] and p["tm_id"] in fact_ids]
+    if billed:
+        held = {
+            (ea.event_id, ea.artist_id)
+            for ea in db.query(EventArtist).filter(
+                EventArtist.event_id.in_([fact_ids[p["tm_id"]] for p in billed])).all()
+        }
+        for p in billed:
+            eid = fact_ids[p["tm_id"]]
+            for i, nm in enumerate(p["bill"]):
+                a = artist_map.get(nm)
+                if a is None or (eid, a.id) in held:
+                    continue
+                held.add((eid, a.id))
+                db.add(EventArtist(event_id=eid, artist_id=a.id,
+                                   is_headliner=(i == 0), sort_order=i))
 
     # Provenance: one bulk pass over everything we just touched. Facts the source
     # has stopped publishing are removed rather than left standing.
