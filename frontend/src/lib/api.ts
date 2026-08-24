@@ -14,6 +14,11 @@ export const API_BASE_URL = resolveBaseUrl();
 
 export type MusicEvent = {
   id: string; title: string; starts_at: string | null; timezone: string | null;
+  // The resolved headliner, so a list can be grouped or varied by ARTIST rather than by
+  // parsing the title. Ticketmaster bills one tour inconsistently ("Foo Fighters: TAKE
+  // COVER TOUR 2026" and "FOO FIGHTERS - TAKE COVER TOUR 2026" are the same run), so the
+  // id is the only reliable key. Null when the headliner is TBA.
+  headliner: string | null; headliner_artist_id: string | null;
   status: string; venue_name: string | null; city: string | null; country: string | null;
   mxs: number | null; confidence: string | null;
   price_from_amount: number | null; price_from_currency: string | null;

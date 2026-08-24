@@ -53,6 +53,10 @@ def _to_list_items(db: Session, events: list[Event]) -> list[EventListItem]:
     venues = {v.id: v for v in db.query(Venue).filter(Venue.id.in_(venue_ids)).all()} if venue_ids else {}
     city_ids = {v.city_id for v in venues.values() if v.city_id}
     cities = {c.id: c for c in db.query(City).filter(City.id.in_(city_ids)).all()} if city_ids else {}
+    # One more batched query, same reason as venues and cities: never per-event.
+    artist_ids = {e.headliner_artist_id for e in events if e.headliner_artist_id}
+    artists = ({a.id: a.name for a in db.query(Artist).filter(Artist.id.in_(artist_ids)).all()}
+               if artist_ids else {})
     out = []
     for ev in events:
         venue = venues.get(ev.venue_id) if ev.venue_id else None
@@ -60,6 +64,8 @@ def _to_list_items(db: Session, events: list[Event]) -> list[EventListItem]:
         out.append(EventListItem(
             id=ev.id, title=ev.title, starts_at=ev.starts_at, timezone=ev.timezone,
             status=ev.status,
+            headliner=artists.get(ev.headliner_artist_id) if ev.headliner_artist_id else None,
+            headliner_artist_id=ev.headliner_artist_id,
             venue_name=venue.name if venue else None,
             city=city.name if city else None,
             country=city.country if city else None,

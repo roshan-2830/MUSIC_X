@@ -9,6 +9,13 @@ from app.schemas.festival import FestivalOut
 class EventListItem(BaseModel):
     id: UUID
     title: str
+    # Who is playing, as a resolved artist rather than a substring of the title. Ticketmaster
+    # bills the same tour inconsistently — "Foo Fighters: TAKE COVER TOUR 2026" and
+    # "FOO FIGHTERS - TAKE COVER TOUR 2026" are the same six-date run — so any client that
+    # needs to group or vary a list by artist has to be given the id, not left to parse the
+    # title. Null when the headliner is TBA.
+    headliner: str | None = None
+    headliner_artist_id: UUID | None = None
     starts_at: datetime | None
     timezone: str | None
     status: str

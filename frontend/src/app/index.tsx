@@ -46,6 +46,34 @@ const COUNTRY_NAMES: Record<string, string> = {
 };
 const countryName = (cc: string | null) => (cc ? COUNTRY_NAMES[cc] ?? cc : "");
 
+/** One card per artist, for the twelve-wide shelves.
+ *
+ *  A shelf's job is breadth. Sorting purely by rating handed the "Highest rated" row to
+ *  three acts: measured 2026-08-24, the top 15 worldwide were 6 Foo Fighters dates, 4 The
+ *  Weeknd and 4 Eric Clapton — one answer printed six times, and you can only go to one of
+ *  them. Nothing is hidden: "See all" opens the unfiltered list, where the city and date
+ *  filters are the right tools for choosing between dates of one tour, and the artist page
+ *  lists their whole run.
+ *
+ *  Grouped by `headliner_artist_id`, never by title. Ticketmaster bills the same six-date
+ *  run as "Foo Fighters: TAKE COVER TOUR 2026" and "FOO FIGHTERS - TAKE COVER TOUR 2026",
+ *  so title matching would read one tour as two artists. Events with no headliner (TBA) are
+ *  each kept — we do not know them to be the same act, and assuming they are would hide
+ *  real shows. */
+function onePerArtist(list: MusicEvent[]): MusicEvent[] {
+  const seen = new Set<string>();
+  const out: MusicEvent[] = [];
+  for (const e of list) {
+    const key = e.headliner_artist_id;
+    if (key) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(e);
+  }
+  return out;
+}
+
 export default function HomeScreen() {
   const { signOut } = useAuth();
   const { profile, setHomeCity } = useProfile();
@@ -193,7 +221,7 @@ export default function HomeScreen() {
         </View>
         {sub ? <Text style={styles.sectionSub}>{sub}</Text> : null}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
-          {data.slice(0, 12).map((e) => (
+          {onePerArtist(data).slice(0, 12).map((e) => (
             <EventHCard key={e.id} event={e} onPress={() => setSelectedId(e.id)} />
           ))}
         </ScrollView>
