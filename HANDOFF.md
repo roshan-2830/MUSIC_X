@@ -204,6 +204,53 @@ The docstring now says so.
 
 ---
 
+## Open bug: Android NPE on a key press (upstream React Native)
+
+An EAS dev build on Android died with:
+
+```
+java.lang.NullPointerException
+  at com.facebook.react.ReactActivityDelegate.onKeyDown(ReactActivityDelegate.java:215)
+  at com.facebook.react.ReactActivity.onKeyDown(ReactActivity.java:101)
+  ... AsyncInputStage -> ImeInputStage.onFinishedInputEvent -> dispatchKeyEvent
+```
+
+**This is a React Native bug, not ours.** Nothing in `frontend/src` is in the stack.
+RN declares the delegate nullable and then refuses to allow it:
+
+```java
+// ReactActivity.java:85
+public @Nullable ReactDelegate getReactDelegate() { ... }
+// ReactActivityDelegate.java:215
+return Objects.requireNonNull(mReactDelegate).onKeyDown(keyCode, event);
+```
+
+`mReactDelegate` is assigned ONLY in `onCreate` (lines 148/152) and never cleared, so it
+is null only when a key event reaches the Activity before `onCreate` finished. The trace
+goes through `AsyncInputStage`, meaning the soft keyboard QUEUED a keystroke and Android
+delivered it later — to an Activity that was still starting or had just been recreated
+(dev reload, config change, or resume after being killed). The NPE is uncaught inside
+`dispatchKeyEvent`, so the process dies. `onKeyUp` and `onKeyLongPress` have the same
+flaw; all 17 delegate call sites use `requireNonNull` with no guard.
+
+**Cannot be fixed from JavaScript.** The fix is a config plugin patching `MainActivity`:
+
+```kotlin
+override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+  if (reactDelegate == null) return false   // React is not ready; do not let it throw
+  return super.onKeyDown(keyCode, event)
+}
+```
+
+Do NOT call `super` when the delegate is null — `ReactActivity.onKeyDown` is what throws.
+Returning false means "not handled", which is correct: React genuinely cannot handle it
+yet. Guard `onKeyUp` and `onKeyLongPress` the same way.
+
+Native changes need a **new EAS dev build** before they can be tested, which is the only
+real cost here. Not yet built, because the frequency is unknown — worth doing next time a
+dev build is needed anyway. `adb` is NOT installed on this machine; installing
+platform-tools would let `adb logcat` confirm whether the process actually dies.
+
 ## Gotchas — read before debugging
 
 - **Run the app. `tsc` proves nothing here.** Seven bugs shipped through a clean typecheck.
