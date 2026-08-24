@@ -1,4 +1,4 @@
-# Music X — session handoff (2026-08-24, evening)
+# Music X — session handoff (2026-08-24, end of day)
 
 Paste this whole file into a new chat to carry the context over.
 
@@ -31,6 +31,8 @@ Recent commits:
 
 | | |
 |---|---|
+| `1a49b71` | the calendar shows only what you saved |
+| `5b252bd` | this handoff |
 | `bd14d43` | artist enrichment, one artist-identity path, Deezer fan-count fix, audience counts in UI |
 | `8ebae86` | Last.fm taste source, saving festivals, the rebuilt Calendar page |
 | `4117890` | similar artists, Last.fm as a taste source, real genres |
@@ -46,13 +48,13 @@ artist enrichment (24h) — and only while the dev server is up.
 | | |
 |---|---|
 | events | 4,955 (3,668 upcoming, 3,117 scored) |
-| artists | 3,794 |
+| artists | 3,799 |
 | festivals | 418 |
 | cities / venues | 885 / 1,893 |
 | event_facts | 47,726 (the provenance moat) |
 | event_changes | 36 |
-| artist_similar | 15,446 |
-| event_genres / genres | 3,436 / 121 |
+| artist_similar | 20,985 |
+| event_genres / genres | 6,414 / 552 |
 | follows | 140 |
 | lastfm_accounts | 5 |
 | calendar_entries | 3 |
@@ -72,15 +74,15 @@ it has `backfill_images`, `backfill_bios`, `backfill_similar`, `backfill_tags` a
 (`ENRICH_INTERVAL_HOURS`, `ENRICH_LIMIT`) and `POST /admin/enrich?limit=N` (limit is
 **per stage**, not per run).
 
-Coverage of the **1,476 artists with an upcoming show** — first run, still finishing:
+Coverage of the **1,476 artists with an upcoming show**, after one full run:
 
 | field | before | now |
 |---|---|---|
+| similar | 0.4% | **98.6%** |
 | photo | 1.4% | **71.1%** |
-| similar | 0.4% | **52.4%** |
-| bio | 2.2% | 10.5% |
-| tags | 10.0% | 10.4% ← last stage, not reached yet |
+| tags | 10.0% | **68.0%** |
 | popularity | 77.3% | 81.0% |
+| bio | 2.2% | 10.6% ← the one that stayed low, see below |
 
 Design rules that must not be quietly loosened:
 
@@ -137,6 +139,25 @@ listeners, so each number names its own service.
 
 ---
 
+### The calendar shows what you saved, and nothing else
+
+`mode=mine` returned saved shows PLUS anything by a followed artist or in a followed
+city — 3 saved concerts against 153 follow-derived ones, so the page read as a list of
+156 commitments the user had made three of.
+
+The previous session met this and chose to keep the content and fix the framing ("Your
+shows" → "For you", eyebrow stating the split), reasoning that an empty tab is worse than
+a mislabelled one. **Reversed on the owner's call**, and the old reasoning does not
+survive the question a calendar actually answers: an empty calendar is not a dead tab, it
+is a true one. Nothing is lost either — Home's Recommended row is built from the same
+follow graph, which is where you DISCOVER a show as opposed to the page that says you are
+going to it.
+
+Scope label is now "Saved" with a bookmark icon; the eyebrow is the mockup's own
+`3 saved · none booked yet`; the empty state names the one action that fills the page,
+because "follow an artist or save a show" became false the moment this scope stopped
+reading follows. `mode=city` is untouched — it never claimed the shows were yours.
+
 ## Bugs I caused and fixed (both found by running it)
 
 1. **Similar-artist photos went blank.** `backfill_similar` writes the 20 names and stamps
@@ -144,7 +165,11 @@ listeners, so each number names its own service.
    was true and the stamp was today, so neither branch fired and the only code that fills
    those photos never ran. Foo Fighters: 20 names, 0 photos, no path to a photo for 30
    days. `artists.py` now also queues the photo pass when rows are fresh but photoless.
-2. **Two backends on port 8000.** An orphaned `uvicorn` from the previous day (parent PID
+2. **`lineup_matches` was computed inside the `mine` branch** of `/me/calendar`, so it
+   was always empty in city mode and a followed support act rendered as a card with no
+   reason shown — the same bug found by running the app last session, still live in the
+   other scope. Now computed for both modes.
+3. **Two backends on port 8000.** An orphaned `uvicorn` from the previous day (parent PID
    1, no `--reload`) held `127.0.0.1:8000` while `fastapi dev` held `*:8000`. macOS lets
    both bind and the **specific address wins**, so `localhost` served yesterday's code and
    hid all of today's work. If today's endpoints seem missing, check
@@ -177,24 +202,31 @@ listeners, so each number names its own service.
 
 ## What to do next
 
-**1. Bios land at ~10% while photos land at 71%.** `wikipedia.fetch_artist_bio` only
+**1. `genres` went from 121 rows to 552** in one tagging run, and crowd tags include
+artist names, venue names, place names and private notes — an unbounded set.
+`tagging.prune_single_artist_genres(db)` exists for exactly this and has NOT been run
+since the backfill. It drops genres claimed by only one artist AND not resembling a genre
+name, and `tagging.reapply_cached_tags(db)` rebuilds the event links afterwards with no
+API calls. Run the prune, then eyeball what it dropped before committing.
+
+**2. Bios land at ~10% while photos land at 71%.** `wikipedia.fetch_artist_bio` only
 accepts a page whose short description reads musical and isn't a disambiguation stub.
 That strictness is what stops the wrong namesake's biography appearing, so it was NOT
 loosened — but it is probably also rejecting artists who do have a real page. Sample 20
 of the rejects by hand before touching the filter. Nothing is stored wrongly and nothing
 is stamped, so a later run retries them for free.
 
-**2. Ticketmaster billing strings are stored as artists** — e.g. `A.R. Rahman feat. Alka
+**3. Ticketmaster billing strings are stored as artists** — e.g. `A.R. Rahman feat. Alka
 Yagnik; Udit Narayan; Sukhwinder Singh; Shankar Mahadevan; Shaan & Sehar`. Not
 duplicates, so `dedupe.py` correctly leaves them, but they look like junk in search. A
 cleanup would split on `feat.` / `;` / ` and ` and attach the real artists to the event.
 
-**3. Accented duplicates are a known gap.** `artist_lookup.key` strips punctuation but
+**4. Accented duplicates are a known gap.** `artist_lookup.key` strips punctuation but
 NOT accents, because the key must match what Postgres computes and `unaccent` is not
 installed. So `Beyoncé` and `Beyonce` would still become two rows. Every duplicate
 actually measured was case or punctuation.
 
-**4. The three missing tabs** — Passport, Trips, Bucket List — backed by ten tables no
+**5. The three missing tabs** — Passport, Trips, Bucket List — backed by ten tables no
 code touches: `passport_entries`, `saved_trips`, `trip_stops`, `travel_legs`,
 `hotel_bookings`, `bucket_list`, `reviews`, `review_likes`, `referrals`,
 `dismissed_suggestions`.
@@ -220,6 +252,14 @@ cd backend && .venv/bin/python -c "from app.services import enrichment; enrichme
 
 # find/merge duplicate artists — DRY RUN by default, prints a full plan
 cd backend && .venv/bin/python -c "from app.services import dedupe; dedupe.dedupe_artists()"
+
+# drop junk crowd-tag genres, then rebuild event links with no API calls
+cd backend && .venv/bin/python -c "
+from app.db.session import SessionLocal
+from app.services import tagging
+db=SessionLocal()
+print(tagging.prune_single_artist_genres(db)); print(tagging.reapply_cached_tags(db))
+db.commit()"
 ```
 
 Device testing needs an EAS development build (Expo Go bounces on SDK 57) and a network
