@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { CalendarEventCard, CalendarFestivalCard } from "../components/calendar-card";
+import FestivalDetailView from "../components/festival-detail";
 import EventDetailView from "../components/event-detail";
 import { CalendarEvent, Festival, getCalendar } from "../lib/api";
 import { zonedDay, zonedTime } from "../lib/format";
@@ -79,6 +80,7 @@ export default function CalendarScreen() {
   const [view, setView] = useState<"month" | "days">("month");
   const [monthKey, setMonthKey] = useState(monthKeyOf(new Date()));
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedFest, setSelectedFest] = useState<string | null>(null);
   const [payload, setPayload] = useState<{ events: CalendarEvent[]; festivals: Festival[] }>({
     events: [], festivals: [],
   });
@@ -372,7 +374,7 @@ export default function CalendarScreen() {
                 {rows.map((it) => it.kind === "event" ? (
                   <CalendarEventCard key={it.event.id} event={it.event} onPress={() => setDetailId(it.event.id)} />
                 ) : (
-                  <CalendarFestivalCard key={it.festival.id} festival={it.festival} />
+                  <CalendarFestivalCard key={it.festival.id} festival={it.festival} onPress={() => setSelectedFest(it.festival.id)} />
                 ))}
               </View>
             ))
@@ -391,6 +393,9 @@ export default function CalendarScreen() {
         {detailId ? (
           <EventDetailView id={detailId} onClose={() => { setDetailId(null); refreshSaves(); }} />
         ) : null}
+      </Modal>
+      <Modal visible={!!selectedFest} animationType="slide" onRequestClose={() => setSelectedFest(null)}>
+        {selectedFest ? <FestivalDetailView id={selectedFest} onClose={() => setSelectedFest(null)} /> : null}
       </Modal>
     </SafeAreaView>
   );

@@ -6,6 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import ArtistAbout from "./artist-about";
 import FestivalCard from "./festival-card";
+import FestivalDetailView from "./festival-detail";
 
 import {
   ArtistDetail as ArtistDetailT,
@@ -58,6 +59,7 @@ export default function ArtistDetail({
   const [followId, setFollowId] = useState<string | null>(null); // artist id if following, else null
   const [aboutOpen, setAboutOpen] = useState(false);
   const [peekArtist, setPeekArtist] = useState<string | null>(null);
+  const [peekFest, setPeekFest] = useState<string | null>(null);
   const [showAllDates, setShowAllDates] = useState(false);
 
   useEffect(() => {
@@ -240,7 +242,7 @@ export default function ArtistDetail({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.fescroll}>
               {data.festivals.map((f) => (
-                <FestivalCard key={f.id} festival={f} />
+                <FestivalCard key={f.id} festival={f} onPress={() => setPeekFest(f.id)} />
               ))}
             </ScrollView>
           </View>
@@ -300,6 +302,9 @@ export default function ArtistDetail({
       </Modal>
 
       {/* tapping a similar artist opens their page on top of this one */}
+      <Modal visible={!!peekFest} animationType="slide" onRequestClose={() => setPeekFest(null)}>
+        {peekFest ? <FestivalDetailView id={peekFest} onClose={() => setPeekFest(null)} /> : null}
+      </Modal>
       <Modal visible={!!peekArtist} animationType="slide" onRequestClose={() => setPeekArtist(null)}>
         {peekArtist ? (
           <ArtistDetail name={peekArtist} onClose={() => setPeekArtist(null)} onSelectEvent={onSelectEvent} />

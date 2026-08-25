@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import ArtistDetail from "../components/artist-detail";
 import EventDetailView from "../components/event-detail";
+import FestivalDetailView from "../components/festival-detail";
 import {
   ArtistSearchResult,
   Festival,
@@ -214,6 +215,7 @@ export default function SearchScreen() {
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
+  const [selectedFest, setSelectedFest] = useState<string | null>(null);
   const [browsing, setBrowsing] = useState(true);
 
   async function loadBrowse(which: string = feed) {
@@ -439,7 +441,7 @@ export default function SearchScreen() {
 
   function FestivalRow({ fest }: { fest: Festival }) {
     return (
-      <View style={styles.row}>
+      <Pressable style={styles.row} onPress={() => setSelectedFest(fest.id)}>
         <View style={styles.thumb}>
           {fest.image_url ? (
             <Image source={{ uri: fest.image_url }} style={styles.tileFill} contentFit="cover" transition={150} />
@@ -453,7 +455,7 @@ export default function SearchScreen() {
             {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
           </Text>
         </View>
-      </View>
+      </Pressable>
     );
   }
 
@@ -673,7 +675,7 @@ export default function SearchScreen() {
                 <>
                   <Text style={styles.groupHead}>Festivals</Text>
                   {festResults.slice(0, 8).map((fest) => (
-                    <View key={fest.id} style={styles.row}>
+                    <Pressable key={fest.id} style={styles.row} onPress={() => setSelectedFest(fest.id)}>
                       <View style={styles.thumb}>
                         {fest.image_url ? (
                           <Image source={{ uri: fest.image_url }} style={styles.tileFill} contentFit="cover" transition={150} />
@@ -687,7 +689,7 @@ export default function SearchScreen() {
                           {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
                         </Text>
                       </View>
-                    </View>
+                    </Pressable>
                   ))}
                 </>
               ) : null
@@ -717,6 +719,9 @@ export default function SearchScreen() {
 
       <Modal visible={!!selectedId} animationType="slide" onRequestClose={() => setSelectedId(null)}>
         {selectedId ? <EventDetailView id={selectedId} onClose={() => setSelectedId(null)} /> : null}
+      </Modal>
+      <Modal visible={!!selectedFest} animationType="slide" onRequestClose={() => setSelectedFest(null)}>
+        {selectedFest ? <FestivalDetailView id={selectedFest} onClose={() => setSelectedFest(null)} /> : null}
       </Modal>
       <Modal visible={!!selectedArtist} animationType="slide" onRequestClose={() => setSelectedArtist(null)}>
         {selectedArtist ? (

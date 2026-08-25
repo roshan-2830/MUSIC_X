@@ -9,6 +9,7 @@ import EventCard from "../components/event-card";
 import EventDetailView from "../components/event-detail";
 import EventHCard from "../components/event-hcard";
 import FestivalCard from "../components/festival-card";
+import FestivalDetailView from "../components/festival-detail";
 import ArtistDetail from "../components/artist-detail";
 import ArtistsRow from "../components/artists-row";
 import LastfmConnect from "../components/lastfm-connect";
@@ -89,6 +90,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedFest, setSelectedFest] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [artistName, setArtistName] = useState<string | null>(null);
   // bumped when the manage-artists screen closes, so the row re-reads the follows
@@ -347,7 +349,7 @@ export default function HomeScreen() {
                 <Text style={styles.sectionSub}>Multi-day trips worth planning around</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hscroll}>
                   {festivals.slice(0, 12).map((f) => (
-                    <FestivalCard key={f.id} festival={f} />
+                    <FestivalCard key={f.id} festival={f} onPress={() => setSelectedFest(f.id)} />
                   ))}
                 </ScrollView>
               </View>
@@ -368,6 +370,12 @@ export default function HomeScreen() {
           </View>
         )}
       />
+
+      <Modal visible={!!selectedFest} animationType="slide" onRequestClose={() => setSelectedFest(null)}>
+
+        {selectedFest ? <FestivalDetailView id={selectedFest} onClose={() => setSelectedFest(null)} /> : null}
+
+      </Modal>
 
       <Modal visible={!!selectedId} animationType="slide" onRequestClose={() => setSelectedId(null)}>
         {selectedId ? <EventDetailView id={selectedId} onClose={() => setSelectedId(null)} /> : null}

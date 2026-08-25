@@ -1,7 +1,9 @@
 import uuid
 from datetime import date
+from datetime import date as date_cls
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import nulls_last, or_
 from sqlalchemy.orm import Session
 
@@ -12,7 +14,7 @@ from app.models.city import City
 from app.models.festival import Festival
 from app.models.festival_lineup import FestivalLineup
 from app.models.follow import Follow
-from app.schemas.festival import FestivalOut
+from app.schemas.festival import FestivalArtist, FestivalDetail, FestivalOut
 from app.services.deezer import _norm
 from app.services.trust import confidence_for
 
@@ -112,3 +114,49 @@ def festivals_for_you(
                 match_count=len(names), matched=sorted(names))
         for f, names in ordered
     ]
+
+
+@router.get("/{festival_id}", response_model=FestivalDetail)
+def get_festival(festival_id: UUID, db: Session = Depends(get_db)):
+    """One festival, with its published line-up.
+
+    Registered AFTER /for-you on purpose: FastAPI matches routes in order, and a path
+    parameter this loose would otherwise swallow "/for-you" and try to parse it as a UUID.
+    """
+    f = db.get(Festival, festival_id)
+    if not f or f.merged_into is not None:
+        raise HTTPException(status_code=404, detail="Festival not found")
+
+    city = db.get(City, f.city_id) if f.city_id else None
+    out = FestivalDetail(**_to_out(f, city).model_dump())
+    out.about = f.about
+    out.lineup_complete = bool(f.lineup_complete)
+    out.last_verified = f.last_verified
+
+    # Headliners first, then the seller's own order — the same shape the concert line-up
+    # uses, so the two pages read alike.
+    rows = (
+        db.query(FestivalLineup, Artist)
+        .join(Artist, FestivalLineup.artist_id == Artist.id)
+        .filter(FestivalLineup.festival_id == f.id)
+        .order_by(FestivalLineup.day_label.asc().nullslast(),
+                  FestivalLineup.is_headliner.desc(),
+                  FestivalLineup.sort_order.asc())
+        .all()
+    )
+    out.lineup = []
+    seen_days: list = []
+    for fl, a in rows:
+        day = None
+        if fl.day_label:
+            # Written by services/festival_merge as an ISO date. Anything else predates
+            # that and is ignored rather than guessed at.
+            try:
+                day = date_cls.fromisoformat(fl.day_label)
+            except ValueError:
+                day = None
+        if day and day not in seen_days:
+            seen_days.append(day)
+        out.lineup.append(FestivalArtist(name=a.name, image_url=a.image_url, day=day))
+    out.lineup_days = sorted(seen_days)
+    return out

@@ -2,7 +2,7 @@ import time
 import uuid
 from datetime import datetime, date, timezone
 
-from sqlalchemy import func, nulls_last
+from sqlalchemy import func, nulls_last, text
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -457,6 +457,12 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
     round-trips as possible (bulk-load each table once, instead of ~6 queries per
     event). Writes only event core + city + venue + headliner + source. Returns
     (event IDs in Ticketmaster's order, the EventChange rows this pass recorded)."""
+    # Listings the festival side already holds. One query, so the per-event check below is
+    # a set lookup. Read up front because ingestion order is not guaranteed: whichever
+    # sweep runs second must defer to the festival table.
+    festival_tm_ids = {r[0] for r in db.execute(text(
+        "SELECT source_festival_id FROM festival_sources WHERE source = 'ticketmaster'")).all()}
+
     # --- 0. flatten each raw event into just the fields we need ---
     parsed = []
     for e in events:
@@ -467,6 +473,11 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
         # filtered at read time, so it never reaches a feed, never mints an artist row, and
         # cannot be resurrected by the nightly re-verify.
         if is_not_attendable(name):
+            continue
+        # And a listing the festival sweep already owns is not a concert. Without this the
+        # two sweeps both claim it and the same festival appears under Concerts as well —
+        # ARC Music Festival was four concert rows and one festival at the same time.
+        if tm_id in festival_tm_ids:
             continue
         emb = e.get("_embedded", {})
         dates = e.get("dates", {})
@@ -863,12 +874,30 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
     # 'Men At Work' arrived as two names and became two rows.
     artist_map = artist_lookup.get_or_create_many(db, want_artists) if want_artists else {}
 
+    # Festivals that other rows have been merged INTO keep their own identity. The merge
+    # set the name to what the whole group agrees on ('Reading Festival 2026', not
+    # '... - Saturday') and the dates to the full span; re-applying one ticket-type listing
+    # would undo both, every night, silently. Same ordering lesson as the genre prune:
+    # ingestion runs first and must not fight what a later pass concluded.
+    parents = {r[0] for r in db.execute(text(
+        "SELECT DISTINCT merged_into FROM festivals WHERE merged_into IS NOT NULL")).all()}
+
     # --- 4. write festivals (ids assigned up front → no flush inside the loop) ---
     today = date.today()
     ids, new_sources, touched = [], [], {}
     for p in parsed:
         cid = city_id_for(p)
-        fest = by_id.get(src_map.get(p["tm_id"])) or by_name_city.get((p["name"].lower(), cid))
+        fest = by_id.get(src_map.get(p["tm_id"]))
+        if fest is None:
+            # Same name and city, but only if it is the same EDITION. Without the date
+            # check, next year's festival lands on this year's row and the span stretches
+            # across twelve months.
+            cand = by_name_city.get((p["name"].lower(), cid))
+            if cand is not None and p["starts_on"] and cand.starts_on:
+                near = abs((p["starts_on"].date() if hasattr(p["starts_on"], "date") else p["starts_on"]) - cand.starts_on).days <= 14
+                fest = cand if near else None
+            else:
+                fest = cand
         if fest is None:
             fest = Festival(id=uuid.uuid4(), name=p["name"])
             db.add(fest)
@@ -878,12 +907,25 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
             new_sources.append((fest.id, p["tm_id"], p["url"]))
             src_map[p["tm_id"]] = fest.id
 
-        fest.name = p["name"]
+        if fest.id not in parents:
+            fest.name = p["name"]
+            # EXPAND, never overwrite. Ticketmaster sells one festival as several listings
+            # that can share a name exactly — ARC Music Festival is four, Shaky Knees six —
+            # and they all reuse this row. Assigning each listing's dates in turn left only
+            # the LAST one standing: ARC showed 7 September with no end date, when it runs
+            # the 4th to the 7th. The row has to cover every listing that is part of it.
+            lo = p["starts_on"]
+            hi = p["ends_on"] or p["starts_on"]
+            if lo is not None:
+                fest.starts_on = lo if fest.starts_on is None else min(fest.starts_on, lo)
+            if hi is not None:
+                cur = fest.ends_on or fest.starts_on
+                fest.ends_on = hi if cur is None else max(cur, hi)
+            if fest.starts_on and fest.ends_on and fest.ends_on > fest.starts_on:
+                fest.days = (fest.ends_on - fest.starts_on).days + 1
+            elif fest.days is None:
+                fest.days = p["days"]
         fest.city_id = cid
-        fest.starts_on = p["starts_on"]
-        fest.ends_on = p["ends_on"]
-        fest.days = p["days"]
-        fest.artists_count = len(p["attractions"]) or None
         fest.price_from_amount = _price_from(p["price"])
         fest.price_from_currency = p["price"].get("currency")
         fest.about = p["about"]
@@ -895,7 +937,12 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
             has_where=fest.city_id is not None,
         )
         ids.append(fest.id)
-        touched.setdefault(fest.id, []).append(p["attractions"])
+        # The day this listing covers, so a same-named day ticket still produces a
+        # day-by-day bill. Single-day listing only: a weekend pass lists the whole festival
+        # and we do not know which act plays when.
+        one_day = p["starts_on"] is not None and (p["ends_on"] is None or p["ends_on"] == p["starts_on"])
+        day = p["starts_on"].isoformat() if one_day else None
+        touched.setdefault(fest.id, []).append((p["attractions"], day))
 
     for fid, tmid, url in new_sources:
         db.add(FestivalSource(festival_id=fid, source="ticketmaster",
@@ -904,17 +951,19 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
     # --- 5. line-ups: one read for everything we touched, then add what's missing ---
     have: dict = {}
     for fl in db.query(FestivalLineup).filter(FestivalLineup.festival_id.in_(list(touched))).all():
-        have.setdefault(fl.festival_id, set()).add(fl.artist_id)
+        have.setdefault(fl.festival_id, set()).add((fl.artist_id, fl.day_label))
     for fid, lineups in touched.items():
         seen = have.setdefault(fid, set())
         order = len(seen)
-        for names in lineups:
+        for names, day in lineups:
             for i, nm in enumerate(names):
                 artist = artist_map.get(nm)
-                if not artist or artist.id in seen:
+                # Keyed by (artist, day): the same act legitimately appears once per day
+                # they play, and once more with no day from a weekend pass.
+                if not artist or (artist.id, day) in seen:
                     continue
-                seen.add(artist.id)
-                db.add(FestivalLineup(festival_id=fid, artist_id=artist.id,
+                seen.add((artist.id, day))
+                db.add(FestivalLineup(festival_id=fid, artist_id=artist.id, day_label=day,
                                       is_headliner=(i == 0 and order == 0), sort_order=order))
                 order += 1
 

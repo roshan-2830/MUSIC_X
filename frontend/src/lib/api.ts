@@ -362,6 +362,32 @@ export type Festival = {
   matched_artists?: string[] | null;  // their names
 };
 
+export type FestivalArtist = {
+  name: string;
+  image_url: string | null;
+  // The day they play, when the seller sold that day as its own listing. Null means "on
+  // the bill, day not announced" — a different claim, and shown as one.
+  day: string | null;
+};
+
+// One festival, with its published bill. Extends Festival so the card and the page can
+// never disagree about the same festival.
+export type FestivalDetail = Festival & {
+  about: string | null;
+  lineup: FestivalArtist[];
+  // Days we actually know a bill for, earliest first. Empty when never split by day.
+  lineup_days: string[];
+  lineup_complete: boolean;
+  last_verified: string | null;
+};
+
+// One festival by id, with its line-up.
+export async function getFestival(id: string): Promise<FestivalDetail> {
+  const res = await fetch(`${API_BASE_URL}/festivals/${id}`);
+  if (!res.ok) throw new Error(`Festival ${res.status}`);
+  return res.json();
+}
+
 // All upcoming festivals (open browse — everyone sees the same).
 export async function getFestivals(limit = 100): Promise<Festival[]> {
   const res = await fetch(`${API_BASE_URL}/festivals?limit=${limit}`);
