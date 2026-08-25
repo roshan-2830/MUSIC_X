@@ -86,7 +86,27 @@ def display_name(names: list, fallback: str) -> str:
         if len(cand) >= 3:
             return cand
     cand = pre.strip(" -–|:,&+")
-    return cand if len(cand) >= 3 else fallback
+    if len(cand) >= 3:
+        return cand
+
+    # No usable prefix — try the common SUFFIX. Ticketmaster puts the festival LAST in a
+    # ticket name: 'Abono General 3 días Corona Capital 2026' and 'Individual Banamex Plus
+    # Corona Capital 2026' share nothing at the front and 'Corona Capital 2026' at the back.
+    suf = names[0]
+    for n in names[1:]:
+        i = 0
+        while i < len(suf) and i < len(n) and suf[len(suf) - 1 - i] == n[len(n) - 1 - i]:
+            i += 1
+        suf = suf[len(suf) - i:] if i else ""
+    # Start at a word boundary, so 'l Corona Capital 2026' does not survive.
+    suf = suf.strip()
+    if " " in suf:
+        parts = suf.split(" ")
+        while parts and len(parts[0]) < 3:
+            parts.pop(0)
+        suf = " ".join(parts)
+    suf = suf.strip(" -–|:,&+")
+    return suf if len(suf) >= 4 else fallback
 
 
 def find_clusters() -> list[dict]:
@@ -401,4 +421,165 @@ def drop_non_festivals(dry_run: bool = True, since_hours: int = 6) -> dict:
         raise
     finally:
         db.close()
+    return out
+
+
+def promote_big_bill_events(dry_run: bool = True) -> dict:
+    """Turn concert rows with a festival-sized bill into festivals.
+
+    Needed because the festival sweep can only find what a festival KEYWORD returns, and
+    some of the biggest festivals are named nothing of the sort. Corona Capital sells
+    'Abono General 3 días Corona Capital 2026' — no festival word, not a name anyone would
+    think to hardcode — and it was sitting under Concerts with a 71-artist bill.
+
+    A long bill is evidence a name cannot give, and it costs no API request: the acts are
+    already in event_artists. Measured 2026-08-25, every upcoming event with 10+ acts was a
+    festival — Corona Capital, Louder Than Life, Aftershock, Breaking Borders, MISSION
+    BAYFEST, Rock Meets Country.
+
+    The listing's own Ticketmaster id moves across, so drop_duplicate_festival_events then
+    removes the concert row and merge_festivals folds the ticket-type variants together.
+    Run promote -> merge -> dedupe, in that order.
+    """
+    db: Session = SessionLocal()
+    out = {"promoted": 0, "skipped_saved": 0, "dry_run": dry_run}
+    try:
+        rows = db.execute(text("""
+            SELECT e.id, e.title, e.starts_at::date, v.city_id, e.image_url, e.description,
+                   COUNT(ea.artist_id) acts
+            FROM events e
+            JOIN event_artists ea ON ea.event_id = e.id
+            LEFT JOIN venues v ON v.id = e.venue_id
+            WHERE e.starts_at >= now() AND e.merged_into IS NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM event_sources es
+                JOIN festival_sources fs ON fs.source_festival_id = es.source_event_id
+                WHERE es.event_id = e.id)
+            GROUP BY e.id, e.title, e.starts_at, v.city_id, e.image_url, e.description
+            HAVING COUNT(ea.artist_id) >= :n
+        """), {"n": 10}).all()
+
+        print(f"[festivals] {len(rows)} concert rows have a festival-sized bill")
+        for eid, title, day, city_id, img, about, acts in rows:
+            saved = db.execute(text("SELECT count(*) FROM calendar_entries WHERE event_id=:e"),
+                               {"e": eid}).scalar()
+            if saved:
+                # Promoting would move it out from under the save. Left alone and reported.
+                out["skipped_saved"] += 1
+                print(f"    SKIP (saved) {title[:52]} — {acts} acts")
+                continue
+            print(f"    {acts:3} acts  {title[:60]}")
+            if dry_run:
+                continue
+            fest = Festival(name=title, city_id=city_id, starts_on=day, image_url=img,
+                            about=about, artists_count=acts)
+            db.add(fest)
+            db.flush()
+            db.execute(text("""INSERT INTO festival_lineup (id, festival_id, artist_id, is_headliner, sort_order)
+                SELECT gen_random_uuid(), :f, ea.artist_id, ea.is_headliner, ea.sort_order
+                FROM event_artists ea WHERE ea.event_id = :e"""), {"f": fest.id, "e": eid})
+            # Carry the listing's identity over, so the concert row is then recognised as a
+            # duplicate and the nightly sweep updates the festival rather than re-creating
+            # the concert.
+            db.execute(text("""INSERT INTO festival_sources (id, festival_id, source, source_festival_id, source_url)
+                SELECT gen_random_uuid(), :f, 'ticketmaster', es.source_event_id, es.source_url
+                FROM event_sources es WHERE es.event_id = :e AND es.source = 'ticketmaster'
+                ON CONFLICT (source, source_festival_id) DO NOTHING"""), {"f": fest.id, "e": eid})
+            out["promoted"] += 1
+        if dry_run:
+            db.rollback()
+            print("[festivals] DRY RUN — nothing written.")
+        else:
+            db.commit()
+            print(f"[festivals] promoted {out['promoted']} to festivals")
+    except Exception as e:
+        db.rollback()
+        print(f"[festivals] promote failed, rolled back: {type(e).__name__} {e}")
+        raise
+    finally:
+        db.close()
+    return out
+
+
+def find_bill_clusters(min_overlap: float = 0.6, min_acts: int = 5) -> list[dict]:
+    """Festivals that share a city, a date window and most of their line-up.
+
+    The name-based clustering cannot reach these. Ticketmaster sells Corona Capital as
+    'Abono General 3 días Corona Capital 2026', 'Individual Banamex Plus Corona Capital
+    2026' and four more; they share no prefix, so base-name grouping leaves six festivals
+    where there is one. Their BILLS are identical, which is a fact about the festival rather
+    than about how a ticket was named.
+
+    Requires `min_acts` on both sides: two festivals with two acts each can overlap 100% by
+    coincidence, and a small bill proves nothing — the same reason bill size is only ever
+    used as evidence FOR a festival and never against one.
+    """
+    db: Session = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT f.id, f.name, f.city_id, f.starts_on, f.ends_on,
+                   array_agg(fl.artist_id) acts
+            FROM festivals f JOIN festival_lineup fl ON fl.festival_id = f.id
+            WHERE f.merged_into IS NULL AND f.starts_on IS NOT NULL
+            GROUP BY f.id, f.name, f.city_id, f.starts_on, f.ends_on
+            HAVING count(fl.artist_id) >= :m
+        """), {"m": min_acts}).all()
+    finally:
+        db.close()
+
+    items = [{"id": r[0], "name": r[1], "city_id": r[2], "starts_on": r[3],
+              "ends_on": r[4], "acts": set(r[5])} for r in rows]
+    used, clusters = set(), []
+    for i, a in enumerate(items):
+        if a["id"] in used:
+            continue
+        group = [a]
+        for b in items[i + 1:]:
+            if b["id"] in used or b["city_id"] != a["city_id"]:
+                continue
+            if abs((b["starts_on"] - a["starts_on"]).days) > CLUSTER_GAP_DAYS:
+                continue
+            inter = len(a["acts"] & b["acts"])
+            union = len(a["acts"] | b["acts"])
+            if union and inter / union >= min_overlap:
+                group.append(b)
+        if len(group) > 1:
+            for g in group:
+                used.add(g["id"])
+            clusters.append({"key": "bill", "city_id": a["city_id"],
+                             "rows": [{"id": g["id"], "name": g["name"], "city_id": g["city_id"],
+                                       "starts_on": g["starts_on"], "ends_on": g["ends_on"],
+                                       "acts": len(g["acts"])} for g in group]})
+    return clusters
+
+
+def merge_by_bill(dry_run: bool = True) -> dict:
+    """Merge festivals that share a city, dates and most of their line-up."""
+    clusters = find_bill_clusters()
+    db: Session = SessionLocal()
+    out = {"clusters": 0, "rows_folded": 0}
+    try:
+        for c in clusters:
+            plan = _plan(c["rows"])
+            out["clusters"] += 1
+            out["rows_folded"] += len(plan["losers"])
+            print(f"\n=== {plan['name']} ({len(c['rows'])} rows -> 1, matched on the bill) ===")
+            print(f"  KEEP  {plan['survivor']['name'][:60]!r} ({plan['survivor']['acts']} acts)")
+            for lo in plan["losers"]:
+                print(f"  FOLD  {lo['name'][:60]!r} ({lo['acts']} acts)")
+            if not dry_run:
+                _apply(db, plan)
+        if dry_run:
+            db.rollback()
+            print("\n[festivals] DRY RUN — nothing written.")
+        else:
+            db.commit()
+            print("\n[festivals] committed.")
+    except Exception as e:
+        db.rollback()
+        print(f"[festivals] bill merge failed, rolled back: {type(e).__name__} {e}")
+        raise
+    finally:
+        db.close()
+    print(f"[festivals] bill-matched: {out['clusters']} clusters, {out['rows_folded']} rows folded")
     return out

@@ -30,8 +30,11 @@ def sweep_catalogue() -> dict:
     deduped = 0
     try:
         from app.services.festival_merge import (drop_duplicate_festival_events,
-                                                 merge_festivals)
+                                                 merge_by_bill, merge_festivals,
+                                                 promote_big_bill_events)
+        promote_big_bill_events(dry_run=False)
         merge_festivals(dry_run=False)
+        merge_by_bill(dry_run=False)
         deduped = drop_duplicate_festival_events(dry_run=False)["deleted"]
     except Exception as e:
         print(f"[sweep] festival reconcile error: {e}")
@@ -61,8 +64,16 @@ def refresh_catalogue(limit: int | None = None) -> dict:
     merged = {}
     try:
         from app.services.festival_merge import (drop_duplicate_festival_events,
-                                                  merge_festivals)
+                                                  drop_non_festivals, merge_by_bill,
+                                                  merge_festivals, promote_big_bill_events)
+        # Order matters and each step feeds the next: promote concert rows with a
+        # festival-sized bill, fold the ticket-type variants by name, then by BILL for the
+        # ones whose names share nothing, then drop what is not a festival, and finally give
+        # each listing one home.
+        promote_big_bill_events(dry_run=False)
         merged = merge_festivals(dry_run=False)
+        merge_by_bill(dry_run=False)
+        drop_non_festivals(dry_run=False)
         # Then give each listing one home. After the merge, so "covered by a visible
         # festival" accounts for rows that were just folded into a survivor.
         merged["deduped_concerts"] = drop_duplicate_festival_events(dry_run=False)["deleted"]

@@ -28,6 +28,7 @@ import {
   getRecommended,
   MusicEvent,
   searchArtists,
+  searchFestivals,
   searchEvents,
   searchEventsLocal,
   unfollowArtist,
@@ -276,7 +277,7 @@ export default function SearchScreen() {
   }, []);
 
   useEffect(() => {
-    getFestivals(100).then(setFestAll).catch(() => {});
+    getFestivals(300).then(setFestAll).catch(() => {});
     loadFollows();
   }, []);
 
@@ -309,9 +310,12 @@ export default function SearchScreen() {
       }
       return;
     }
-    const t = term.toLowerCase();
     setSearched(true); setBrowsing(false); setError(null);
-    setFestResults(festAll.filter((x) => x.name?.toLowerCase().includes(t) || (x.city ?? "").toLowerCase().includes(t)));
+    // Server-side now, and ranked. The old client-side filter searched only the 100
+    // festivals this screen had fetched, so a search for something we DO hold returned
+    // nothing but whatever noise happened to be in those 100 — "ade" matched "BULL
+    // BRIGADE" and "Shred Fest Adelaide" while Corona Capital was unreachable.
+    searchFestivals(term).then((l) => { if (!stale()) setFestResults(l); }).catch(() => {});
     // No artist lookup here any more: Concerts and Festivals no longer render artists, and
     // this fired a Deezer request on every keystroke to fill a list nobody sees.
     setArtists([]);

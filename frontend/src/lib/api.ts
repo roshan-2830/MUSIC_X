@@ -381,6 +381,14 @@ export type FestivalDetail = Festival & {
   last_verified: string | null;
 };
 
+// Search festivals we hold, ranked server-side. The screen used to filter the first 100
+// festivals it had fetched — of 500-odd — so four in five were unreachable.
+export async function searchFestivals(q: string, limit = 40): Promise<Festival[]> {
+  const res = await fetch(`${API_BASE_URL}/festivals/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+  if (!res.ok) throw new Error(`Festival search ${res.status}`);
+  return res.json();
+}
+
 // One festival by id, with its line-up.
 export async function getFestival(id: string): Promise<FestivalDetail> {
   const res = await fetch(`${API_BASE_URL}/festivals/${id}`);

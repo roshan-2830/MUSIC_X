@@ -788,9 +788,25 @@ FESTIVAL_WORDS = ("festival", "fest", "weekender", "all dayer", "carnival", "jam
                   "festiv", "festa", "fiesta")
 
 
+# A bill this long is not a concert. Measured 2026-08-25 over every upcoming event we
+# hold: at 12+ acts the list is Corona Capital (71), Louder Than Life (50) and Aftershock
+# (36) with no exceptions, and the 10-11 band is Breaking Borders, MISSION BAYFEST, Rock
+# Meets Country and Grand Point North — festivals every one. Ten is the honest cut.
+#
+# This is the signal the earlier attempt got backwards. "multi-day OR 3+ acts" threw out
+# both Coachella weekends, because Coachella has no announced line-up in Ticketmaster's
+# data — a SMALL bill proves nothing. A LARGE one does, and it needs no name at all, which
+# is what makes it worth having: 'Abono General 3 días Corona Capital 2026' says nothing
+# about a festival and lists 71 artists.
+BIG_BILL_ACTS = 10
+
+
 def _is_festival_listing(raw: dict, name: str) -> bool:
     low = name.lower()
     if any(w in low for w in FESTIVAL_WORDS):
+        return True
+    atts = ((raw.get("_embedded") or {}).get("attractions") or [])
+    if len(atts) >= BIG_BILL_ACTS:
         return True
     kw = (raw.get("_mx_keyword") or "")
     # Only a NAMED keyword can vouch for a listing: the generics are already covered above,

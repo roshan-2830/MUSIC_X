@@ -1,10 +1,11 @@
+import re
 import uuid
 from datetime import date
 from datetime import date as date_cls
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import nulls_last, or_
+from sqlalchemy import case, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user_id
@@ -114,6 +115,53 @@ def festivals_for_you(
                 match_count=len(names), matched=sorted(names))
         for f, names in ordered
     ]
+
+
+@router.get("/search", response_model=list[FestivalOut])
+def search_festivals_local(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(60, le=200),
+    db: Session = Depends(get_db),
+):
+    """Search festivals we hold, ranked by how well the term matches.
+
+    Server-side because the screen was filtering the first 100 festivals it had fetched —
+    of 505 — so four out of five were unreachable and a search for something we DO hold
+    could return nothing but noise.
+
+    Ranked, and the whole-word tier is the point. Searching "ADE" against a plain substring
+    matched "BULL BRIGADE | QUARTOLATO FESTIVAL" and "Shred Fest Adelaide", because
+    "brigADE" and "ADElaide" both contain it. An acronym is a word, so a whole-word hit
+    outranks a prefix, which outranks a substring, which outranks a city match. Nothing is
+    hidden — the weak matches still come, just underneath.
+    """
+    raw = q.strip()
+    safe = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    term, starts = f"%{safe}%", f"{safe}%"
+    # \m and \M are Postgres word boundaries. The term is escaped for regex separately:
+    # a festival called "Rock & Roll" must not be read as a pattern.
+    word = r"\m" + re.escape(raw) + r"\M"
+
+    rank = case(
+        (Festival.name.op("~*")(word), 0),
+        (Festival.name.ilike(starts, escape="\\"), 1),
+        (Festival.name.ilike(term, escape="\\"), 2),
+        else_=3,
+    ).label("match_rank")
+
+    rows = (
+        db.query(Festival, rank)
+        .outerjoin(City, Festival.city_id == City.id)
+        .filter(Festival.merged_into.is_(None), _upcoming(date.today()))
+        .filter(or_(Festival.name.ilike(term, escape="\\"),
+                    City.name.ilike(term, escape="\\")))
+        .order_by(rank, nulls_last(Festival.starts_on.asc()))
+        .limit(limit)
+        .all()
+    )
+    fests = [r[0] for r in rows]
+    cities = _cities_for(db, fests)
+    return [_to_out(f, cities.get(f.city_id) if f.city_id else None) for f in fests]
 
 
 @router.get("/{festival_id}", response_model=FestivalDetail)
