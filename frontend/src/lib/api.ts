@@ -389,6 +389,15 @@ export async function searchFestivals(q: string, limit = 40): Promise<Festival[]
   return res.json();
 }
 
+// Ask Ticketmaster for festivals matching this term and store them — the mirror of
+// searchEvents. Without it a festival the periodic sweep missed is unfindable however
+// precisely you type its name.
+export async function searchFestivalsLive(q: string): Promise<Festival[]> {
+  const res = await fetch(`${API_BASE_URL}/festivals/search-live?q=${encodeURIComponent(q)}`);
+  if (!res.ok) throw new Error(`Festival live search ${res.status}`);
+  return res.json();
+}
+
 // One festival by id, with its line-up.
 export async function getFestival(id: string): Promise<FestivalDetail> {
   const res = await fetch(`${API_BASE_URL}/festivals/${id}`);

@@ -29,6 +29,7 @@ import {
   MusicEvent,
   searchArtists,
   searchFestivals,
+  searchFestivalsLive,
   searchEvents,
   searchEventsLocal,
   unfollowArtist,
@@ -337,6 +338,22 @@ export default function SearchScreen() {
   // keystroke this would drain the quota in a single session of typing.
   async function runLiveSearch(term: string, seq: number) {
     if (mode === "artists") return;
+    if (mode === "festivals") {
+      // The same deal the concert side has always had: our own festivals appear instantly,
+      // then Ticketmaster is asked once for anything we have never swept. Merged by id, so
+      // a festival we already held is not listed twice.
+      try {
+        const live = await searchFestivalsLive(term);
+        if (seq !== searchSeq.current) return;
+        setFestResults((prev) => {
+          const seen = new Set(prev.map((f) => f.id));
+          return [...prev, ...live.filter((f) => !seen.has(f.id))];
+        });
+      } catch {
+        /* the local results already stand on their own */
+      }
+      return;
+    }
     try {
       const live = await searchEvents(term);
       if (seq !== searchSeq.current) return;

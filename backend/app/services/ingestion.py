@@ -1015,6 +1015,33 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
     return list(dict.fromkeys(ids))
 
 
+def festival_search_and_ingest(keyword: str, size: int = 40):
+    """Live festival search: ask Ticketmaster for this keyword and keep what is a festival.
+
+    The concert side has had this since the beginning — /events/search queries Ticketmaster
+    live so a show nobody has swept yet is still findable. Festivals had no equivalent, so
+    they were limited to whatever the periodic sweep happened to have collected, and a
+    festival the sweep missed was simply absent no matter what the user typed.
+
+    This is the honest answer to "list every festival": we cannot sweep the world, but we
+    can look when someone asks. One Ticketmaster request per search.
+
+    The same `_is_festival_listing` test as the sweep decides what counts, so a live search
+    cannot admit things the sweep would have refused — search results and swept results
+    mean the same thing.
+    """
+    raw = search_music_events(keyword, size=size)
+    fests = [e for e in raw if e.get("id") and e.get("name")
+             and _is_festival_listing(e, e["name"])]
+    if not fests:
+        return []
+    db: Session = SessionLocal()
+    try:
+        return _batch_upsert_festivals(db, fests)
+    finally:
+        db.close()
+
+
 def ingest_festivals(size: int = 100, deep: bool = False):
     """Broad festival sweep -> batched upsert. Returns the festival ids touched.
 

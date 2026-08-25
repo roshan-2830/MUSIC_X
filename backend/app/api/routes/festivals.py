@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, nulls_last, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.security import get_current_user_id
 from app.db.session import get_db
@@ -17,6 +17,7 @@ from app.models.festival_lineup import FestivalLineup
 from app.models.follow import Follow
 from app.schemas.festival import FestivalArtist, FestivalDetail, FestivalOut
 from app.services.deezer import _norm
+from app.services.ingestion import festival_search_and_ingest
 from app.services.trust import confidence_for
 
 router = APIRouter(prefix="/festivals", tags=["festivals"])
@@ -142,19 +143,31 @@ def search_festivals_local(
     # a festival called "Rock & Roll" must not be read as a pattern.
     word = r"\m" + re.escape(raw) + r"\M"
 
+    # Also matched on the BILL, the way the concert search matches its line-up. Without it,
+    # typing an artist's name found their concerts but not the festival they headline —
+    # searching "Tyler, The Creator" missed Lowlands, where he is on the bill.
+    BillArtist = aliased(Artist)
+
     rank = case(
         (Festival.name.op("~*")(word), 0),
         (Festival.name.ilike(starts, escape="\\"), 1),
         (Festival.name.ilike(term, escape="\\"), 2),
-        else_=3,
+        # An artist on the bill is a weaker reading of the query than the festival's own
+        # name, and a stronger one than the city it happens to be in.
+        (BillArtist.name.ilike(term, escape="\\"), 3),
+        else_=4,
     ).label("match_rank")
 
     rows = (
         db.query(Festival, rank)
         .outerjoin(City, Festival.city_id == City.id)
+        .outerjoin(FestivalLineup, FestivalLineup.festival_id == Festival.id)
+        .outerjoin(BillArtist, FestivalLineup.artist_id == BillArtist.id)
         .filter(Festival.merged_into.is_(None), _upcoming(date.today()))
         .filter(or_(Festival.name.ilike(term, escape="\\"),
-                    City.name.ilike(term, escape="\\")))
+                    City.name.ilike(term, escape="\\"),
+                    BillArtist.name.ilike(term, escape="\\")))
+        .distinct()
         .order_by(rank, nulls_last(Festival.starts_on.asc()))
         .limit(limit)
         .all()
@@ -162,6 +175,43 @@ def search_festivals_local(
     fests = [r[0] for r in rows]
     cities = _cities_for(db, fests)
     return [_to_out(f, cities.get(f.city_id) if f.city_id else None) for f in fests]
+
+
+@router.get("/search-live", response_model=list[FestivalOut])
+def search_festivals_live(
+    q: str = Query(..., min_length=2),
+    db: Session = Depends(get_db),
+):
+    """Ask Ticketmaster for festivals matching this keyword, store them, return them.
+
+    The mirror of /events/search, which the concert side has always had. Without it a
+    festival the periodic sweep missed was unfindable however precisely someone typed its
+    name — and the sweep can only ever reach what a festival-shaped keyword returns.
+
+    Results are collapsed by base name and city before returning. Ticketmaster sells one
+    festival as many ticket types, and the real merge runs from the nightly refresh; doing
+    it properly here would mean a full-catalogue pass on every search, so this is a
+    presentation-level collapse that writes nothing.
+    """
+    ids = festival_search_and_ingest(q)
+    if not ids:
+        return []
+    fests = (db.query(Festival)
+               .filter(Festival.id.in_(ids), Festival.merged_into.is_(None))
+               .all())
+
+    # One entry per festival, keeping the fullest bill — the same survivor rule the merge
+    # uses, so a search result and the page it opens agree about which row is the festival.
+    best: dict = {}
+    for f in fests:
+        key = (re.sub(r"\s*[-–|:].*$", "", (f.name or "").lower()).strip(), f.city_id)
+        acts = db.query(FestivalLineup).filter_by(festival_id=f.id).count()
+        if key not in best or acts > best[key][1]:
+            best[key] = (f, acts)
+    chosen = [f for f, _ in best.values()]
+    chosen.sort(key=lambda f: (f.starts_on is None, f.starts_on))
+    cities = _cities_for(db, chosen)
+    return [_to_out(f, cities.get(f.city_id) if f.city_id else None) for f in chosen]
 
 
 @router.get("/{festival_id}", response_model=FestivalDetail)
