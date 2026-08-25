@@ -24,12 +24,23 @@ def sweep_catalogue() -> dict:
         festivals = len(ingest_festivals())
     except Exception as e:
         print(f"[sweep] festival error: {e}")
+    # Give each listing one home, here too. Costs no API requests — it is one query over
+    # what we already hold — and without it a festival the concert sweep saw first sits
+    # under Concerts until tomorrow's refresh. Runs AFTER both sweeps, always.
+    deduped = 0
+    try:
+        from app.services.festival_merge import (drop_duplicate_festival_events,
+                                                 merge_festivals)
+        merge_festivals(dry_run=False)
+        deduped = drop_duplicate_festival_events(dry_run=False)["deleted"]
+    except Exception as e:
+        print(f"[sweep] festival reconcile error: {e}")
     alerts = {}
     try:
         alerts = run_alerts()          # newly announced shows by artists people follow
     except Exception as e:
         print(f"[sweep] alerts error: {e}")
-    summary = {"concerts": concerts, "festivals": festivals, "alerts": alerts}
+    summary = {"concerts": concerts, "festivals": festivals, "deduped": deduped, "alerts": alerts}
     print(f"[sweep] done — {summary}")
     return summary
 
@@ -41,7 +52,7 @@ def refresh_catalogue(limit: int | None = None) -> dict:
     result = reverify_all_events(limit=limit)
     festivals = 0
     try:
-        festivals = len(ingest_festivals())
+        festivals = len(ingest_festivals(deep=True))
     except Exception as e:
         print(f"[refresh] festival error: {e}")
     # Fold Ticketmaster's ticket-type listings back into one festival. AFTER ingestion,

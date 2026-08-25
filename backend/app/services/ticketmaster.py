@@ -69,6 +69,7 @@ def fetch_music_events(size: int = 100, months: int = 12, pages_per_window: int 
             evs = ((data.get("_embedded") or {}).get("events") or [])
             for e in evs:
                 if e.get("id"):
+                    e["_mx_keyword"] = kw
                     seen.setdefault(e["id"], e)
             total_pages = (data.get("page") or {}).get("totalPages", 1)
             if page + 1 >= total_pages or not evs:
@@ -93,7 +94,68 @@ def search_music_events(keyword: str, size: int = 20):
     return r.json().get("_embedded", {}).get("events", [])
 
 
-def search_festivals(size: int = 100, months: int = 12, pages_per_window: int = 10):
+# Festival discovery is keyword-only, and that is a limit of the source rather than a
+# choice. Measured 2026-08-25 against 200 music events: `classifications[].type` and
+# `subType` are "Undefined" on every one, `dates.spanMultipleDays` is false on every one,
+# and passing `subType=Festival` is silently ignored — it returns the whole catalogue led
+# by "Eagles Live at Sphere". Ticketmaster exposes no structural festival flag, so there is
+# nothing to filter on but the name.
+#
+# Which is why this list exists. "festival" alone found 1,587 listings and missed Amsterdam
+# Dance Event entirely — ADE has 21 events on Ticketmaster and not one of them says
+# "festival". The generic terms below are the broad net; the named ones are the festivals
+# big enough that missing them is embarrassing and whose names carry no generic word.
+#
+# This is a curated allowlist, and the difference from a blocklist matters: a blocklist has
+# to enumerate everything bad and can never keep up, while every entry here is a festival
+# somebody confirmed exists. It will always be incomplete, and adding a name is the honest
+# way to fix a specific gap. What it must never become is a guess — "ade" as a substring
+# would match Parade, Decade and Renegade, so it is sent as a keyword to Ticketmaster's own
+# search rather than matched against titles ourselves.
+FESTIVAL_KEYWORDS = (
+    # generic — the broad net, and the only terms allowed to qualify a listing on their own
+    "festival", "fest", "weekender", "all dayer", "carnival", "jamboree",
+    # Named festivals, for the ones whose LISTINGS carry no generic word — Creamfields
+    # sells "Creamfields 2026 - Parking - Weekend Camping", which says nothing about a
+    # festival. A name here vouches for a listing, so every entry must be a distinctive
+    # proper noun.
+    #
+    # Measured 2026-08-25, these were REMOVED for being common words or place names, and
+    # the damage each did is why the rule is now "distinctive or not at all":
+    #   Leeds, Reading   -> cities. "An Afternoon of Indie LEEDS", "Breakin Science ... Leeds"
+    #   Latitude         -> "Changes In Latitudes"
+    #   Boomtown         -> "Boomtown Rats", a band
+    #   Ultra            -> "54 Ultra - LIVE IN EU"
+    #   Movement, Download, Exit, Wireless, EDC -> ordinary English
+    #   ADE              -> matched the venue attraction "Ademelkweg" on 18 club nights
+    # None of them were needed: 'Reading Festival 2026' and 'Download Festival' already
+    # match the generic net. A name only earns a place here if the generic net CANNOT
+    # find it.
+    # Each of these was MEASURED (2026-08-25) by asking Ticketmaster and counting the
+    # listings it rescues — ones that name the festival but carry no generic word, so the
+    # broad net cannot reach them:
+    #   Download    30 rescued, all "Download 2027 - <ticket type>". Without it Download
+    #               Festival is absent from the app entirely — not one of its listings
+    #               says "festival".
+    #   Latitude    28, "Latitude Luxury 2027 - ...". EDC 14, "EDC Orlando".
+    #   Time Warp   19.  DGTL 1.
+    # And these were tried and REJECTED on the same measurement, because what they rescued
+    # was not the festival:
+    #   Movement 58 -> "Improvement Movement".  Ultra 17 -> "Ultra Sunn", "54 Ultra".
+    #   Boomtown 2 -> "Boomtown Rats".  Leeds 10 -> "Day Fever - Leeds" (a city).
+    #   Exit 7 -> "Last Exit", "Slow Exit".  ADE 7 -> club nights, which are concerts.
+    #   Awakenings, Sonar, Lowlands, Wireless, Sonic Temple -> 0 rescued, so no loss.
+    # A name belongs here only if the generic net cannot find the festival AND what it
+    # drags in is the festival rather than something that shares a word with it.
+    "Creamfields", "Tomorrowland", "Glastonbury", "Coachella", "Lollapalooza",
+    "Bonnaroo", "Roskilde", "Sziget", "Pukkelpop", "Pinkpop", "Wacken", "Hellfest",
+    "Dekmantel", "Primavera Sound", "Kappa Futur", "Rock Werchter", "Parklife",
+    "Download", "Latitude", "EDC", "Time Warp", "DGTL",
+)
+
+
+def search_festivals(size: int = 100, months: int = 12, pages_per_window: int = 10,
+                     deep: bool = False):
     """BROAD SWEEP for festivals — the same shape as the concert sweep, but windowed.
 
     The old version asked once and took the first 2 pages: 200 events out of the 1,667
@@ -114,16 +176,59 @@ def search_festivals(size: int = 100, months: int = 12, pages_per_window: int = 
     their own platforms, not TM. No amount of sweeping finds what the source lacks.
     """
     seen: dict = {}
+    calls = 0
+    # Tiered, because breadth costs requests and the quota is 5,000 a DAY shared with the
+    # nightly re-verify. This runs from the 3-hourly sweep AND the daily refresh — nine
+    # times a day — so asking every keyword every time came to ~7,100 requests and would
+    # have silently exhausted the quota. The two cheap generics run every time; the long
+    # tail and the named festivals run once a day, from refresh_catalogue.
+    generic = [k for k in FESTIVAL_KEYWORDS if k.islower()]
+    if not deep:
+        generic = [k for k in generic if k in ("festival", "fest")]
+    named = [k for k in FESTIVAL_KEYWORDS if not k.islower()] if deep else []
+
+    for kw in named:
+        for page in range(2):
+            params = {
+                "apikey": settings.ticketmaster_api_key,
+                "classificationName": "music",
+                "keyword": kw,
+                "startDateTime": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "sort": "date,asc",
+                "size": size,
+                "page": page,
+            }
+            try:
+                calls += 1
+                r = httpx.get(BASE, params=params, timeout=30)
+                r.raise_for_status()
+                data = r.json()
+            except Exception:
+                break
+            evs = ((data.get("_embedded") or {}).get("events") or [])
+            for e in evs:
+                if e.get("id"):
+                    # Remember WHICH keyword found this. The ingest needs it: a listing
+                    # called 'Creamfields 2026 - Parking' is a festival because we asked
+                    # for Creamfields, and nothing in its title says so.
+                    e["_mx_keyword"] = kw
+                    seen.setdefault(e["id"], e)
+            if page + 1 >= (data.get("page") or {}).get("totalPages", 1) or not evs:
+                break
+
     cursor = datetime.now(timezone.utc)
     for _ in range(months):
         window_end = cursor + timedelta(days=31)
-        for page in range(pages_per_window):
+        for kw in generic:
+          # "festival" is the one that genuinely has hundreds per month; the rest are a
+          # long tail and paging them ten deep spends requests on empty pages.
+          for page in range(pages_per_window if kw == "festival" else 3):
             if page * size >= 1000:          # Ticketmaster's hard pagination ceiling
                 break
             params = {
                 "apikey": settings.ticketmaster_api_key,
                 "classificationName": "music",
-                "keyword": "festival",
+                "keyword": kw,
                 "startDateTime": cursor.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "endDateTime": window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "sort": "date,asc",
@@ -131,6 +236,7 @@ def search_festivals(size: int = 100, months: int = 12, pages_per_window: int = 
                 "page": page,
             }
             try:
+                calls += 1
                 r = httpx.get(BASE, params=params, timeout=30)
                 r.raise_for_status()
                 data = r.json()
@@ -144,6 +250,8 @@ def search_festivals(size: int = 100, months: int = 12, pages_per_window: int = 
             if page + 1 >= total_pages or not evs:
                 break
         cursor = window_end
+    print(f"[festivals] sweep {'deep' if deep else 'light'}: {calls} Ticketmaster requests, "
+          f"{len(seen)} distinct listings")
     return list(seen.values())
 
 

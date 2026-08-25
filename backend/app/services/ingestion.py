@@ -770,6 +770,34 @@ def upsert_festival(db: Session, e: dict):
 TOURING_CITY_THRESHOLD = 3
 
 
+# What counts as a festival listing, now that the sweep asks more than one keyword.
+#
+# This used to be `"festival" not in name.lower()` — the real bottleneck, and it made the
+# whole keyword list pointless: 'Creamfields 2026 - Parking - Weekend Camping' was fetched
+# by asking for Creamfields and then thrown away for not saying "festival". Measured
+# 2026-08-25: 27 of 35 named festivals produced nothing for exactly this reason.
+#
+# A listing qualifies two ways, and both are evidence rather than a guess:
+#
+#   • its own name carries a festival word, or
+#   • we asked for that festival BY NAME and the listing says the name back. Asking for
+#     "Creamfields" and getting "Creamfields 2026 - Parking" is the seller confirming it;
+#     asking for "ADE" and getting "MEDUZA" (matched on the venue attraction Ademelkweg)
+#     is not, so that one is correctly refused.
+FESTIVAL_WORDS = ("festival", "fest", "weekender", "all dayer", "carnival", "jamboree",
+                  "festiv", "festa", "fiesta")
+
+
+def _is_festival_listing(raw: dict, name: str) -> bool:
+    low = name.lower()
+    if any(w in low for w in FESTIVAL_WORDS):
+        return True
+    kw = (raw.get("_mx_keyword") or "")
+    # Only a NAMED keyword can vouch for a listing: the generics are already covered above,
+    # and letting them vouch would admit anything the fuzzy search dragged in.
+    return bool(kw) and not kw.islower() and kw.lower() in low
+
+
 def _drop_touring_shows(parsed: list) -> list:
     """Remove listings whose identical bill turns up in 3+ different cities."""
     from collections import defaultdict
@@ -807,7 +835,7 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
     parsed = []
     for e in events:
         tm_id, name = e.get("id"), e.get("name")
-        if not tm_id or not name or "festival" not in name.lower():
+        if not tm_id or not name or not _is_festival_listing(e, name):
             continue
         emb = e.get("_embedded") or {}
         dates = e.get("dates") or {}
@@ -971,9 +999,14 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
     return list(dict.fromkeys(ids))
 
 
-def ingest_festivals(size: int = 100):
-    """Broad festival sweep -> batched upsert. Returns the festival ids touched."""
-    events = search_festivals(size=size)
+def ingest_festivals(size: int = 100, deep: bool = False):
+    """Broad festival sweep -> batched upsert. Returns the festival ids touched.
+
+    `deep` asks every keyword including the named festivals. Reserved for the daily
+    refresh: this function runs from the 3-hourly sweep too, and a deep pass nine times a
+    day would spend more than the whole Ticketmaster quota.
+    """
+    events = search_festivals(size=size, deep=deep)
     db: Session = SessionLocal()
     try:
         return _batch_upsert_festivals(db, events)

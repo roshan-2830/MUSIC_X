@@ -324,3 +324,81 @@ def drop_duplicate_festival_events(dry_run: bool = True) -> dict:
     finally:
         db.close()
     return out
+
+
+def drop_non_festivals(dry_run: bool = True, since_hours: int = 6) -> dict:
+    """Remove festival rows whose name gives no reason to call them a festival.
+
+    The same test the ingest applies, run over what is already stored. Needed because the
+    named-keyword rule was briefly too loose: 'Leeds' and 'Reading' are cities, 'Ultra' and
+    'Movement' are ordinary words, and 'Boomtown' is a band — so 'Boomtown Rats',
+    'Changes In Latitudes' and 'An Afternoon of Indie LEEDS' were all filed as festivals.
+
+    A row survives on the same evidence as at ingest: a festival word in its own name, or a
+    DISTINCTIVE named festival it says outright. Never one a user saved — that outranks any
+    classification we can make, and one is reported rather than quietly taken.
+    """
+    from app.services.ticketmaster import FESTIVAL_KEYWORDS
+    from app.services.ingestion import FESTIVAL_WORDS
+
+    named = [k.lower() for k in FESTIVAL_KEYWORDS if not k.islower()]
+    db: Session = SessionLocal()
+    out = {"checked": 0, "kept_saved": 0, "dropped": 0, "dry_run": dry_run}
+    try:
+        # Two guards, both learned the hard way:
+        #
+        #  • Never a merge SURVIVOR. The merge renames a survivor to what its group agreed
+        #    on, which strips the ticket-type suffix — 'Openair Frauenfeld 2027 | festival
+        #    ticket' becomes 'Openair Frauenfeld 2027', losing the very word this test looks
+        #    for. A name-only test cannot judge a row whose name we rewrote.
+        #  • Only rows created recently. Anything older predates the loose keyword rule this
+        #    is cleaning up after, and was already accepted under a stricter test.
+        rows = db.execute(text("""
+            SELECT f.id, f.name FROM festivals f
+            WHERE f.merged_into IS NULL
+              AND f.created_at > now() - make_interval(hours => :age)
+              AND NOT EXISTS (SELECT 1 FROM festivals c WHERE c.merged_into = f.id)
+        """), {"age": max(1, int(since_hours))}).all()
+        out["checked"] = len(rows)
+        doomed = []
+        for fid, name in rows:
+            low = (name or "").lower()
+            if any(w in low for w in FESTIVAL_WORDS) or any(k in low for k in named):
+                continue
+            doomed.append((fid, name))
+
+        saved = {r[0] for r in db.execute(text(
+            "SELECT festival_id FROM calendar_entries WHERE festival_id = ANY(:ids)"),
+            {"ids": [i for i, _ in doomed]}).all()} if doomed else set()
+        keep = [(i, n) for i, n in doomed if i in saved]
+        doomed = [(i, n) for i, n in doomed if i not in saved]
+        out["kept_saved"] = len(keep)
+
+        print(f"[festivals] {len(doomed)} rows are not festivals by name:")
+        for _i, n in doomed[:15]:
+            print(f"    {n[:66]}")
+        if len(doomed) > 15:
+            print(f"    ... and {len(doomed) - 15} more")
+        for _i, n in keep:
+            print(f"    KEEPING (a user saved it): {n[:50]}")
+
+        if not dry_run and doomed:
+            ids = [i for i, _ in doomed]
+            for tbl in ("festival_lineup", "festival_genres", "festival_offers", "festival_sources"):
+                db.execute(text(f"DELETE FROM {tbl} WHERE festival_id = ANY(:ids)"), {"ids": ids})
+            db.execute(text("UPDATE festivals SET merged_into = NULL WHERE merged_into = ANY(:ids)"), {"ids": ids})
+            db.execute(text("DELETE FROM festivals WHERE id = ANY(:ids)"), {"ids": ids})
+            db.commit()
+            out["dropped"] = len(ids)
+            print(f"[festivals] removed {len(ids)}")
+        else:
+            db.rollback()
+            if dry_run:
+                print("[festivals] DRY RUN — nothing written.")
+    except Exception as e:
+        db.rollback()
+        print(f"[festivals] failed, rolled back: {type(e).__name__} {e}")
+        raise
+    finally:
+        db.close()
+    return out
