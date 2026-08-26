@@ -47,6 +47,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
 from app.models.festival import Festival
+# The bill-size floor lives with the ingestion rules that first apply it; one
+# definition, so the promoter and the ingest test can never disagree.
+from app.services.ingestion import BIG_BILL_ACTS
 
 # Ticketmaster separates the festival from the ticket type with one of these.
 _SEP = re.compile(r"\s*(?: - | – |\s[-–|]\s|: |\|)")
@@ -424,6 +427,99 @@ def drop_non_festivals(dry_run: bool = True, since_hours: int = 6) -> dict:
     return out
 
 
+# A festival's name carries its year, the concert listing's often does not: the real thing
+# is "Corona Capital 2026" while the three concert rows are plain "Corona Capital". Matching
+# has to ignore the year or the two never meet.
+_YEAR = re.compile(r"\s*(?:19|20)\d{2}\s*$")
+
+
+def _name_key(name: str) -> str:
+    """Cluster key that survives a missing year. 'Corona Capital 2026' -> 'corona capital'."""
+    return _YEAR.sub("", _key(name)).strip()
+
+
+def _existing_festival_for(db: Session, title: str, day) -> "tuple | None":
+    """A festival we already hold that this concert row is a day OF, or None.
+
+    Deliberately NOT keyed on city. The three Corona Capital concert rows carry the right
+    venue — Autódromo Hermanos Rodríguez, the Mexico City circuit — under the wrong city,
+    Temple City, US. Keyed on city they would miss the real festival in México and promote
+    a second Corona Capital into the United States. Name plus a date the festival actually
+    covers is the stronger claim, and a festival name is distinctive enough to carry it.
+    """
+    rows = db.execute(text("""
+        SELECT f.id, f.name, f.starts_on, f.ends_on FROM festivals f
+        WHERE f.merged_into IS NULL AND f.starts_on IS NOT NULL
+          AND :day BETWEEN f.starts_on AND COALESCE(f.ends_on, f.starts_on)
+    """), {"day": day}).all()
+    want = _name_key(title)
+    for fid, name, _s, _e in rows:
+        if _name_key(name) == want:
+            return fid, name
+    return None
+
+
+# A festival's bill CHANGES from one day to the next; a residency's does not. Both of those
+# are "same title, same venue, consecutive nights", which is why the day count alone proves
+# nothing — The Weeknd plays three nights at one stadium and Chris Botti six.
+#
+# Measured 2026-08-26 over every upcoming event we hold: 132 groups are same-title,
+# same-venue and consecutive, and requiring the bill to differ across days cuts those to
+# five — Corona Capital, Rock The Country (Ocala), Rock The Country (Hamburg), Voices of
+# America Country Music Fest and Wasteland. Every one is a festival, and Corona Capital is
+# a useful control: the rule independently re-finds a festival we already hold.
+#
+# This is the signal the bill-size rule cannot see. Rock The Country fields 7-9 acts a day
+# against a BIG_BILL_ACTS floor of 10, so it sat under Concerts as four separate one-day
+# concerts — and a two-day festival shown as two one-day rows also reports the wrong dates.
+MULTIDAY_MIN_ACTS = 2
+
+
+def find_multiday_events() -> list[dict]:
+    """Concert rows that are really the days of one multi-day festival.
+
+    Returns one entry per EVENT row, not per group: each is promoted to its own festival and
+    merge_festivals then folds them into a single row with the true date range and a
+    day-by-day bill, which is the same path the ticket-type variants already take.
+    """
+    db: Session = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            WITH per_event AS (
+                SELECT e.id, e.title, e.venue_id, e.starts_at::date AS day,
+                       (SELECT string_agg(ea.artist_id::text, ',' ORDER BY ea.artist_id)
+                          FROM event_artists ea WHERE ea.event_id = e.id) AS bill,
+                       (SELECT count(*) FROM event_artists ea WHERE ea.event_id = e.id) AS acts
+                FROM events e
+                WHERE e.merged_into IS NULL AND e.starts_at >= now()
+                  AND e.venue_id IS NOT NULL
+                  AND NOT EXISTS (
+                        SELECT 1 FROM event_sources es
+                        JOIN festival_sources fs ON fs.source_festival_id = es.source_event_id
+                        WHERE es.event_id = e.id)
+            ), grouped AS (
+                SELECT title, venue_id,
+                       count(DISTINCT day) AS days,
+                       max(day) - min(day) AS span,
+                       count(DISTINCT bill) AS distinct_bills,
+                       max(acts) AS max_acts
+                FROM per_event GROUP BY title, venue_id
+            )
+            SELECT p.id, p.title, p.day, p.acts, g.days, g.distinct_bills
+            FROM per_event p
+            JOIN grouped g ON g.title = p.title AND g.venue_id IS NOT DISTINCT FROM p.venue_id
+            WHERE g.days >= 2                     -- more than one date
+              AND g.span = g.days - 1             -- and they run CONSECUTIVELY, no gaps
+              AND g.distinct_bills >= 2           -- and the line-up changes: not a residency
+              AND g.max_acts >= :min_acts
+            ORDER BY p.title, p.day
+        """), {"min_acts": MULTIDAY_MIN_ACTS}).all()
+    finally:
+        db.close()
+    return [{"id": r[0], "title": r[1], "day": r[2], "acts": r[3],
+             "group_days": r[4], "group_bills": r[5]} for r in rows]
+
+
 def promote_big_bill_events(dry_run: bool = True) -> dict:
     """Turn concert rows with a festival-sized bill into festivals.
 
@@ -442,8 +538,12 @@ def promote_big_bill_events(dry_run: bool = True) -> dict:
     Run promote -> merge -> dedupe, in that order.
     """
     db: Session = SessionLocal()
-    out = {"promoted": 0, "skipped_saved": 0, "dry_run": dry_run}
+    out = {"promoted": 0, "absorbed": 0, "skipped_saved": 0, "dry_run": dry_run}
     try:
+        # Second signal, admitted alongside the bill-size one. A festival that fields fewer
+        # than BIG_BILL_ACTS a day is invisible to the count but obvious from its SHAPE:
+        # consecutive days at one venue with a line-up that changes. See find_multiday_events.
+        multiday = {r["id"]: r for r in find_multiday_events()}
         rows = db.execute(text("""
             SELECT e.id, e.title, e.starts_at::date, v.city_id, e.image_url, e.description,
                    COUNT(ea.artist_id) acts
@@ -456,10 +556,12 @@ def promote_big_bill_events(dry_run: bool = True) -> dict:
                 JOIN festival_sources fs ON fs.source_festival_id = es.source_event_id
                 WHERE es.event_id = e.id)
             GROUP BY e.id, e.title, e.starts_at, v.city_id, e.image_url, e.description
-            HAVING COUNT(ea.artist_id) >= :n
-        """), {"n": 10}).all()
+            HAVING COUNT(ea.artist_id) >= :n OR e.id::text = ANY(:extra)
+        """), {"n": BIG_BILL_ACTS, "extra": [str(k) for k in multiday]}).all()
 
-        print(f"[festivals] {len(rows)} concert rows have a festival-sized bill")
+        big = sum(1 for r in rows if r[0] not in multiday)
+        print(f"[festivals] {big} concert rows have a festival-sized bill, "
+              f"{len(rows) - big} are days of a multi-day festival")
         for eid, title, day, city_id, img, about, acts in rows:
             saved = db.execute(text("SELECT count(*) FROM calendar_entries WHERE event_id=:e"),
                                {"e": eid}).scalar()
@@ -468,7 +570,28 @@ def promote_big_bill_events(dry_run: bool = True) -> dict:
                 out["skipped_saved"] += 1
                 print(f"    SKIP (saved) {title[:52]} — {acts} acts")
                 continue
-            print(f"    {acts:3} acts  {title[:60]}")
+            why = ("multi-day" if eid in multiday else "big bill")
+
+            # Already held as a festival — this row is one of its days, not a new festival.
+            # Carrying the listing's Ticketmaster id onto the EXISTING festival is what makes
+            # drop_duplicate_festival_events remove the concert row, so the show stops
+            # appearing under Concerts without a second festival being invented.
+            found = _existing_festival_for(db, title, day)
+            if found:
+                out["absorbed"] += 1
+                print(f"    {acts:3} acts  [{why:9}] {title[:44]} -> ABSORBED into "
+                      f"{found[1][:32]!r}")
+                if not dry_run:
+                    db.execute(text("""
+                        INSERT INTO festival_sources (id, festival_id, source, source_festival_id, source_url)
+                        SELECT gen_random_uuid(), :f, 'ticketmaster', es.source_event_id, es.source_url
+                        FROM event_sources es
+                        WHERE es.event_id = :e AND es.source = 'ticketmaster'
+                        ON CONFLICT (source, source_festival_id) DO NOTHING"""),
+                        {"f": found[0], "e": eid})
+                continue
+
+            print(f"    {acts:3} acts  [{why:9}] {title[:52]}")
             if dry_run:
                 continue
             fest = Festival(name=title, city_id=city_id, starts_on=day, image_url=img,

@@ -30,6 +30,7 @@ from app.schemas.artist import ArtistOut, BulkFollowIn, FollowArtistIn
 from app.schemas.festival import FestivalOut
 from app.schemas.event import CalendarEvent, CalendarPayload, EventListItem, RecommendedEvent
 from app.schemas.profile import ProfileOut, ProfileUpdate
+from app.services import artist_lookup
 from app.services.deezer import _norm
 from app.services.ingestion import search_and_ingest
 from app.services.scoring import score_events_by_ids

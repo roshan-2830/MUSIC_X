@@ -5,7 +5,7 @@ from datetime import date as date_cls
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, nulls_last, or_
+from sqlalchemy import case, func, nulls_last, or_
 from sqlalchemy.orm import Session, aliased
 
 from app.core.security import get_current_user_id
@@ -19,6 +19,7 @@ from app.schemas.festival import FestivalArtist, FestivalDetail, FestivalOut
 from app.services.deezer import _norm
 from app.services.ingestion import festival_search_and_ingest
 from app.services.trust import confidence_for
+from app.services import text_search as ts
 
 router = APIRouter(prefix="/festivals", tags=["festivals"])
 
@@ -137,41 +138,72 @@ def search_festivals_local(
     hidden — the weak matches still come, just underneath.
     """
     raw = q.strip()
-    safe = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    term, starts = f"%{safe}%", f"{safe}%"
-    # \m and \M are Postgres word boundaries. The term is escaped for regex separately:
-    # a festival called "Rock & Roll" must not be read as a pattern.
-    word = r"\m" + re.escape(raw) + r"\M"
+    safe = ts.escape_like(raw)
 
     # Also matched on the BILL, the way the concert search matches its line-up. Without it,
     # typing an artist's name found their concerts but not the festival they headline —
     # searching "Tyler, The Creator" missed Lowlands, where he is on the bill.
     BillArtist = aliased(Artist)
 
+    def joined(query):
+        return (
+            query
+            .outerjoin(City, Festival.city_id == City.id)
+            .outerjoin(FestivalLineup, FestivalLineup.festival_id == Festival.id)
+            .outerjoin(BillArtist, FestivalLineup.artist_id == BillArtist.id)
+            .filter(Festival.merged_into.is_(None), _upcoming(date.today()))
+        )
+
+    # Accents fold on both sides of every comparison, so the whole-word tier keeps working
+    # for a term typed without them. Folding only widens a match, so the tiers below rank
+    # exactly as they did for anyone typing ASCII.
     rank = case(
-        (Festival.name.op("~*")(word), 0),
-        (Festival.name.ilike(starts, escape="\\"), 1),
-        (Festival.name.ilike(term, escape="\\"), 2),
+        (ts.whole_word(Festival.name, raw), 0),
+        (ts.starts_with(Festival.name, safe), 1),
+        (ts.contains(Festival.name, safe), 2),
         # An artist on the bill is a weaker reading of the query than the festival's own
         # name, and a stronger one than the city it happens to be in.
-        (BillArtist.name.ilike(term, escape="\\"), 3),
+        (ts.contains(BillArtist.name, safe), 3),
         else_=4,
     ).label("match_rank")
 
+    # GROUP BY, not DISTINCT. A festival joins every artist on its bill, so it comes back
+    # once per bill row — and those rows do not all carry the same rank, which is exactly
+    # what DISTINCT preserves. min(rank) collapses them to one row at its STRONGEST reason
+    # for matching, which is also the rank it should be ranked by.
+    best = func.min(rank).label("match_rank")
     rows = (
-        db.query(Festival, rank)
-        .outerjoin(City, Festival.city_id == City.id)
-        .outerjoin(FestivalLineup, FestivalLineup.festival_id == Festival.id)
-        .outerjoin(BillArtist, FestivalLineup.artist_id == BillArtist.id)
-        .filter(Festival.merged_into.is_(None), _upcoming(date.today()))
-        .filter(or_(Festival.name.ilike(term, escape="\\"),
-                    City.name.ilike(term, escape="\\"),
-                    BillArtist.name.ilike(term, escape="\\")))
-        .distinct()
-        .order_by(rank, nulls_last(Festival.starts_on.asc()))
+        joined(db.query(Festival, best))
+        .filter(or_(ts.contains(Festival.name, safe),
+                    ts.contains(City.name, safe),
+                    ts.contains(BillArtist.name, safe)))
+        .group_by(Festival.id)
+        .order_by(best, nulls_last(Festival.starts_on.asc()))
         .limit(limit)
         .all()
     )
+
+    # Misspelling fallback, same rule as the concert search: only on an otherwise empty
+    # screen, so a search that works today is byte-for-byte unchanged. Festival names are
+    # long and easy to get wrong — "Creamfeilds" scores 0.38 against Creamfields 2026 —
+    # and the festival's own name outranks a close artist on its bill.
+    if not rows and len(raw) >= 4:
+        close = or_(ts.is_close(Festival.name, raw), ts.is_close(BillArtist.name, raw))
+        score = func.greatest(
+            func.coalesce(ts.similarity(Festival.name, raw), 0),
+            func.coalesce(ts.similarity(BillArtist.name, raw), 0),
+        ).label("sim")
+        fuzzy_rank = case((ts.is_close(Festival.name, raw), 0), else_=1)
+        best_rank, best_sim = func.min(fuzzy_rank).label("fr"), func.max(score).label("sim")
+        rows = (
+            joined(db.query(Festival, best_rank, best_sim))
+            .filter(close)
+            .group_by(Festival.id)
+            .order_by(best_rank, best_sim.desc(), nulls_last(Festival.starts_on.asc()))
+            .limit(limit)
+            .all()
+        )
+
     fests = [r[0] for r in rows]
     cities = _cities_for(db, fests)
     return [_to_out(f, cities.get(f.city_id) if f.city_id else None) for f in fests]

@@ -219,6 +219,33 @@ export async function unsaveFestival(festivalId: string): Promise<void> {
   if (!res.ok) throw new Error(`API error ${res.status}`);
 }
 
+// ---- genre-led onboarding (for people with no Last.fm account) ----
+export type GenreOption = { name: string; artist_count: number };
+export type GenreArtist = {
+  name: string;
+  image_url: string | null;
+  deezer_fans: number | null;
+  lastfm_listeners: number | null;
+  genres: string[];
+  upcoming_shows: number;
+};
+
+// Genres worth offering, most-played first. Counted over artists who have an upcoming
+// show, so picking one always leads somewhere.
+export async function getGenres(limit = 30): Promise<GenreOption[]> {
+  const res = await fetch(`${API_BASE_URL}/genres?limit=${limit}`);
+  if (!res.ok) throw new Error(`Genres ${res.status}`);
+  return res.json();
+}
+
+// Artists to follow for the genres someone picked.
+export async function getGenreArtists(names: string[], limit = 30): Promise<GenreArtist[]> {
+  const q = encodeURIComponent(names.join(","));
+  const res = await fetch(`${API_BASE_URL}/genres/artists?genres=${q}&limit=${limit}`);
+  if (!res.ok) throw new Error(`Genre artists ${res.status}`);
+  return res.json();
+}
+
 // ---- taste / followed artists ----
 // A real artist from the global (Deezer) catalogue — what the follow screen shows.
 export type ArtistSearchResult = {

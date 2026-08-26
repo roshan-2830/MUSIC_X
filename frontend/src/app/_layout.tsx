@@ -10,6 +10,7 @@ import AppTabs from '@/components/app-tabs';
 import AuthScreen from '@/components/auth-screen';
 import ConnectMusic from '@/components/connect-music';
 import FollowArtists from '@/components/follow-artists';
+import PickGenres from '@/components/pick-genres';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { ProfileProvider } from '@/lib/profile';
 import { SavesProvider } from '@/lib/saves';
@@ -32,6 +33,10 @@ function SignedInApp({ userId }: { userId: string }) {
   const [ready, setReady] = useState(false);
   const [onboarding, setOnboarding] = useState(false);
   const [skippedConnect, setSkippedConnect] = useState(false);
+  // Set when someone would rather name an artist than pick genres. Genres are the
+  // default fallback because most people cannot recall an artist on demand, but a
+  // few arrive knowing exactly who they want and must not be made to browse.
+  const [wantsSearch, setWantsSearch] = useState(false);
   const key = `${ONBOARDED_KEY}_${userId}`;
 
   useEffect(() => {
@@ -49,14 +54,17 @@ function SignedInApp({ userId }: { userId: string }) {
       setOnboarding(false);
     };
     // Connect a listening history FIRST — it is the shortest path to real
-    // recommendations. "Who do you love?" is the fallback for anyone who skips, since
-    // most people do not have a Last.fm account and must not be stuck at the door.
+    // recommendations. Anyone who skips picks genres instead and gets real artists to
+    // follow, since most people do not have a Last.fm account and must not be stuck at
+    // the door. Search stays one tap away for the few who already know who they want.
     return (
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
-        {skippedConnect ? (
+        {!skippedConnect ? (
+          <ConnectMusic onDone={finish} onSkip={() => setSkippedConnect(true)} />
+        ) : wantsSearch ? (
           <FollowArtists onDone={finish} />
         ) : (
-          <ConnectMusic onDone={finish} onSkip={() => setSkippedConnect(true)} />
+          <PickGenres onDone={finish} onSearch={() => setWantsSearch(true)} />
         )}
       </SafeAreaProvider>
     );

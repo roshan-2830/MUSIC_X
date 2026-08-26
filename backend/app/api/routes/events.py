@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, nulls_last, or_
+from sqlalchemy import case, func, nulls_last, or_
 from sqlalchemy.orm import Session, aliased
 
 from app.db.session import get_db
@@ -21,6 +21,7 @@ from app.services.trust import confidence_for
 from app.schemas.event import FactOut, MissingFactOut, EventListItem, EventDetail, ArtistOut, OfferOut
 from app.services.ingestion import search_and_ingest
 from app.services.scoring import score_events_by_ids
+from app.services import text_search as ts
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -133,17 +134,30 @@ def search_local(
     """Search events ALREADY in our database — INSTANT, no live Ticketmaster call.
     Matches by event title, artist (headliner or line-up), or city. The app shows these
     immediately, then supplements with a live search for anything not yet stored."""
-    # Escape the LIKE wildcards, or a search for "50%" matches the entire catalogue.
     raw = q.strip()
-    safe = raw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    term = f"%{safe}%"
-    starts = f"{safe}%"
+    # Escape the LIKE wildcards, or a search for "50%" matches the entire catalogue.
+    safe = ts.escape_like(raw)
     cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     upcoming = (Event.starts_at >= cutoff) | (Event.starts_at.is_(None))
 
     # One query: match title, city, headliner name, OR any line-up artist name.
     LineupArtist = aliased(Artist)
 
+    def joined(query):
+        return (
+            query
+            .outerjoin(Venue, Event.venue_id == Venue.id)
+            .outerjoin(City, Venue.city_id == City.id)
+            .outerjoin(Artist, Event.headliner_artist_id == Artist.id)
+            .outerjoin(EventArtist, EventArtist.event_id == Event.id)
+            .outerjoin(LineupArtist, EventArtist.artist_id == LineupArtist.id)
+            .filter(Event.merged_into.is_(None), upcoming)
+        )
+
+    # Every comparison folds accents on both sides, so "gulsen" finds Gülşen and "joao"
+    # finds João Gomes. Folding only ever widens a match — it cannot drop a row the plain
+    # comparison found — so the ranking below is unchanged for anyone typing ASCII.
+    #
     # Rank by WHERE the term matched, then by date inside each band. Date alone was the
     # wrong order for a search box: typing "corona" put Corona Capital SIXTH, behind a
     # gospel tour in Corona, California and a mariachi act called Banda Corona Del Rey,
@@ -152,34 +166,61 @@ def search_local(
     # contains it, then the artists on the bill, and a city match comes last because it is
     # the loosest reading of what you meant.
     rank = case(
-        (Event.title.ilike(starts, escape="\\"), 0),
-        (Event.title.ilike(term, escape="\\"), 1),
-        (or_(Artist.name.ilike(term, escape="\\"),
-             LineupArtist.name.ilike(term, escape="\\")), 2),
+        (ts.starts_with(Event.title, safe), 0),
+        (ts.contains(Event.title, safe), 1),
+        (or_(ts.contains(Artist.name, safe),
+             ts.contains(LineupArtist.name, safe)), 2),
         else_=3,
     ).label("match_rank")
 
+    # GROUP BY, not DISTINCT: an event joins every artist on its bill, so it returns once
+    # per bill row, and those rows carry different ranks — which DISTINCT keeps as separate
+    # results. min(rank) collapses them to one row at its strongest reason for matching.
+    best = func.min(rank).label("match_rank")
     rows = (
-        db.query(Event, rank)
-        .outerjoin(Venue, Event.venue_id == Venue.id)
-        .outerjoin(City, Venue.city_id == City.id)
-        .outerjoin(Artist, Event.headliner_artist_id == Artist.id)
-        .outerjoin(EventArtist, EventArtist.event_id == Event.id)
-        .outerjoin(LineupArtist, EventArtist.artist_id == LineupArtist.id)
-        .filter(Event.merged_into.is_(None), upcoming)
+        joined(db.query(Event, best))
         .filter(
             or_(
-                Event.title.ilike(term, escape="\\"),
-                City.name.ilike(term, escape="\\"),
-                Artist.name.ilike(term, escape="\\"),
-                LineupArtist.name.ilike(term, escape="\\"),
+                ts.contains(Event.title, safe),
+                ts.contains(City.name, safe),
+                ts.contains(Artist.name, safe),
+                ts.contains(LineupArtist.name, safe),
             )
         )
-        .distinct()
-        .order_by(rank, nulls_last(Event.starts_at.asc()))
+        .group_by(Event.id)
+        .order_by(best, nulls_last(Event.starts_at.asc()))
         .limit(limit)
         .all()
     )
+
+    # Nothing matched, so the term may be misspelled. This tier runs ONLY here, on a screen
+    # that would otherwise read "No results" — a search that works today is untouched, and
+    # a wrong guess costs nothing where there was nothing.
+    #
+    # Scored against the ARTIST name, never the title: measured on this catalogue, a short
+    # clean name puts the right answer first ("Metalica" -> Metallica, 0.73) while the same
+    # call against a long title ranked "Scene Queen: METALICIOUS" above it.
+    if not rows and len(raw) >= 4:
+        close = or_(ts.is_close(Artist.name, raw), ts.is_close(LineupArtist.name, raw))
+        score = func.greatest(
+            func.coalesce(ts.similarity(Artist.name, raw), 0),
+            func.coalesce(ts.similarity(LineupArtist.name, raw), 0),
+        ).label("sim")
+        # Headliner before bill, the same order the strict tier uses. Without it "Foo
+        # Figthers" led with Rock in Rio — they ARE on that bill, and a bill match scores
+        # exactly as high as a headline match, so the tie fell to whichever was sooner.
+        # Someone typing a band's name wants that band's own show first.
+        fuzzy_rank = case((ts.is_close(Artist.name, raw), 0), else_=1)
+        best_rank, best_sim = func.min(fuzzy_rank).label("fr"), func.max(score).label("sim")
+        rows = (
+            joined(db.query(Event, best_rank, best_sim))
+            .filter(close)
+            .group_by(Event.id)
+            .order_by(best_rank, best_sim.desc(), nulls_last(Event.starts_at.asc()))
+            .limit(limit)
+            .all()
+        )
+
     return _to_list_items(db, [r[0] for r in rows])
 
 
