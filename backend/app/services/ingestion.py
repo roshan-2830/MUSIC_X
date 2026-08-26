@@ -10,6 +10,7 @@ from app.models.city import City
 from app.models.venue import Venue
 from app.models.artist import Artist
 from app.services import artist_lookup
+from app.services import venue_lookup
 from app.models.genre import Genre
 from app.models.event import Event
 from app.models.event_artist import EventArtist
@@ -260,11 +261,12 @@ def upsert_event(db: Session, e: dict, full: bool = True):
                           "lng": _geo(loc)[1]},
             )
         if v.get("name"):
-            venue = _get_or_create(
-                db, Venue, name=v["name"],
-                city_id=(city_obj.id if city_obj else None),
-                defaults={"lat": _geo(loc)[0],
-                          "lng": _geo(loc)[1]},
+            # Same normalised match as the batch path — two ingest routes that disagreed
+            # about what counts as the same venue would just recreate the duplicates.
+            lat, lng = _geo(loc)
+            venue = venue_lookup.get_or_create(
+                db, v["name"], city_id=(city_obj.id if city_obj else None),
+                lat=lat, lng=lng,
             )
 
     attractions = emb.get("attractions") or []
@@ -552,18 +554,14 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
         c = city_map.get((p["city_name"], p["country"]))
         return c.id if c else None
 
-    # --- 3. venues: keyed by (name, city_id) ---
-    want_venues = {(p["venue_name"], city_id_for(p)): p for p in parsed if p["venue_name"]}
-    venue_map = {}
-    if want_venues:
-        for v in db.query(Venue).filter(Venue.name.in_([n for n, _ in want_venues])).all():
-            venue_map[(v.name, v.city_id)] = v
-        for (vn, cid), p in want_venues.items():
-            if (vn, cid) not in venue_map:
-                v = Venue(name=vn, city_id=cid, lat=p["lat"], lng=p["lng"])
-                db.add(v)
-                venue_map[(vn, cid)] = v
-        db.flush()
+    # --- 3. venues: matched on the NORMALISED name within the city ---
+    # This used to filter on Venue.name.in_(...) — the exact string — which is where the
+    # duplicate venues came from: Ticketmaster sends the same arena as 'Toyota Center' and
+    # 'Toyota Center - TX', so one building became two rows and its shows appeared twice.
+    # Same fault, same fix, as the artists a few lines below.
+    want_venues = {(p["venue_name"], city_id_for(p)): {"lat": p["lat"], "lng": p["lng"]}
+                   for p in parsed if p["venue_name"]}
+    venue_map = venue_lookup.resolve_many(db, want_venues) if want_venues else {}
 
     # --- 4. headliner artists by name ---
     want_artists = {n for p in parsed for n in p["bill"]} | {
