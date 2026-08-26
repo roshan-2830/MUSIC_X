@@ -118,11 +118,55 @@ def _by_booking(db: Session) -> list:
     return out
 
 
+def _by_minute(db: Session) -> list:
+    """RULE 3 — same city, same headliner at the same MINUTE, and the names share a word.
+
+    Stronger than Rule 2 and it needs no coordinate at all. Rule 2 asks for a shared DATE
+    plus 200 m of proximity; a shared MINUTE is a far harder claim on its own, because one
+    act cannot begin two shows in one city at one minute. So the location can be unknown, or
+    disagree by kilometres, and the conclusion still holds.
+
+    That last part is what earns it a place: every pair it finds is 0.4 to 3.2 km apart on
+    paper, so Rule 2 rejected all four — 'The Vogue' and 'Vogue Theatre - IN' in
+    Indianapolis, 'HQ' and 'HQ Denver', 'Paramount Theatre' and 'Paramount Theatre-Iowa'
+    (a suffix the name key does not strip, because it lists two-letter codes, not state
+    names). The disagreeing coordinates were the duplication, not evidence against it.
+
+    The shared word is still required, for the same reason as Rule 2: a headliner can be an
+    artefact row minted from a billing string, and two unrelated shows can hang off one.
+    """
+    rows = db.execute(text("""
+        SELECT DISTINCT va.id AS a_id, vb.id AS b_id
+        FROM events ea
+        JOIN events eb ON eb.headliner_artist_id = ea.headliner_artist_id
+                      AND eb.starts_at = ea.starts_at
+                      AND eb.venue_id <> ea.venue_id
+        JOIN venues va ON va.id = ea.venue_id
+        JOIN venues vb ON vb.id = eb.venue_id AND vb.city_id = va.city_id AND va.id < vb.id
+        WHERE ea.merged_into IS NULL AND eb.merged_into IS NULL AND ea.starts_at >= now()
+    """)).all()
+    if not rows:
+        return []
+    ids = {i for pair in rows for i in pair}
+    detail = {r["id"]: dict(r) for r in db.execute(text("""
+        SELECT v.id, v.name, v.city_id, v.lat, v.lng, v.capacity,
+               (SELECT count(*) FROM events e WHERE e.venue_id = v.id) AS evs
+        FROM venues v WHERE v.id = ANY(:ids)
+    """), {"ids": list(ids)}).mappings().all()}
+
+    out = []
+    for a_id, b_id in rows:
+        a, b = detail[a_id], detail[b_id]
+        if _tokens(a["name"]) & _tokens(b["name"]):
+            out.append({"why": "same act, same minute", "rows": [a, b]})
+    return out
+
+
 def find_duplicates() -> list:
     """Groups of venue rows that are one venue. Rules are unioned, then overlaps folded."""
     db: Session = SessionLocal()
     try:
-        groups = _by_name(db) + _by_booking(db)
+        groups = _by_name(db) + _by_booking(db) + _by_minute(db)
     finally:
         db.close()
 
@@ -152,7 +196,14 @@ def _survivor(rows: list) -> dict:
     # The trailing state code is Ticketmaster's artefact, not part of the name, so on a tie
     # 'Toyota Center' wins over 'Toyota Center - TX' rather than losing on string length.
     def artefact(n):
-        return bool(re.search(r"\s*[-–]\s*(?:redirect|[a-z]{2})$", (n or "").lower()))
+        low = (n or "").lower()
+        # Ticketmaster disambiguates with a hyphen and NO spaces around it — 'Paramount
+        # Theatre-Iowa', 'The Eastern-GA', 'Palace Theatre-NY' — whereas a real name spaces
+        # its dashes ('Co-op Live' keeps its hyphen mid-name, not trailing). Matching only
+        # two-letter codes kept 'Paramount Theatre-Iowa' as the surviving name over the
+        # actual 'Paramount Theatre'.
+        return bool(re.search(r"\s*[-–]\s*(?:redirect|[a-z]{2})$", low)
+                    or re.search(r"\S[-–]\w+$", low))
     return max(rows, key=lambda r: (r["evs"], r["lat"] is not None,
                                     not artefact(r["name"]), len(r["name"] or "")))
 

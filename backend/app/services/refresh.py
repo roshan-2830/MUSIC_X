@@ -45,6 +45,10 @@ def sweep_catalogue() -> dict:
         from app.services.venue_repair import recover_missing_coords
         merge_venues(dry_run=False)
         recover_missing_coords(dry_run=False)
+        # Ticket types last: merging venues first can bring two variants of one show onto
+        # the same venue_id, and only then do they group.
+        from app.services.event_merge import merge_ticket_variants
+        merge_ticket_variants(dry_run=False)
     except Exception as e:
         print(f"[sweep] festival reconcile error: {e}")
     alerts = {}
@@ -90,6 +94,8 @@ def refresh_catalogue(limit: int | None = None) -> dict:
         from app.services.venue_repair import recover_missing_coords
         merged["venues_merged"] = merge_venues(dry_run=False)["rows_merged"]
         merged["venues_located"] = recover_missing_coords(dry_run=False)["recovered"]
+        from app.services.event_merge import merge_ticket_variants
+        merged["ticket_variants"] = merge_ticket_variants(dry_run=False)["rows_merged"]
     except Exception as e:
         print(f"[refresh] festival merge error: {e}")
     alerts = {}
