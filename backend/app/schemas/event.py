@@ -91,6 +91,14 @@ class MissingFactOut(BaseModel):
 
 
 class EventDetail(EventListItem):
+    # Where the venue is, for the map. On the DETAIL only, never the list: a browse
+    # response carries 60 of these and no list screen draws a map.
+    #
+    # Null when Ticketmaster gave us no coordinates — 36 of 2,024 venues. The screen then
+    # renders no map at all rather than a plausible-looking one centred on the city, which
+    # would be a guess dressed as a fact.
+    venue_lat: float | None = None
+    venue_lng: float | None = None
     description: str | None = None
     mxs_breakdown: dict | None = None
     last_verified: date | None = None

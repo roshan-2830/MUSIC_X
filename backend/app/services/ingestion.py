@@ -116,6 +116,21 @@ def _num(x):
     except (TypeError, ValueError):
         return None
 
+def _geo(loc: dict) -> tuple:
+    """(lat, lng) from a Ticketmaster location, with 0,0 rejected as the non-answer it is.
+
+    0,0 is a point in the Atlantic off West Africa. No venue is there; Ticketmaster sends it
+    as a placeholder when it does not know, and stored as a number it reads as certainty —
+    8 venues carried it, and the event page would have drawn a map of open ocean.
+
+    NOT folded into _num: a price of 0 is a real price, and a free show is not a missing one.
+    """
+    lat, lng = _num(loc.get("latitude")), _num(loc.get("longitude"))
+    if lat == 0 and lng == 0:
+        return None, None
+    return lat, lng
+
+
 def _pick_image(images):
     """Pick the best artwork URL from a Ticketmaster images array (prefer wide 16:9)."""
     best = None
@@ -241,15 +256,15 @@ def upsert_event(db: Session, e: dict, full: bool = True):
             city_obj = _get_or_create(
                 db, City, name=cname, country=ccode[:2],
                 defaults={"timezone": v.get("timezone"),
-                          "lat": _num(loc.get("latitude")),
-                          "lng": _num(loc.get("longitude"))},
+                          "lat": _geo(loc)[0],
+                          "lng": _geo(loc)[1]},
             )
         if v.get("name"):
             venue = _get_or_create(
                 db, Venue, name=v["name"],
                 city_id=(city_obj.id if city_obj else None),
-                defaults={"lat": _num(loc.get("latitude")),
-                          "lng": _num(loc.get("longitude"))},
+                defaults={"lat": _geo(loc)[0],
+                          "lng": _geo(loc)[1]},
             )
 
     attractions = emb.get("attractions") or []
@@ -491,7 +506,7 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
             "city_name": (v.get("city") or {}).get("name"),
             "country": ccode[:2] if ccode else None,
             "tz": v.get("timezone"),
-            "lat": _num(loc.get("latitude")), "lng": _num(loc.get("longitude")),
+            "lat": _geo(loc)[0], "lng": _geo(loc)[1],
             "venue_name": v.get("name"),
             "head_name": atts[0]["name"] if atts and atts[0].get("name") else None,
             # The FULL bill, in Ticketmaster's own order — headliner first. This was
@@ -689,7 +704,7 @@ def upsert_festival(db: Session, e: dict):
             city_obj = _get_or_create(
                 db, City, name=cname, country=ccode[:2],
                 defaults={"timezone": v.get("timezone"),
-                          "lat": _num(loc.get("latitude")), "lng": _num(loc.get("longitude"))},
+                          "lat": _geo(loc)[0], "lng": _geo(loc)[1]},
             )
 
     starts_on = _parse_date(dates.get("start", {}).get("localDate"))
@@ -865,7 +880,7 @@ def _batch_upsert_festivals(db: Session, events: list) -> list:
             "city_name": (v.get("city") or {}).get("name"),
             "country": ccode[:2] if ccode else None,
             "tz": v.get("timezone"),
-            "lat": _num(loc.get("latitude")), "lng": _num(loc.get("longitude")),
+            "lat": _geo(loc)[0], "lng": _geo(loc)[1],
             "starts_on": starts_on, "ends_on": ends_on,
             "days": (ends_on - starts_on).days + 1 if starts_on and ends_on else None,
             "price": (e.get("priceRanges") or [{}])[0] or {},

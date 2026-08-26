@@ -6,6 +6,7 @@ import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleS
 
 import { EventDetail, fetchEvent } from "../lib/api";
 import ArtistDetail from "./artist-detail";
+import VenueMap from "./venue-map";
 import { coverColor, flagEmoji, hashHue } from "../lib/format";
 import { useProfile } from "../lib/profile";
 import { useSaves } from "../lib/saves";
@@ -281,6 +282,34 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
             </Pressable>
           ) : aboutCredit(ev) ? (
             <Text style={styles.aboutSource}>ⓘ {aboutCredit(ev)}</Text>
+          ) : null}
+
+          {/* venue map — only when we actually know where the venue is. A map centred on
+              the city would look like an answer while being a guess, and this app says
+              "not published" rather than guessing everywhere else.
+              0,0 is excluded explicitly: 8 venues carry it, and it is the Atlantic off
+              Africa, not a missing value the null check would catch.
+              Deliberately NOT excluded: a venue far from its recorded city. That looks
+              like the bug and usually is not — checked four of the worst, and in three the
+              VENUE was right to within a kilometre while the CITY was wrong (Hollywood
+              holding Florida's coordinates, Portland holding Oregon's, Monterrey holding
+              0,0). Dropping those maps would discard correct ones. */}
+          {ev.venue_lat != null && ev.venue_lng != null &&
+           !(ev.venue_lat === 0 && ev.venue_lng === 0) ? (
+            <>
+              <Text style={styles.section}>Venue</Text>
+              <VenueMap
+                lat={ev.venue_lat}
+                lng={ev.venue_lng}
+                venue={ev.venue_name || "the venue"}
+                city={ev.city}
+                imageUrl={
+                  ev.lineup.find((a) => a.is_headliner)?.image_url ??
+                  ev.lineup[0]?.image_url ??
+                  ev.image_url
+                }
+              />
+            </>
           ) : null}
 
           {isAbroad ? (

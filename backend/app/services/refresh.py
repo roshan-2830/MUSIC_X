@@ -36,6 +36,10 @@ def sweep_catalogue() -> dict:
         merge_festivals(dry_run=False)
         merge_by_bill(dry_run=False)
         deduped = drop_duplicate_festival_events(dry_run=False)["deleted"]
+        # A venue with no coordinates draws no map, and Ticketmaster files some real
+        # venues twice with the location on only one of the rows. Costs no API request.
+        from app.services.venue_repair import recover_missing_coords
+        recover_missing_coords(dry_run=False)
     except Exception as e:
         print(f"[sweep] festival reconcile error: {e}")
     alerts = {}
@@ -77,6 +81,8 @@ def refresh_catalogue(limit: int | None = None) -> dict:
         # Then give each listing one home. After the merge, so "covered by a visible
         # festival" accounts for rows that were just folded into a survivor.
         merged["deduped_concerts"] = drop_duplicate_festival_events(dry_run=False)["deleted"]
+        from app.services.venue_repair import recover_missing_coords
+        merged["venues_located"] = recover_missing_coords(dry_run=False)["recovered"]
     except Exception as e:
         print(f"[refresh] festival merge error: {e}")
     alerts = {}

@@ -294,8 +294,11 @@ def get_event(event_id: UUID, db: Session = Depends(get_db)):
 
     headliner = db.get(Artist, ev.headliner_artist_id) if ev.headliner_artist_id else None
     base = _to_list_item(db, ev).model_dump()
+    map_venue = db.get(Venue, ev.venue_id) if ev.venue_id else None
     return EventDetail(
         **base,
+        venue_lat=map_venue.lat if map_venue else None,
+        venue_lng=map_venue.lng if map_venue else None,
         description=ev.description,
         mxs_breakdown=ev.mxs_breakdown,
         last_verified=ev.last_verified,

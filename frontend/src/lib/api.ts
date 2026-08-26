@@ -40,6 +40,10 @@ export type EventFact = {
 };
 export type MissingFact = { key: string; label: string };
 export type EventDetail = MusicEvent & {
+  /** Where the venue is. Null when Ticketmaster gave us no coordinates (36 of 2,024
+   *  venues) — the screen then shows no map rather than one centred on a guess. */
+  venue_lat?: number | null;
+  venue_lng?: number | null;
   description: string | null;
   mxs_breakdown: Record<string, any> | null;
   last_verified: string | null;
