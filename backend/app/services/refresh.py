@@ -98,11 +98,27 @@ def refresh_catalogue(limit: int | None = None) -> dict:
         merged["ticket_variants"] = merge_ticket_variants(dry_run=False)["rows_merged"]
     except Exception as e:
         print(f"[refresh] festival merge error: {e}")
+
+    # Score LAST, once the catalogue has settled. Both cohorts, because the full formula was
+    # reachable by nothing: score_all_events exists and has clearly run at some point — 2,253
+    # events carry a percentile only it writes — but no schedule or endpoint calls it, so a
+    # show that arrives through live search keeps the provisional artist-only score for good.
+    # 568 were sitting on one. Calibration is a ranking, so it has to be redone whenever the
+    # cohort changes, which is every refresh.
+    scores = {}
+    try:
+        from app.services.scoring import score_all_events
+        from app.services.festival_scoring import score_all_festivals
+        scores["events"] = score_all_events()
+        scores["festivals"] = score_all_festivals()
+    except Exception as e:
+        print(f"[refresh] scoring error: {type(e).__name__} {e}")
     alerts = {}
     try:
         alerts = run_alerts()          # cancellations / date moves / price drops we just spotted
     except Exception as e:
         print(f"[refresh] alerts error: {e}")
-    summary = {**result, "festivals": festivals, "merged": merged, "alerts": alerts}
+    summary = {**result, "festivals": festivals, "merged": merged,
+               "scores": scores, "alerts": alerts}
     print(f"[refresh] done — {summary}")
     return summary

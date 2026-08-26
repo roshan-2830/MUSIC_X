@@ -76,6 +76,23 @@ def trigger_sweep_now() -> None:
     scheduler.add_job(sweep_catalogue, id="sweep_now", replace_existing=True)
 
 
+def trigger_score_now() -> None:
+    """Re-score every upcoming concert AND festival immediately.
+
+    Separate from refresh because scoring needs no API budget at all — it reads what is
+    already stored — so it is the one job that is free to re-run whenever the catalogue has
+    shifted underneath it. Calibration is a ranking across the cohort, so adding or merging
+    events changes every other score.
+    """
+    def _both():
+        from app.services.festival_scoring import score_all_festivals
+        from app.services.scoring import score_all_events
+        print(f"[score] events   -> {score_all_events()}")
+        print(f"[score] festivals -> {score_all_festivals()}")
+
+    scheduler.add_job(_both, id="score_now", replace_existing=True)
+
+
 def trigger_enrich_now(limit: int | None = None) -> None:
     """Kick off a one-off artist enrichment immediately (manual trigger endpoint)."""
     scheduler.add_job(

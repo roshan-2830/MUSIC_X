@@ -92,13 +92,30 @@ def _artist_stature(db, ev, cache):
         a = db.get(Artist, ev.headliner_artist_id)
         if a:
             rows = [a]
-    rows = [a for a in rows if a.name and a.name.strip().upper() not in ("TBA", "VARIOUS")]
+    return stature_from_bill(db, rows, cache)
+
+
+def stature_from_bill(db, rows, cache, live: bool = True):
+    """The artist component, given a bill — shared with the festival scorer.
+
+    Split out of _artist_stature so a festival's line-up is judged by the SAME rule as a
+    concert's. Two scorers with their own copy of "Deezer decides, Last.fm only fills gaps"
+    would drift, and the rule above took measurement over 724 artists to arrive at.
+
+    `live=False` forbids the Deezer fallback and scores only from what is stored. Needed
+    because a festival bill is long and mostly un-enriched: the first festival run faced
+    2,460 artists with no cached fan count and started fetching them one at a time while
+    holding a database connection open — the exact failure backfill_popularity's docstring
+    was written about, where Supabase's pooler drops an idle connection after ten minutes.
+    Enrichment fetches; scoring reads. That was always the design.
+    """
+    rows = [a for a in (rows or []) if a.name and a.name.strip().upper() not in ("TBA", "VARIOUS")]
     if not rows:
         return None
 
     dz, lf = [], []
     for a in rows[:6]:
-        if a.deezer_fans is None and a.name not in cache:
+        if live and a.deezer_fans is None and a.name not in cache:
             cache[a.name] = artist_fans(a.name) or 0     # fallback for un-enriched acts
         d = a.deezer_fans if a.deezer_fans is not None else cache.get(a.name, 0)
         if d and d > 0:

@@ -58,12 +58,33 @@ def _todo(column: str, limit: int) -> list[tuple]:
     db: Session = SessionLocal()
     try:
         return [(r[0], r[1]) for r in db.execute(text(f"""
+            -- Every artist with something coming up, by ANY route. This used to be a plain
+            -- join to events.headliner_artist_id, which meant enrichment had never once
+            -- looked at 2,449 artists on a festival bill or 577 support acts — no photo, no
+            -- bio, no fan count, and therefore unscoreable. Against 1,538 headliners it
+            -- could see, that is two thirds of the catalogue invisible.
+            WITH upcoming AS (
+                SELECT e.headliner_artist_id AS artist_id
+                  FROM events e
+                 WHERE e.merged_into IS NULL AND e.starts_at >= now()
+                   AND e.headliner_artist_id IS NOT NULL
+                UNION ALL
+                SELECT ea.artist_id
+                  FROM event_artists ea JOIN events e ON e.id = ea.event_id
+                 WHERE e.merged_into IS NULL AND e.starts_at >= now()
+                UNION ALL
+                SELECT fl.artist_id
+                  FROM festival_lineup fl JOIN festivals f ON f.id = fl.festival_id
+                 WHERE f.merged_into IS NULL
+                   AND (f.ends_on >= current_date OR f.starts_on >= current_date
+                        OR f.starts_on IS NULL)
+            )
             SELECT a.id, a.name,
                    (SELECT count(*) FROM follows f
                      WHERE f.followable_type = 'artist' AND f.followable_id = a.id) AS follows,
-                   COUNT(*) AS shows
-            FROM artists a JOIN events e ON e.headliner_artist_id = a.id
-            WHERE e.starts_at >= now() AND a.{column} IS NULL
+                   COUNT(*) AS shows   -- appearances by any route
+            FROM artists a JOIN upcoming u ON u.artist_id = a.id
+            WHERE a.{column} IS NULL
             GROUP BY a.id, a.name, a.deezer_fans
             ORDER BY follows DESC, a.deezer_fans DESC NULLS LAST, shows DESC
             LIMIT :lim

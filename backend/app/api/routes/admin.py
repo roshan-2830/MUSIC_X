@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 
 from app.core.security import get_current_user_id
-from app.scheduler import trigger_enrich_now, trigger_refresh_now, trigger_sweep_now
+from app.scheduler import (trigger_enrich_now, trigger_refresh_now,
+                           trigger_score_now, trigger_sweep_now)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -38,3 +39,15 @@ def enrich_now(limit: int | None = None, user_id: str = Depends(get_current_user
     trigger_enrich_now(limit=limit)
     scope = f"{limit} artists per stage" if limit else "the default batch per stage"
     return {"status": f"enrichment started ({scope}) — watch the server logs for [enrich] lines"}
+
+
+@router.post("/score")
+def score_now(user_id: str = Depends(get_current_user_id)):
+    """Re-score every upcoming concert and festival right now — the full MXS formula, not
+    the provisional artist-only score a live search writes.
+
+    Costs no API budget: it reads the popularity already cached on the artist rows, so run
+    it whenever the catalogue has changed. Concerts and festivals are calibrated as separate
+    cohorts, each against its own kind. Runs in the background; watch for [score] lines."""
+    trigger_score_now()
+    return {"status": "scoring started — watch the server logs for [score] lines"}
