@@ -750,6 +750,7 @@ export default function SearchScreen() {
             name={selectedArtist}
             onClose={() => setSelectedArtist(null)}
             onSelectEvent={(id) => { setSelectedArtist(null); setSelectedId(id); }}
+            onSelectFestival={(id) => { setSelectedArtist(null); setSelectedFest(id); }}
           />
         ) : null}
       </Modal>

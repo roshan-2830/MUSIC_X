@@ -1,4 +1,4 @@
-# Music X — session handoff (2026-08-24, end of day, rev 2)
+# Music X — session handoff (2026-08-25, end of day)
 
 Paste this whole file into a new chat to carry the context over.
 
@@ -31,6 +31,10 @@ Recent commits:
 
 | | |
 |---|---|
+| `0743a70` | festival search works the way concert search always has |
+| `66fc27a` | festival search reaches every festival, and the ones hiding as concerts |
+| `8dfcc87` | find the festivals the sweep was throwing away |
+| `d80ab5a` | festival pages, one listing one home, and the day-by-day bill |
 | `c4f4fcd` | one toggle, one kind of search result |
 | `cb5e6a4` | search as you type, ranked by relevance |
 | `4f55b8e` | event page: genres on the artwork, a tappable line-up |
@@ -51,18 +55,19 @@ artist enrichment (24h) — and only while the dev server is up.
 
 | | |
 |---|---|
-| events | 5,055 (3,769 upcoming, 3,160 scored) |
-| artists | 4,462 |
-| festivals | 418 |
-| cities / venues | 901 / 1,949 |
+| events | 5,066 (3,779 upcoming, 3,105 scored) |
+| artists | 5,209 |
+| festivals | **509 visible** (775 rows, the rest merged away) |
+| cities / venues | 937 / 2,003 |
 | event_facts | 48,782 (the provenance moat) |
 | event_changes | 45 |
-| artist_similar | 21,065 |
-| event_genres / genres | 7,531 / 521 |
+| artist_similar | 21,145 |
+| event_genres / genres | 7,075 / 521 |
 | follows | 140 |
 | lastfm_accounts | 5 |
 | calendar_entries | 4 |
-| event_artists (line-ups) | 4,617 |
+| event_artists (line-ups) | 3,741 |
+| festival_lineup | 6,259 (4,146 carry a day) |
 
 **Frontend:** 3 screens (Home, Calendar, Search) + modals. Tab bar has 2 tabs; the mockup
 has 5. Missing tabs are Passport, Trips, Bucket List.
@@ -269,6 +274,107 @@ fixed `nothing`, which required all three kinds to be empty and so hid "No resul
 
 ---
 
+## Festivals — the whole of day two
+
+Festivals were a dead end: no `GET /festivals/{id}`, no detail component, and
+`FestivalCard`'s `onPress` passed by NONE of its four call sites. Now they have a page,
+a day-by-day bill, and a search that matches the concert side.
+
+**418 rows → 509 real festivals, 92 with a day-by-day line-up.**
+
+### The bottleneck was one line, not the keywords
+
+```python
+if not tm_id or not name or "festival" not in name.lower(): continue
+```
+
+Every listing whose TITLE lacked the literal word was fetched and discarded. Creamfields
+sells `Creamfields 2026 - Parking - Weekend Camping`; Download sells `Download 2027 -
+Charge Candy` and not one of its listings says festival. Widening the keyword list without
+fixing this moved the count by 14 — the honest measure of how little it achieved alone.
+
+A listing now qualifies on evidence: a festival word in its own name, OR we asked for that
+festival BY NAME and it says the name back, OR **10+ acts on the bill**.
+
+### Bill size is the signal a name cannot give
+
+Measured over every upcoming event: at 10+ acts the list is Corona Capital (71), Louder
+Than Life (50), Aftershock (36), Bourbon & Beyond, Oceans Calling — festivals every one.
+Corona Capital was sitting under Concerts as **15 event rows**.
+
+This is the inverse of the mistake the old code documented. "multi-day OR 3+ acts" threw
+out both Coachella weekends, because a SMALL bill proves nothing. A large one does.
+
+### Named keywords were MEASURED, never guessed
+
+Kept, with what each rescues that the generic net cannot: Download 30, Latitude 28,
+Time Warp 19, EDC 14, DGTL 1. **Rejected on the same measurement**, because what they
+rescued was not the festival: Movement 58 → "Improvement Movement", Ultra 17 → "Ultra
+Sunn", Leeds 10 → a city, Exit 7 → "Last Exit", Boomtown 2 → "Boomtown Rats", ADE 7 →
+club nights. Awakenings, Sonar, Lowlands, Wireless, Sonic Temple rescued **nothing**.
+
+### Merging, and the traps in it
+
+`services/festival_merge.py` groups by base name AND city, breaking a cluster on a gap
+over 3 days — `Discovery Festival 2027` is THREE festivals (Plymouth/Dundee/Darlington)
+and ACL's two weekends are separately ticketed. Festivals also cluster on the **BILL**
+(same city, dates within 3 days, 60%+ identical line-up), because `Abono General 3 días
+Corona Capital 2026` and `Individual Banamex Plus Corona Capital 2026` share no prefix.
+Survivor named from the common prefix, falling back to the common **suffix** — Ticketmaster
+puts the festival name LAST in a ticket title.
+
+**Days come from each listing's own date**, never from reading a weekday out of a title.
+A multi-day listing labels nothing: its bill is the whole festival and we do not know who
+plays when. Unlabelled means "on the bill, day not announced" — a different claim.
+
+### One listing, one home
+
+117 Ticketmaster ids existed in `events` AND `festivals`; ARC Music Festival was four
+concert rows under Concerts and the festival simultaneously. Fixed at three layers: the
+duplicates removed, the concert sweep skips anything the festival side owns, and the
+reconcile runs after BOTH sweeps.
+
+ARC was still wrong after that — `7 September, no end date, 1 act` — because listings
+sharing a name exactly reuse one row and each assigned its dates in turn, so only the LAST
+survived. Dates now EXPAND; reuse requires dates within 14 days so next year's edition
+cannot stretch the span across twelve months.
+
+### Search, matching the concert side exactly
+
+`/festivals/search` (ours, ranked: whole word → prefix → substring → artist on the bill →
+city) at 250ms, and `/festivals/search-live` (one Ticketmaster request, stores what it
+finds) at 900ms. Festival search had been filtering the first 100 of 507 on the device —
+four in five unreachable, which is why "ade" returned "BULL BRIGADE" while Corona Capital
+could not be found at all.
+
+## What no source can fix
+
+**Ticketmaster is the ONLY source.** All 928 festival source rows say `ticketmaster`.
+Inside its feed: ticketmaster.com 687, ticketweb 135, universe 70, moshtix 18, **frontgate 0**.
+
+Measured 2026-08-25, Ticketmaster returns **zero** listings for: Bonnaroo, Glastonbury,
+Tomorrowland, Primavera Sound, Wacken, Hellfest, Sziget, Governors Ball, Hangout, Railbird.
+There is no listing named "Amsterdam Dance Event" — the 21 "ADE" results are club nights
+during ADE week, mostly matched on the venue attraction "Ademelkweg", and they are
+genuinely concerts.
+
+Sources tested and ruled out, all on 2026-08-25:
+
+| source | finding |
+|---|---|
+| **Eventbrite** | public search API removed Dec 2019, off Feb 2020 |
+| **Songkick** | paid licence; "not approving API requests for student, educational or hobbyist purposes" |
+| **Bandsintown** | artists only, one artist per key |
+| **Front Gate** | organiser-only API — you would have to be their ticketing client |
+| **Wikidata** | 7,454 festivals but only **2** with a date after Aug 2026; 7,203 have no date. A worldwide DIRECTORY, not a feed |
+| **MusicBrainz** | 164 upcoming with dates, free, no key — but an archive: Bonnaroo 2007, ADE 2018, nothing upcoming for big names |
+| **PredictHQ** | **untested** — 14-day trial, no card. The only serious candidate left |
+
+**There is no free API listing all music festivals worldwide.** The realistic path is a
+curated table of the ~50 names a CEO will search (Wikidata gives the checklist), and a
+PredictHQ trial where the FIRST thing to do is search ADE, Bonnaroo, Glastonbury and
+Tomorrowland before writing any integration.
+
 ## Open bug: Android NPE on a key press (upstream React Native)
 
 An EAS dev build on Android died with:
@@ -319,6 +425,14 @@ platform-tools would let `adb logcat` confirm whether the process actually dies.
 ## Gotchas — read before debugging
 
 - **Run the app. `tsc` proves nothing here.** Seven bugs shipped through a clean typecheck.
+- **Detail screens must NOT import each other.** `artist-detail` takes `onSelectEvent` and
+  `onSelectFestival` as CALLBACKS for exactly this reason. Importing `festival-detail` from
+  `artist-detail` made a require cycle — "can result in uninitialized values" — because
+  `festival-detail` already imports `artist-detail` for its line-up. One-way only:
+  `festival-detail → artist-detail` and `event-detail → artist-detail`.
+- **Ingest first, reconcile last.** Bitten three times in two days: the genre prune undone
+  by `reapply_cached_tags`, the festival merge undone by `fest.name = p["name"]`, and 4
+  deleted rows restored by a long-running import holding pre-fix code in memory.
 - **A long-running import holds the code it started with.** 4 deleted add-on listings came
   back because `reverify_all_events` was mid-run with the pre-filter code in memory and
   re-inserted them in its final write. A data cleanup during an import gets undone.

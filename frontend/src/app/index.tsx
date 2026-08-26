@@ -403,6 +403,7 @@ export default function HomeScreen() {
             name={artistName}
             onClose={() => { setArtistName(null); setFollowsKey((k) => k + 1); }}
             onSelectEvent={(id) => { setArtistName(null); setSelectedId(id); }}
+            onSelectFestival={(id) => { setArtistName(null); setSelectedFest(id); }}
           />
         ) : null}
       </Modal>

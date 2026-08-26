@@ -6,7 +6,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import ArtistAbout from "./artist-about";
 import FestivalCard from "./festival-card";
-import FestivalDetailView from "./festival-detail";
 
 import {
   ArtistDetail as ArtistDetailT,
@@ -49,17 +48,22 @@ export default function ArtistDetail({
   name,
   onClose,
   onSelectEvent,
+  onSelectFestival,
 }: {
   name: string;
   onClose: () => void;
   onSelectEvent?: (id: string) => void;
+  // Handed in rather than imported, the same reason onSelectEvent is: a detail screen that
+  // imports another detail screen makes a require cycle. festival-detail renders THIS
+  // component for its line-up, so importing festival-detail here closed the loop —
+  // "Require cycles are allowed, but can result in uninitialized values."
+  onSelectFestival?: (id: string) => void;
 }) {
   const [data, setData] = useState<ArtistDetailT | null>(null);
   const [loading, setLoading] = useState(true);
   const [followId, setFollowId] = useState<string | null>(null); // artist id if following, else null
   const [aboutOpen, setAboutOpen] = useState(false);
   const [peekArtist, setPeekArtist] = useState<string | null>(null);
-  const [peekFest, setPeekFest] = useState<string | null>(null);
   const [showAllDates, setShowAllDates] = useState(false);
 
   useEffect(() => {
@@ -242,7 +246,7 @@ export default function ArtistDetail({
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.fescroll}>
               {data.festivals.map((f) => (
-                <FestivalCard key={f.id} festival={f} onPress={() => setPeekFest(f.id)} />
+                <FestivalCard key={f.id} festival={f} onPress={() => onSelectFestival?.(f.id)} />
               ))}
             </ScrollView>
           </View>
@@ -302,12 +306,10 @@ export default function ArtistDetail({
       </Modal>
 
       {/* tapping a similar artist opens their page on top of this one */}
-      <Modal visible={!!peekFest} animationType="slide" onRequestClose={() => setPeekFest(null)}>
-        {peekFest ? <FestivalDetailView id={peekFest} onClose={() => setPeekFest(null)} /> : null}
-      </Modal>
       <Modal visible={!!peekArtist} animationType="slide" onRequestClose={() => setPeekArtist(null)}>
         {peekArtist ? (
-          <ArtistDetail name={peekArtist} onClose={() => setPeekArtist(null)} onSelectEvent={onSelectEvent} />
+          <ArtistDetail name={peekArtist} onClose={() => setPeekArtist(null)}
+            onSelectEvent={onSelectEvent} onSelectFestival={onSelectFestival} />
         ) : null}
       </Modal>
     </SafeAreaView>
