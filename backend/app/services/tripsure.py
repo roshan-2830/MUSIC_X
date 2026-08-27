@@ -103,9 +103,13 @@ def _call(method: str, base: str, path: str, *, trace_id=None, user_id=None,
         # Distinguished on purpose. A resource-policy denial is an allowlist problem and no
         # amount of retrying or re-keying fixes it; a missing route means the wrong host.
         body = r.text[:160]
-        hint = ("our IP is not allowlisted on their gateway"
+        # Two very different 403s, and telling them apart saves looking in the wrong place.
+        # Tripsure's gateway is IP-allowlisted to the office network, so the first one is the
+        # expected answer from anywhere else — a VPN or the office WiFi fixes it and no
+        # amount of re-keying will. The second is not about access at all.
+        hint = ("IP not allowlisted — are you off the office network? (VPN or office WiFi)"
                 if "not authorized to perform" in body else
-                "that route does not exist on this host — wrong base URL?"
+                "no such route on this host — this is NOT the network; wrong base URL"
                 if "Missing Authentication Token" in body else "check tenant and key")
         print(f"[tripsure] {method} {path} -> {r.status_code}: {hint}")
         return None

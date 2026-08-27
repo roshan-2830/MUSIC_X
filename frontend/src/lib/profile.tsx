@@ -6,6 +6,8 @@ type ProfileContextValue = {
   profile: Profile | null;
   loading: boolean;
   homeCountry: string | null;
+  /** The city name, for flight search — a country cannot be flown from. */
+  homeCity: string | null;
   setHomeCity: (cityId: string) => Promise<void>;
   refresh: () => Promise<void>;
 };
@@ -41,6 +43,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         profile,
         loading,
         homeCountry: profile?.home_city_country ?? null,
+        homeCity: profile?.home_city_name ?? null,
         setHomeCity,
         refresh,
       }}

@@ -615,3 +615,66 @@ export async function connectLastfm(username: string): Promise<LastfmConnectResu
 export async function disconnectLastfm(): Promise<void> {
   await fetch(`${API_BASE_URL}/me/lastfm`, { method: "DELETE", headers: await authHeaders() });
 }
+
+/* ---------------------------------------------------------------- trip options */
+
+/** A place to sleep near the show. Normalised by our backend, never a supplier's shape —
+ *  the screen must not care which provider answered. */
+export type Stay = {
+  name: string;
+  image_url: string | null;
+  price_amount: number | null;
+  price_currency: string | null;
+  rating: number | null;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  deep_link: string | null;
+  provider: string;
+};
+
+export type Flight = {
+  airline: string | null;
+  flight_number: string | null;
+  origin: string | null;
+  destination: string | null;
+  departs_at: string | null;
+  arrives_at: string | null;
+  stops: number | null;
+  duration_minutes: number | null;
+  price_amount: number | null;
+  price_currency: string | null;
+  deep_link: string | null;
+  provider: string;
+};
+
+/** `status` matters as much as the list. "no stays here" and "we could not ask" are
+ *  different claims and the screen says which — never the first when it means the second. */
+export type TravelOptions = {
+  status: "ok" | "not_configured" | "unavailable" | "no_location";
+  reason: string | null;
+  check_in: string | null;
+  check_out: string | null;
+  stays: Stay[];
+  flights: Flight[];
+};
+
+const NO_TRAVEL: TravelOptions = {
+  status: "unavailable", reason: null, check_in: null, check_out: null, stays: [], flights: [],
+};
+
+/** Somewhere to stay for the night of the show. Dates come from the event, not the user. */
+export async function getStays(eventId: string, nights = 1): Promise<TravelOptions> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/stays?nights=${nights}`);
+  if (!res.ok) return { ...NO_TRAVEL, reason: "Could not load stays." };
+  return res.json();
+}
+
+/** Getting there. `origin` is a city name or an IATA code. */
+export async function getFlights(eventId: string, origin: string): Promise<TravelOptions> {
+  const res = await fetch(
+    `${API_BASE_URL}/events/${eventId}/flights?origin=${encodeURIComponent(origin)}`,
+  );
+  if (!res.ok) return { ...NO_TRAVEL, reason: "Could not load flights." };
+  return res.json();
+}
