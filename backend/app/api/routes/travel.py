@@ -163,15 +163,18 @@ def stays_for_event(
                                      adults=adults)
     hotels = tripsure.search_hotels(place, check_in.isoformat(),
                                     check_out.isoformat(), adults=adults, trace_id=trace)
-    if hotels is None:
-        # The hand-over link still works: it is a URL on their consumer site, built from the
-        # autosuggest result, and needs no further call. So a listing outage costs the list
-        # but not the ability to book — measured 2026-08-27, when /api/hotel/listing began
-        # answering 500 to the very request that had returned 1,227 hotels minutes earlier
-        # while autosuggest stayed healthy.
+    if not hotels:
+        # NO BUTTON when we found nothing, and this is a correction of the opposite choice.
+        # The hand-over link needs no API call, so it was offered even when the listing
+        # failed — on the reasoning that a booking page beats nothing. In practice the
+        # listing fails precisely where Tripsure has no inventory, their consumer site runs
+        # on the same backend, and the user who clicked it landed on "couldn't find a match".
+        # A button that leads nowhere is worse than no button: it spends the user's trust to
+        # tell them something we already knew.
         return TravelOptions(
-            status="unavailable", booking_url=hand_over,
-            reason="We can't show prices right now — this opens the booking page instead.",
+            status="unavailable",
+            reason=f"We can't find stays near {city_name} yet — our travel partner doesn't "
+                   f"cover it.",
             **dates)
     return TravelOptions(
         booking_url=hand_over,
