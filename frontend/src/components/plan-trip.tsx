@@ -3,8 +3,8 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "r
 import { Ionicons } from "@expo/vector-icons";
 
 import {
-  clearStayBase, Flight, getFlights, getStayBase, getStays, setStayBase, Stay, StayBase,
-  TravelOptions,
+  clearStayBase, Flight, getFlights, getStayBase, getStays, getTravelContext, setStayBase,
+  Stay, StayBase, TravelContext, TravelOptions,
 } from "../lib/api";
 import StayMap from "./stay-map";
 import VenueMap from "./venue-map";
@@ -48,6 +48,48 @@ function Empty({ options, kind }: { options: TravelOptions | null; kind: string 
       <Ionicons name="information-circle-outline" size={16} color={MUTED} />
       <Text style={styles.emptyText}>{line}</Text>
     </View>
+  );
+}
+
+/** The answer for someone who does not need a flight.
+ *
+ *  A local person was previously shown a flight search to the city they live in, which is the
+ *  kind of thing that makes an app feel like it isn't listening. What they actually need is the
+ *  way to the door, so that is all this shows — and the Directions link carries no origin, so
+ *  the map app starts from wherever they are standing.
+ */
+function NoFlightNeeded({ ctx }: { ctx: TravelContext }) {
+  const local = ctx.kind === "local";
+  const km = ctx.distance_km;
+  return (
+    <>
+      <View style={styles.hereRow}>
+        <View style={styles.hereIcon}>
+          <Ionicons name={local ? "location" : "car"} size={17} color={ACCENT} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.hereTitle}>
+            {local
+              ? `You're already in ${ctx.event_city ?? "town"}`
+              : `About ${km != null ? Math.round(km) : "—"} km away`}
+          </Text>
+          <Text style={styles.hereSub}>
+            {local
+              ? "No flight needed"
+              : `A drive or a train from ${ctx.origin_city ?? "home"} — no flight needed`}
+          </Text>
+        </View>
+      </View>
+      {ctx.directions_url ? (
+        <Pressable style={styles.dirBtn} onPress={() => Linking.openURL(ctx.directions_url!)}>
+          <Ionicons name="navigate" size={14} color="#101204" />
+          <Text style={styles.dirBtnText}>
+            Directions to {ctx.venue_name ?? "the venue"}
+          </Text>
+          <Ionicons name="open-outline" size={12} color="#101204" />
+        </Pressable>
+      ) : null}
+    </>
   );
 }
 
@@ -180,6 +222,14 @@ export default function PlanTrip({
   const [stays, setStays] = useState<TravelOptions | null>(null);
   const [flights, setFlights] = useState<TravelOptions | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ctx, setCtx] = useState<TravelContext | null>(null);
+  // Separate from `ctx` being null, which is also what a FAILED lookup returns. Without this
+  // distinction a failure is indistinguishable from "still loading", so the tab would wait
+  // forever and a real traveller would sit in front of a blank panel.
+  const [ctxDone, setCtxDone] = useState(false);
+  // A regional traveller is not offered flights, but is not forbidden them either — 250 km is
+  // a drive for most people and a flight for some, and that is their call, not ours.
+  const [wantFlights, setWantFlights] = useState(false);
   const [base, setBase] = useState<StayBase | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
@@ -192,12 +242,21 @@ export default function PlanTrip({
       setLoading(true);
       getStays(eventId).then((r) => { if (alive) { setStays(r); setLoading(false); } });
     }
-    if (tab === "getting" && flights === null && homeCity) {
+    // Not for a local. A flight search takes 7-14 seconds and fans out to airlines, and
+    // running one for somebody who lives in the city spends their time and our supplier calls
+    // to answer a question they did not ask. The tab now opens instantly for them.
+    // A null ctx AFTER the lookup finished means it failed — fall back to searching, which is
+    // what the tab did before any of this existed. Better to spend a supplier call than to
+    // strand someone who really is flying.
+    const flightsWanted = ctxDone && (
+      ctx === null || ctx.kind === "far" || ctx.kind === "unknown"
+      || (ctx.kind === "regional" && wantFlights));
+    if (tab === "getting" && flights === null && homeCity && flightsWanted) {
       setLoading(true);
       getFlights(eventId, homeCity).then((r) => { if (alive) { setFlights(r); setLoading(false); } });
     }
     return () => { alive = false; };
-  }, [tab, eventId, homeCity, stays, flights]);
+  }, [tab, eventId, homeCity, stays, flights, ctx, ctxDone, wantFlights]);
 
   // Loaded once on mount, not with the tab: a base that has already been chosen is the answer
   // to "where am I staying", and waiting for a supplier call to show it would hide a fact we
@@ -205,6 +264,9 @@ export default function PlanTrip({
   useEffect(() => {
     let alive = true;
     getStayBase(eventId).then((b) => { if (alive) setBase(b); });
+    // Two small queries against our own tables, no supplier — cheap enough to ask on every
+    // event page, and the Getting there tab cannot render honestly without the answer.
+    getTravelContext(eventId).then((t) => { if (alive) { setCtx(t); setCtxDone(true); } });
     return () => { alive = false; };
   }, [eventId]);
 
@@ -321,8 +383,41 @@ export default function PlanTrip({
         )
       ) : null}
 
-      {!loading && tab === "getting" ? (
-        !homeCity ? (
+      {/* Until we know whether this person is local, the tab cannot say anything honest —
+          showing "set your city" or a flight list and then swapping it is worse than a beat
+          of waiting. Our own database, so the beat is short. */}
+      {!loading && tab === "getting" && !ctxDone ? (
+        <View style={styles.empty}><ActivityIndicator color={ACCENT} /></View>
+      ) : null}
+
+      {!loading && ctxDone && tab === "getting" ? (
+        // Order matters. The local answer comes BEFORE the missing-home-city message, because
+        // someone who has told us where they live has already answered the only question that
+        // message asks.
+        ctx && (ctx.kind === "local" || ctx.kind === "regional") ? (
+          <>
+            <NoFlightNeeded ctx={ctx} />
+            {ctx.kind === "regional" && !wantFlights ? (
+              <Pressable style={styles.anyway} onPress={() => setWantFlights(true)}>
+                <Ionicons name="airplane-outline" size={14} color={MUTED} />
+                <Text style={styles.anywayText}>Flying instead? Show flights</Text>
+              </Pressable>
+            ) : null}
+            {ctx.kind === "regional" && wantFlights && flights?.flights?.length ? (
+              <>
+                <Text style={styles.dates}>Arriving the day before · cheapest first</Text>
+                {flights.flights.map((f, i) =>
+                  <FlightRow key={`${f.flight_number}-${i}`} flight={f} />)}
+                <Text style={styles.footnote}>
+                  Prices for planning. Booking flights isn't connected yet.
+                </Text>
+              </>
+            ) : null}
+            {ctx.kind === "regional" && wantFlights && flights && !flights.flights.length ? (
+              <Empty options={flights} kind="Flight" />
+            ) : null}
+          </>
+        ) : !homeCity ? (
           <View style={styles.empty}>
             <Ionicons name="information-circle-outline" size={16} color={MUTED} />
             <Text style={styles.emptyText}>Set your city in your profile and we'll find flights.</Text>
@@ -348,7 +443,9 @@ export default function PlanTrip({
 
       {/* Required by the covenant, not decoration: the fee is disclosed on the surface where
           the booking happens, and it states plainly that it buys no placement. */}
-      {tab !== "map" ? (
+      {tab !== "map"
+        && !(tab === "getting" && (ctx?.kind === "local"
+             || (ctx?.kind === "regional" && !wantFlights))) ? (
         <View style={styles.promise}>
           <Ionicons name="shield-checkmark" size={13} color="#7ef0b2" />
           <Text style={styles.promiseText}>
@@ -401,6 +498,24 @@ const styles = StyleSheet.create({
   emptyText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
   footnote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 12, fontStyle: "italic" },
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },
+  hereRow: {
+    flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 4, marginTop: 4,
+  },
+  hereIcon: {
+    width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(232,255,71,0.12)",
+  },
+  hereTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
+  hereSub: { color: MUTED, fontSize: 12.5, marginTop: 2 },
+  // Offered quietly, underneath: 250 km is a drive for most people and a flight for some, and
+  // that is theirs to decide — but it is not the answer we lead with.
+  anyway: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    paddingVertical: 11, marginTop: 10, borderRadius: 11,
+    borderWidth: 1, borderColor: LINE,
+  },
+  anywayText: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
+
   // The base card. Bordered in the accent rather than filled with it: it is a fact the
   // traveller told us, worth finding at a glance, but not a call to action.
   base: {

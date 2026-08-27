@@ -765,3 +765,29 @@ export async function clearStayBase(eventId: string): Promise<void> {
     headers: await authHeaders(),
   });
 }
+
+
+/** Whether this person has to travel to this show at all.
+ *
+ *  Decided by the server: the phone only holds city names, and a name cannot tell "Newcastle"
+ *  from "Newcastle Upon Tyne" or produce the 40 km rule that keeps a Brooklyn user from being
+ *  sold a flight to Manhattan. */
+export type TravelContext = {
+  /** local — already there. regional — a drive or train. far — a flight. unknown — we can't tell. */
+  kind: "local" | "regional" | "far" | "unknown";
+  reason: string | null;
+  distance_km: number | null;
+  origin_city: string | null;
+  venue_name: string | null;
+  event_city: string | null;
+  /** Directions with no origin, so the map app starts from wherever the phone is. */
+  directions_url: string | null;
+};
+
+export async function getTravelContext(eventId: string): Promise<TravelContext | null> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/travel-context`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
