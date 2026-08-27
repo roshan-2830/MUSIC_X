@@ -3,17 +3,40 @@ import { Image, LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Stay } from "../lib/api";
-import { metresBetween, tileGrid, TILE, zoomToFit } from "../lib/slippy";
+import { metresBetween, TILE, tileGrid, zoomToFit } from "../lib/slippy";
 
 const ACCENT = "#e8ff47";
 const INK = "#17171c";
 const LINE = "#26262f";
+/** The tiles' own paper colour, so the frame matches while they load rather than flashing. */
 const TILE_BG = "#e8e2d9";
-const HEIGHT = 220;
+/** Hotel pills. Red is the convention for lodging on a map and it reads at a glance against
+ *  a light basemap — the venue keeps the app's accent so the anchor stays distinguishable. */
+const HOTEL = "#c5321f";
+const HEIGHT = 300;
 
-/** How many hotels get a pin. Twenty came back and twenty pins is a smear, not a map — the
- *  nearest few answer the only question this map is asked: "is there anywhere by the venue?" */
-const MAX_PINS = 8;
+/** Every hotel we can place, not a curated few.
+ *
+ *  An earlier version showed eight, reasoning that twenty pins on a phone-width map is a
+ *  smear. The reference disagrees: Google's hotel search draws every result and lets them
+ *  overlap, because the value is in the SHAPE of the cluster — where the hotels are, and what
+ *  they cost — not in reading each label. Twenty is what the search returns.
+ */
+const MAX_PINS = 20;
+
+/** Exact, with separators: ₹1,148 as the reference shows, not a rounded ₹1k.
+ *
+ *  Rounding to thousands was the wrong economy. The whole point of a price on a pin is
+ *  comparing one against another, and ₹1k beside ₹2k hides that they are ₹1,148 and ₹1,865.
+ */
+function priceLabel(s: Stay): string | null {
+  if (s.price_amount == null) return null;
+  const sym = s.price_currency === "INR" ? "₹"
+    : s.price_currency === "GBP" ? "£"
+    : s.price_currency === "EUR" ? "€"
+    : s.price_currency === "USD" ? "$" : "";
+  return `${sym}${Math.round(s.price_amount).toLocaleString()}`;
+}
 
 export default function StayMap({
   lat,
@@ -29,23 +52,19 @@ export default function StayMap({
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
 
-  // Only hotels we can actually place. One with no coordinates is not a pin at an arbitrary
-  // spot — it is a hotel this map cannot show, and the count below says so.
+  // Only hotels we can actually place. One without coordinates gets no pin rather than a pin
+  // at an arbitrary spot — a hotel in the wrong street is worse than a hotel not shown.
   const placeable = stays
     .filter((s) => s.lat != null && s.lng != null)
     .map((s) => ({ ...s, away: metresBetween(lat, lng, s.lat!, s.lng!) }))
-    .sort((a, b) => a.away - b.away)
-    .slice(0, MAX_PINS);
+    .sort((a, b) => b.away - a.away)      // furthest first, so the NEAREST draw on top
+    .slice(-MAX_PINS);
 
-  // Fit the furthest pin, so nothing sits silently off the edge.
-  const span = placeable.length ? Math.max(...placeable.map((s) => s.away)) * 2.2 : 1500;
-  const zoom = zoomToFit(span, width || 340);
+  // Fit the furthest pin so nothing sits silently off the edge, with a floor of 1.2 km so a
+  // cluster of hotels next door does not zoom into a single street.
+  const furthest = placeable.length ? Math.max(...placeable.map((s) => s.away)) : 600;
+  const zoom = zoomToFit(Math.max(furthest * 2.4, 1200), width || 340);
   const grid = width > 0 ? tileGrid(lat, lng, zoom, width, HEIGHT) : null;
-
-  const money = (s: Stay) =>
-    s.price_amount == null ? null
-      : s.price_currency === "INR" ? `₹${Math.round(s.price_amount / 1000)}k`
-      : `${Math.round(s.price_amount)}`;
 
   return (
     <View style={styles.frame} onLayout={onLayout}>
@@ -58,41 +77,37 @@ export default function StayMap({
         </View>
       ) : null}
 
-      {/* Hotels first so the venue marker draws on top of them — the venue is the anchor the
-          whole map is about, and a hotel pin covering it would hide the point. */}
       {grid
         ? placeable.map((s, i) => {
             const p = grid.project(s.lat!, s.lng!);
-            const label = money(s);
+            const label = priceLabel(s);
             return (
-              <View key={`${s.name}-${i}`} style={[styles.hotelWrap, { left: p.x, top: p.y }]}>
-                <View style={styles.hotelPin}>
-                  {label ? (
-                    <Text style={styles.hotelPinText}>{label}</Text>
-                  ) : (
-                    <Ionicons name="bed" size={10} color="#fff" />
-                  )}
+              <View key={`${s.name}-${i}`} style={[styles.pinWrap, { left: p.x, top: p.y }]}>
+                <View style={styles.pill}>
+                  <Ionicons name="bed" size={10} color="#fff" />
+                  {label ? <Text style={styles.pillText}>{label}</Text> : null}
                 </View>
+                {/* The tail, so the pill points at its coordinate instead of floating over
+                    it — the same reason the venue marker has one. */}
+                <View style={styles.tailWrap}><View style={styles.tail} /></View>
               </View>
             );
           })
         : null}
 
       {grid ? (
-        <View style={styles.venueWrap} pointerEvents="none">
-          <View style={styles.venuePin}>
+        <View style={styles.venueLayer} pointerEvents="none">
+          <View style={styles.venuePill}>
             <Ionicons name="musical-notes" size={13} color={INK} />
-            <Text style={styles.venuePinText} numberOfLines={1}>{venue || "Venue"}</Text>
+            <Text style={styles.venueText} numberOfLines={1}>{venue || "Venue"}</Text>
           </View>
-          <View style={styles.pointerWrap}><View style={styles.pointer} /></View>
+          <View style={styles.venueTailWrap}><View style={styles.venueTail} /></View>
         </View>
       ) : null}
 
-      <Text style={styles.attr}>© OpenStreetMap · CARTO</Text>
+      <Text style={styles.attr}>© OpenStreetMap</Text>
       {placeable.length ? (
-        <Text style={styles.count}>
-          {placeable.length} of {stays.length} nearest
-        </Text>
+        <Text style={styles.count}>{placeable.length} stays near the venue</Text>
       ) : null}
     </View>
   );
@@ -106,38 +121,42 @@ const styles = StyleSheet.create({
   grid: { position: "absolute" },
   tile: { position: "absolute", width: TILE, height: TILE },
 
-  // Placed by its centre, so the pin sits ON the coordinate rather than beside it.
-  hotelWrap: { position: "absolute", marginLeft: -19, marginTop: -11, zIndex: 2 },
-  hotelPin: {
-    minWidth: 38, alignItems: "center", justifyContent: "center",
-    backgroundColor: "#17171c", borderColor: "#fff", borderWidth: 1.5,
-    borderRadius: 999, paddingVertical: 3, paddingHorizontal: 7,
-    shadowColor: "#000", shadowOpacity: 0.3, shadowRadius: 3, elevation: 3,
+  // Anchored so the TAIL sits on the coordinate: the pill is lifted by its own height, and
+  // centred horizontally by half its minimum width.
+  pinWrap: { position: "absolute", alignItems: "center", marginLeft: -30, marginTop: -30, zIndex: 2 },
+  pill: {
+    flexDirection: "row", alignItems: "center", gap: 3,
+    backgroundColor: HOTEL, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 6,
+    minWidth: 60, justifyContent: "center",
+    shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 }, elevation: 3,
   },
-  hotelPinText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+  pillText: { color: "#fff", fontSize: 11, fontWeight: "800" },
+  tailWrap: { width: 10, height: 5, alignItems: "center", overflow: "hidden" },
+  tail: { width: 8, height: 8, backgroundColor: HOTEL, transform: [{ rotate: "45deg" }], marginTop: -5 },
 
-  venueWrap: {
-    position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 4,
+  venueLayer: {
+    position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 5,
     alignItems: "center", justifyContent: "center",
   },
-  venuePin: {
-    flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "72%",
+  venuePill: {
+    flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "70%",
     backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
-    shadowColor: "#000", shadowOpacity: 0.45, shadowRadius: 7,
-    shadowOffset: { width: 0, height: 3 }, elevation: 5,
+    shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 }, elevation: 6,
   },
-  venuePinText: { color: INK, fontSize: 11, fontWeight: "800", flexShrink: 1 },
-  pointerWrap: { width: 20, height: 8, alignItems: "center", overflow: "hidden", marginTop: -1 },
-  pointer: { width: 12, height: 12, backgroundColor: ACCENT, transform: [{ rotate: "45deg" }], marginTop: -7 },
+  venueText: { color: INK, fontSize: 11, fontWeight: "800", flexShrink: 1 },
+  venueTailWrap: { width: 20, height: 8, alignItems: "center", overflow: "hidden", marginTop: -1 },
+  venueTail: { width: 12, height: 12, backgroundColor: ACCENT, transform: [{ rotate: "45deg" }], marginTop: -7 },
 
   attr: {
-    position: "absolute", right: 6, bottom: 5, zIndex: 5, fontSize: 9,
-    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.7)",
+    position: "absolute", right: 6, bottom: 5, zIndex: 6, fontSize: 9,
+    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.75)",
     paddingVertical: 2, paddingHorizontal: 5, borderRadius: 6, overflow: "hidden",
   },
   count: {
-    position: "absolute", left: 6, bottom: 5, zIndex: 5, fontSize: 9,
-    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.7)",
+    position: "absolute", left: 6, bottom: 5, zIndex: 6, fontSize: 9,
+    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.75)",
     paddingVertical: 2, paddingHorizontal: 5, borderRadius: 6, overflow: "hidden",
   },
 });

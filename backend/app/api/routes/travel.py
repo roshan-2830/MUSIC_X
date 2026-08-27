@@ -39,6 +39,15 @@ def _first(d: dict, *keys, default=None):
     return default
 
 
+def _metres(la1: float, lo1: float, la2: float, lo2: float) -> float:
+    """Great-circle metres — for ranking stays by how close they are to the venue."""
+    import math
+    r = math.radians
+    h = (math.sin((r(la2) - r(la1)) / 2) ** 2
+         + math.cos(r(la1)) * math.cos(r(la2)) * math.sin((r(lo2) - r(lo1)) / 2) ** 2)
+    return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
 def _num(v):
     try:
         return None if v is None else float(v)
@@ -191,12 +200,23 @@ def stays_for_event(
             reason=f"No stays available near {city_name} right now — worth trying again "
                    f"later.",
             **dates)
+    # NEAREST twenty, not the first twenty. The listing returns over a thousand in the
+    # supplier's own order, so slicing it raw pinned hotels up to 16 km out and called them
+    # "near the venue" — which is the one claim this tab makes. Sorted against the venue's
+    # coordinates, so the map opens on the walkable ones.
+    parsed = [_to_stay(h) for h in hotels if isinstance(h, dict)]
+    if venue and venue.lat is not None and venue.lng is not None:
+        def away(st):
+            if st.lat is None or st.lng is None:
+                return float("inf")     # unplaceable ones sink to the bottom
+            return _metres(venue.lat, venue.lng, st.lat, st.lng)
+        parsed.sort(key=away)
     return TravelOptions(
         booking_url=hand_over,
         status="ok" if hotels else "unavailable",
         reason=None if hotels else f"No stays available in {city_name} for those dates.",
         **dates,
-        stays=[_to_stay(h) for h in hotels[:20] if isinstance(h, dict)],
+        stays=parsed[:20],
     )
 
 
