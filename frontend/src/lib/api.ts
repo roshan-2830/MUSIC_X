@@ -403,7 +403,30 @@ export type FestivalArtist = {
 
 // One festival, with its published bill. Extends Festival so the card and the page can
 // never disagree about the same festival.
+/** One component of a Music Experience Score, as the scorer wrote it. */
+export type MxsComponent = {
+  score: number;
+  weight: number;
+  confidence: string;
+  reason: string;
+  ranked_against?: string;
+};
+
+/** The score taken apart. `missing` names the components that could NOT be used and why —
+ *  the score is meant to be arguable, so it carries its own gaps. */
+export type MxsBreakdown = {
+  scored?: boolean;
+  final?: number;
+  percentile?: number;
+  cohort?: string;
+  confidence?: string;
+  reasons?: string[];
+  components?: Record<string, MxsComponent>;
+  missing?: Record<string, string>;
+};
+
 export type FestivalDetail = Festival & {
+  mxs_breakdown?: MxsBreakdown | null;
   about: string | null;
   lineup: FestivalArtist[];
   // Days we actually know a bill for, earliest first. Empty when never split by day.

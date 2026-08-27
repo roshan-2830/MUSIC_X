@@ -6,12 +6,21 @@ import {
   ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 
-import { FestivalArtist, FestivalDetail as FestivalDetailT, getFestival } from "../lib/api";
+import { FestivalArtist, FestivalDetail as FestivalDetailT, getFestival, MxsComponent } from "../lib/api";
 import { coverColor, flagEmoji } from "../lib/format";
 import { useSaves } from "../lib/saves";
 import ArtistDetail from "./artist-detail";
 
 const ACCENT = "#e8ff47";
+const COMPONENT_LABEL: Record<string, string> = {
+  artist: "Line-up strength",
+  context: "Size of the festival",
+  rarity: "Rare occasion",
+  venue: "Venue",
+  production: "Production",
+  reviews: "Reviews",
+};
+
 const MUTED = "#8a8a95";
 
 function initials(name: string): string {
@@ -80,6 +89,7 @@ function Avatar({ name, size = 44, imageUrl }: { name: string; size?: number; im
 }
 
 export default function FestivalDetailView({ id, onClose }: { id: string; onClose: () => void }) {
+  const [showWhy, setShowWhy] = useState(false);
   const [f, setF] = useState<FestivalDetailT | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -161,13 +171,18 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
             </View>
           ) : null}
 
-          {/* rating + save. The rating cell tells the truth: no festival in the catalogue
-              is scored yet, so it reads "No rating yet" rather than borrowing a number. */}
+          {/* rating + save. A scored festival's cell opens the breakdown; an unscored one
+              says so plainly rather than borrowing a number from somewhere. */}
           <View style={styles.segRow}>
-            <View style={styles.segCell}>
-              <Text style={styles.segTop}>{f.mxs != null ? f.mxs.toFixed(1) : "–"}</Text>
+            <Pressable style={styles.segCell} onPress={() => setShowWhy((v) => !v)}>
+              <View style={styles.segTopRow}>
+                <Text style={styles.segTop}>{f.mxs != null ? f.mxs.toFixed(1) : "–"}</Text>
+                {f.mxs != null ? (
+                  <Ionicons name={showWhy ? "chevron-up" : "chevron-forward"} size={14} color={MUTED} />
+                ) : null}
+              </View>
               <Text style={styles.segLbl}>{f.mxs != null ? "Rating" : "No rating yet"}</Text>
-            </View>
+            </Pressable>
             <Pressable style={[styles.segCell, styles.segBorder]} onPress={() => toggleFestival(f)}>
               <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={19} color={saved ? ACCENT : "#f4f4f6"} />
               <Text style={[styles.segLbl, saved && { color: ACCENT }]}>{saved ? "Saved" : "Save"}</Text>
@@ -177,6 +192,42 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
               <Text style={styles.segLbl}>{billed === 1 ? "Artist" : "Artists"}</Text>
             </View>
           </View>
+
+          {/* Why this score. Every component that contributed, with what it actually read,
+              and — named, not hidden — the parts of the formula this festival could not
+              answer. A bare 9.4 explains nothing, and the score is meant to be arguable. */}
+          {showWhy && f.mxs != null ? (
+            <View style={styles.whyBox}>
+              {Object.entries((f.mxs_breakdown?.components ?? {}) as Record<string, MxsComponent>).map(
+                ([key, c]) => (
+                  <View key={key} style={{ marginBottom: 12 }}>
+                    <View style={styles.barRow}>
+                      <Text style={styles.barLabel}>{COMPONENT_LABEL[key] ?? key}</Text>
+                      <Text style={styles.barVal}>{c.score?.toFixed(1)}</Text>
+                    </View>
+                    <View style={styles.barTrack}>
+                      <View style={[styles.barFill, { width: `${Math.max(0, Math.min(100, (c.score ?? 0) * 10))}%` }]} />
+                    </View>
+                    <Text style={styles.whyReason}>
+                      {c.reason}
+                      {c.weight != null ? ` · ${Math.round(c.weight * 100)}% of the score` : ""}
+                    </Text>
+                  </View>
+                ),
+              )}
+              {Object.keys(f.mxs_breakdown?.missing ?? {}).length ? (
+                <Text style={styles.whyMissing}>
+                  Not counted: {Object.entries(f.mxs_breakdown!.missing!)
+                    .map(([k, why]) => `${COMPONENT_LABEL[k] ?? k} — ${why}`)
+                    .join("; ")}
+                </Text>
+              ) : null}
+              <Text style={styles.whyText}>
+                Ranked against {f.mxs_breakdown?.cohort ?? "other festivals"}. This scores the{" "}
+                <Text style={{ fontWeight: "800" }}>festival</Text>, never you — and it can never be bought.
+              </Text>
+            </View>
+          ) : null}
 
           {/* line-up */}
           {f.lineup.length ? (
@@ -335,6 +386,16 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 3 },
   meta: { color: MUTED, fontSize: 14, fontWeight: "600" },
 
+  segTopRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  whyBox: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
+  barRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
+  barLabel: { color: "#c8c8d0", fontSize: 13, fontWeight: "600" },
+  barVal: { color: ACCENT, fontSize: 13, fontWeight: "800" },
+  barTrack: { height: 7, borderRadius: 4, backgroundColor: "#26262f", overflow: "hidden" },
+  barFill: { height: 7, borderRadius: 4, backgroundColor: ACCENT },
+  whyReason: { color: MUTED, fontSize: 12, marginTop: 6, lineHeight: 17 },
+  whyMissing: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2, fontStyle: "italic" },
+  whyText: { color: "#c8c8d0", fontSize: 13, lineHeight: 19, marginTop: 10 },
   segRow: { flexDirection: "row", borderColor: "#1e1e26", borderWidth: 1, borderRadius: 16, marginTop: 18, overflow: "hidden" },
   segCell: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, gap: 3 },
   segBorder: { borderLeftWidth: 1, borderLeftColor: "#1e1e26" },

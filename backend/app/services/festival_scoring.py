@@ -38,6 +38,7 @@ a band of nines, which is exactly where a user is choosing between them.
 import math
 from datetime import date
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal
@@ -57,14 +58,48 @@ FESTIVAL_RARE = RARE_WORDS + ("final edition", "last edition", "farewell edition
                               "first edition", "inaugural")
 
 
-def _artist(db: Session, f: Festival, cache: dict):
-    """The bill, judged exactly as a concert's line-up is."""
+def _real_bill(db: Session, f: Festival) -> list:
+    """The acts actually playing — with the two things that are not acts removed.
+
+    Ticketmaster bills things that are not performers, and stored as artists they inherit
+    a popularity that is not theirs:
+
+      • A GENRE WORD. 'Labor Day Jazz Fest' had exactly one act, named 'Jazz', carrying
+        1,127,865 Last.fm listeners — the tag's audience, not a band's. That single row
+        scored the festival 10.0, above Creamfields and its 142 acts. Checked against our
+        own pruned `genres` table, so the test is a curated list rather than a guess.
+
+      • THE FESTIVAL ITSELF. 207 line-up rows name the festival as its own performer —
+        'Just Like Heaven Festival' playing Just Like Heaven Festival. That is a billing
+        artefact, and counting it inflates both the bill size and the stature.
+
+    Same family as 'Fast Track - O2 arena' and 'AO Arena - Premium Packages': strings from
+    a ticketing system that became artist rows because something had to hold them.
+    """
     rows = (db.query(Artist)
               .join(FestivalLineup, FestivalLineup.artist_id == Artist.id)
               .filter(FestivalLineup.festival_id == f.id)
               .order_by(FestivalLineup.sort_order).all())
+    if not rows:
+        return []
+    names = [a.name for a in rows]
+    genre_names = {r[0] for r in db.execute(text("""
+        SELECT public.mx_fold(a.name) FROM artists a
+        WHERE a.name = ANY(:names)
+          AND EXISTS (SELECT 1 FROM genres g
+                      WHERE public.mx_fold(g.name) = public.mx_fold(a.name))"""),
+        {"names": names}).all()}
+    own = db.execute(text("SELECT public.mx_fold(:n)"), {"n": f.name or ""}).scalar()
+    folded = {a.name: r[0] for a, r in zip(rows, db.execute(text(
+        "SELECT public.mx_fold(n) FROM unnest(CAST(:names AS text[])) AS n"), {"names": names}).all())}
+    return [a for a in rows
+            if folded.get(a.name) not in genre_names and folded.get(a.name) != own]
+
+
+def _artist(db: Session, f: Festival, cache: dict):
+    """The bill, judged exactly as a concert's line-up is."""
     # live=False: read stored popularity only. See stature_from_bill.
-    return stature_from_bill(db, rows, cache, live=False)
+    return stature_from_bill(db, _real_bill(db, f), cache, live=False)
 
 
 def _rarity(f: Festival):
@@ -75,7 +110,7 @@ def _rarity(f: Festival):
     return {"pct": 0.9, "confidence": "high", "reason": f"Rare occasion · “{hit}”"}
 
 
-def _context(f: Festival):
+def _context(db: Session, f: Festival):
     """How much festival this is: days on site, and how many acts it books.
 
     Continuous, not a flag. The concert scorer can only ask "is this a festival?" and answer
@@ -83,7 +118,11 @@ def _context(f: Festival):
     seventy acts is a different proposition from one afternoon and five, and the ranking
     should be able to say so.
     """
-    acts = f.artists_count or 0
+    # Ticketmaster's own count first; failing that, count the bill we hold. 133 festivals
+    # have line-up rows and no artists_count, and without this fallback every one of them
+    # scored on the artist component ALONE — a single line of evidence, rank-calibrated to a
+    # decimal place, which reads far more certain than it is.
+    acts = f.artists_count or len(_real_bill(db, f))
     days = f.days or ((f.ends_on - f.starts_on).days + 1 if f.ends_on and f.starts_on else None)
 
     # The BILL is the festival. A duration on its own says nothing about quality, and taking
@@ -118,7 +157,7 @@ def _collect(db: Session, f: Festival, cache: dict) -> dict:
     if (r := _rarity(f)):
         comps["rarity"] = {"weight": WEIGHTS["rarity"], "pct": r["pct"],
                            "confidence": r["confidence"], "reason": r["reason"]}
-    if (c := _context(f)):
+    if (c := _context(db, f)):
         comps["context"] = {"weight": WEIGHTS["context"], "raw": c["raw"],
                             "confidence": c["confidence"], "reason": c["reason"]}
     return comps

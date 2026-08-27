@@ -51,3 +51,7 @@ class FestivalDetail(FestivalOut):
     # is still growing is a different claim from a bill that is finished.
     lineup_complete: bool = False
     last_verified: date | None = None
+    # The score, taken apart: which components contributed, what each one read, and — named,
+    # not silently dropped — which parts of the formula this festival could not answer. The
+    # PRD requires every score to carry its reasons; a bare 9.4 explains nothing.
+    mxs_breakdown: dict | None = None

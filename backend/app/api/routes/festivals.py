@@ -262,6 +262,7 @@ def get_festival(festival_id: UUID, db: Session = Depends(get_db)):
     out.about = f.about
     out.lineup_complete = bool(f.lineup_complete)
     out.last_verified = f.last_verified
+    out.mxs_breakdown = f.mxs_breakdown
 
     # Headliners first, then the seller's own order — the same shape the concert line-up
     # uses, so the two pages read alike.
