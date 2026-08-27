@@ -23,8 +23,10 @@ from app.models.festival_lineup import FestivalLineup
 from app.models.festival_source import FestivalSource
 from app.services.provenance import sync_facts
 from app.services.trust import confidence_for
-from app.services.ticketmaster import (artist_attraction, fetch_artist_events, fetch_event_by_id,
-                                       fetch_music_events, search_festivals, search_music_events)
+from app.services.ticketmaster import (REVERIFY_BATCH, artist_attraction,
+                                       fetch_artist_events, fetch_events_by_ids,
+                                       fetch_music_events, search_festivals,
+                                       search_music_events)
 
 
 # Listings that SAY they are not a ticket to anything. Ticketmaster sells add-ons through
@@ -382,14 +384,28 @@ def ingest_from_ticketmaster(size: int = 100):
 # one per event. With the sweeps taking ~550, this cap keeps a night's run comfortably
 # inside the budget while the catalogue keeps growing. Events past the cap are not
 # skipped forever — they move up the queue as their date approaches.
-MAX_REVERIFY_PER_RUN = 2000
+# No cap. There was one — 2,000 — and it existed only because each event cost one
+# Ticketmaster request: 6,386 upcoming shows against a quota of 5,000 a day did not fit, so the
+# pass took the soonest 2,000 and everything past about two months went unchecked for weeks. The
+# oldest stamp in the catalogue had drifted nine days while the schedule looked healthy.
+#
+# Batched, the whole catalogue costs ~43 requests, so rationing it makes no sense. Kept as a
+# number rather than deleted because `limit=` still needs a ceiling for tests, and because a
+# catalogue that somehow grew past this really would be worth noticing.
+MAX_REVERIFY_PER_RUN = 50000
 
 
 def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -> dict:
-    """Deep refresh: re-fetch EVERY Ticketmaster event we have (by its TM id) and update
-    it in place — status (cancelled/postponed), dates, price — for ALL shows in the
-    catalogue, not just followed artists. `limit` caps how many (for a quick test).
-    Network fetches run without holding a DB connection; one batched write at the end."""
+    """Deep refresh: re-fetch EVERY Ticketmaster event we have and update it in place —
+    status (cancelled/postponed), dates, price — for ALL shows, not just followed artists.
+
+    Batched: 150 ids per request instead of one event per request. That is the difference
+    between checking the soonest 2,000 shows and checking all 6,386 of them, and between
+    spending 2,000 requests and spending about 43.
+
+    `limit` caps how many (for a quick test). Network fetches run without holding a DB
+    connection; one batched write at the end.
+    """
     db: Session = SessionLocal()
     try:
         # UPCOMING only, soonest first. Two reasons this matters now that the broad
@@ -397,12 +413,11 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
         #
         #   • Re-checking a show that already happened cannot tell us anything and
         #     cost 933 API calls a night.
-        #   • Every check is one Ticketmaster request, and the free tier allows 5,000
-        #     a day. Checking all 4,677 events plus the sweeps came to ~5,229 — over
-        #     the limit, which would have started failing silently.
+        #   • It keeps the pass small even though batching made it cheap. 1,288 of the
+        #     7,674 rows we hold are in the past.
         #
-        # Soonest-first is also the right priority: a show next week is the one someone
-        # has tickets for, and a show next June gets re-checked many times as it nears.
+        # Soonest-first is kept even though everything now fits in one pass: if a batch fails
+        # partway, the shows people already hold tickets for have already been done.
         rows = (
             db.query(EventSource.source_event_id)
             .join(Event, Event.id == EventSource.event_id)
@@ -418,18 +433,20 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
     tm_ids = list(dict.fromkeys(tm_ids))  # de-dupe, keeps soonest-first order
     tm_ids = tm_ids[:(limit or MAX_REVERIFY_PER_RUN)]
 
-    print(f"[refresh] re-verifying {len(tm_ids)} events by Ticketmaster id")
-    raws: list = []
-    gone = 0
-    for i, tm_id in enumerate(tm_ids, 1):
-        raw = fetch_event_by_id(tm_id)
-        if raw:
-            raws.append(raw)
-        else:
-            gone += 1
-        if i % 200 == 0 or i == len(tm_ids):
-            print(f"[refresh] fetched {i}/{len(tm_ids)}")
-        time.sleep(delay_seconds)
+    print(f"[refresh] re-verifying {len(tm_ids)} events in batches of "
+          f"{REVERIFY_BATCH}")
+    raws, unchecked, requests = fetch_events_by_ids(tm_ids, delay_seconds=delay_seconds)
+
+    # GONE is what we asked about, got an answer for, and did not get back. Verified against the
+    # live API: a batch containing an unknown id returns HTTP 200 with every valid event and
+    # omits the bad one, so absence really is retirement — but only within a response that
+    # arrived. Events in a batch whose request failed are UNCHECKED, and calling those gone would
+    # report a network blip as 150 cancellations.
+    returned = {r.get("id") for r in raws if r.get("id")}
+    unchecked_set = set(unchecked)
+    gone = sum(1 for i in tm_ids if i not in returned and i not in unchecked_set)
+    print(f"[refresh] {len(raws)} returned, {gone} gone, {len(unchecked)} unchecked, "
+          f"{requests} request(s) spent")
 
     updated, lines = 0, []
     if raws:
@@ -445,6 +462,7 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
         finally:
             db.close()
     summary = {"checked": len(tm_ids), "updated": updated, "gone": gone,
+               "unchecked": len(unchecked), "requests": requests,
                "changes": len(lines)}
     print(f"[refresh] re-verify done — {summary}")
     for line in lines:

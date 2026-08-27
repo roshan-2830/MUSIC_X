@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import time
+
 import httpx
 
 from app.core.config import settings
@@ -97,6 +99,64 @@ def search_music_events(keyword: str, size: int = 20):
     r = httpx.get(BASE, params=params, timeout=30)
     r.raise_for_status()
     return r.json().get("_embedded", {}).get("events", [])
+
+
+# Ticketmaster answers about up to 200 events in ONE request when their ids are passed
+# together — verified live: 200 ids returned 200 events for a single call, and the payload is
+# byte-identical in shape to the one-at-a-time endpoint (same 15 keys, same status, dates,
+# timezone, prices, venue and line-up).
+#
+# 150, not 200, on purpose. 200 ids is a 3,189-character URL, which worked but sits close
+# enough to what proxies and CDNs truncate that a silent loss is conceivable, and the whole
+# point of this pass is trusting what came back. The margin costs 11 extra requests across the
+# entire catalogue.
+REVERIFY_BATCH = 150
+
+
+def fetch_events_by_ids(tm_ids: list, *, delay_seconds: float = 0.2) -> tuple:
+    """Full payloads for many events at once.
+
+    (raws, unchecked_ids, requests). Replaces one request per event, which is what made a full
+    re-verify impossible: 6,386 upcoming shows needed 6,386 requests against a quota of 5,000 a
+    day, so the pass was capped at the soonest 2,000 and everything beyond about two months went
+    unchecked for weeks. The same work is now ~43 requests.
+
+    MISSING AND UNCHECKED ARE DIFFERENT ANSWERS and the caller must keep them apart. An id that
+    is absent from a successful response is genuinely gone from Ticketmaster — verified: a batch
+    containing an unknown id still returns HTTP 200 with every valid event and simply omits the
+    bad one, so one dead show cannot spoil the rest. But a batch whose REQUEST failed says
+    nothing about any of its 150 events, and counting those as gone would report a network blip
+    as 150 cancellations.
+    """
+    raws, unchecked, requests = [], [], 0
+    for start in range(0, len(tm_ids), REVERIFY_BATCH):
+        chunk = tm_ids[start:start + REVERIFY_BATCH]
+        got = None
+        for attempt in (1, 2):
+            try:
+                requests += 1
+                r = httpx.get(BASE, params={
+                    "id": ",".join(chunk),
+                    "size": REVERIFY_BATCH,
+                    "apikey": settings.ticketmaster_api_key,
+                }, timeout=40)
+                r.raise_for_status()
+                got = ((r.json().get("_embedded") or {}).get("events") or [])
+                break
+            except Exception as e:
+                if attempt == 2:
+                    print(f"[refresh] batch {start//REVERIFY_BATCH + 1} failed twice: "
+                          f"{type(e).__name__}")
+                else:
+                    time.sleep(1.5)
+        if got is None:
+            unchecked.extend(chunk)
+            continue
+        raws.extend(got)
+        # What was asked for and not returned is worked out by the caller, against the ids it
+        # asked for minus the ids that came back minus the ones it knows went unchecked.
+        time.sleep(delay_seconds)
+    return raws, unchecked, requests
 
 
 # Festival discovery is keyword-only, and that is a limit of the source rather than a
