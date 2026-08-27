@@ -35,6 +35,18 @@ function hhmm(iso: string | null): string {
   return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5);
 }
 
+/** Short weekday names by index, rather than toLocaleDateString.
+ *
+ *  Hermes ships a partial Intl and the locale data is not guaranteed on device, so a formatter
+ *  can silently come back with something unexpected. A seven-item array cannot. */
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function weekday(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : DAYS[d.getDay()];
+}
+
 /** Whole days between departing and arriving, in the airports' own local dates.
  *
  *  Without this the tab printed "19:50 -> 10:05" for an overnight connection, which reads as
@@ -235,15 +247,20 @@ function FlightRow({ flight, showLocal }: { flight: Flight; showLocal: string | 
   // an overnight arrival was the tab claiming something untrue.
   const dur = duration(flight.duration_minutes);
   const durLabel = dur ? (direct ? dur : `${dur} in the air`) : null;
-  const plus = dayOffset(flight.departs_at, flight.arrives_at);
+  // "+1" is airline shorthand and read as nonsense by anyone who has not flown much — the
+  // first person shown it asked what it meant. A day name needs no explaining: "19:50 -> Thu
+  // 10:05" is obviously the next morning, and it keeps working for a two-day itinerary where
+  // "+2" would have needed explaining twice.
+  const landsLater = dayOffset(flight.departs_at, flight.arrives_at) > 0;
+  const arrDay = landsLater ? weekday(flight.arrives_at) : null;
   return (
     <View style={styles.row}>
       <View style={styles.thumb}><Ionicons name="airplane" size={18} color={MUTED} /></View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
-          {hhmm(flight.departs_at)} → {hhmm(flight.arrives_at)}
-          {plus > 0 ? <Text style={styles.nextDay}> +{plus}</Text> : null}
-          {flight.origin ? `  ${flight.origin}–${flight.destination}` : ""}
+          {hhmm(flight.departs_at)} →{" "}
+          {arrDay ? <Text style={styles.nextDay}>{arrDay} </Text> : null}
+          {hhmm(flight.arrives_at)}
         </Text>
         <Text style={styles.rowSub} numberOfLines={1}>
           {[flight.airline, durLabel, stops].filter(Boolean).join(" · ")}
@@ -473,7 +490,12 @@ export default function PlanTrip({
             ) : null}
             {ctx.kind === "regional" && wantFlights && flights?.flights?.length ? (
               <>
-                <Text style={styles.dates}>Arriving the day before · cheapest first</Text>
+                <Text style={styles.dates}>
+                  {flights.flights[0]?.origin
+                    ? `${flights.flights[0].origin} → ${flights.flights[0].destination} · `
+                    : ""}
+                  cheapest that gets you there
+                </Text>
                 {flights.flights.map((f, i) =>
                   <FlightRow key={`${f.flight_number}-${i}`} flight={f}
                              showLocal={flights.show_local_start} />)}
@@ -494,7 +516,10 @@ export default function PlanTrip({
         ) : flights?.flights?.length ? (
           <>
             <Text style={styles.dates}>
-              Arriving the day before · cheapest that gets you there
+              {flights.flights[0]?.origin
+                ? `${flights.flights[0].origin} → ${flights.flights[0].destination} · `
+                : ""}
+              cheapest that gets you there
             </Text>
             {flights.flights.map((f, i) =>
               <FlightRow key={`${f.flight_number}-${i}`} flight={f}
@@ -571,7 +596,10 @@ const styles = StyleSheet.create({
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },
   // The day marker on an arrival. Accent, because "+1" changing to "+2" is the difference
   // between making the show and missing it.
-  nextDay: { color: ACCENT, fontSize: 12, fontWeight: "800" },
+  // Same size as the times it sits between — a smaller day name looked like a footnote on the
+  // arrival rather than part of it. Accent coloured, because landing on a different day is the
+  // difference between making the show and missing it.
+  nextDay: { color: ACCENT, fontSize: 14, fontWeight: "800" },
   verdict: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   verdictText: { fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
   hereRow: {
