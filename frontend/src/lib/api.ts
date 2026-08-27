@@ -657,6 +657,10 @@ export type Flight = {
   price_currency: string | null;
   deep_link: string | null;
   provider: string;
+  /** Minutes between landing and the show starting, both on the destination city's own clock.
+   *  Negative means you have missed it. Null when the show's start time isn't published — a
+   *  margin nobody can compute must not be shown as a comfortable one. */
+  minutes_before_show: number | null;
 };
 
 /** `status` matters as much as the list. "no stays here" and "we could not ask" are
@@ -675,6 +679,9 @@ export type TravelOptions = {
    *  property's details can only be asked for inside the search that found it. */
   doc_key: string | null;
   search_token: string | null;
+  /** When the show starts, on the clock of the city it's in — so the screen can say "lands the
+   *  day before" by comparing dates rather than inferring it from a number of hours. */
+  show_local_start: string | null;
 };
 
 /** Where this person is sleeping for this show, as they told us.
@@ -708,6 +715,7 @@ export type StayBase = {
 const NO_TRAVEL: TravelOptions = {
   status: "unavailable", reason: null, check_in: null, check_out: null,
   booking_url: null, stays: [], flights: [], doc_key: null, search_token: null,
+  show_local_start: null,
 };
 
 /** Somewhere to stay for the night of the show. Dates come from the event, not the user. */

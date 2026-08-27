@@ -191,7 +191,38 @@ function duration(mins: number | null): string | null {
   return h ? `${h}h${String(m).padStart(2, "0")}` : `${m}m`;
 }
 
-function FlightRow({ flight }: { flight: Flight }) {
+const GOOD = "#7ef0b2";
+const TIGHT = "#ffc266";
+const LATE = "#ff7a6b";
+
+/** Does this flight actually get them to the show?
+ *
+ *  The reason this tab exists rather than a link to an airline. Google Flights does not know
+ *  about the concert; Ticketmaster does not know about the flight. We hold both, so we are the
+ *  only ones who can say this — and saying it wrong is worse than not saying it, which is why a
+ *  show with no published start time gets no verdict at all.
+ */
+function verdict(
+  m: number | null,
+  arrivesAt: string | null,
+  showLocal: string | null,
+): { text: string; tone: string; icon: string } | null {
+  if (m == null) return null;
+  if (m < 0) return { text: "Lands after the show starts", tone: LATE, icon: "close-circle" };
+  // Decided by the calendar, not by a number of hours. An earlier cut said "the day before"
+  // past 1440 minutes and "23h55 before the show" just under it — the same situation described
+  // two ways, split by a cliff that means nothing to a traveller.
+  if (arrivesAt && showLocal && dayOffset(arrivesAt, showLocal) > 0) {
+    return { text: "Lands the day before", tone: GOOD, icon: "checkmark-circle" };
+  }
+  const label = duration(m) ?? `${m}m`;
+  // Under three hours means landing, clearing an airport and crossing a city before the doors.
+  // Possible, and not something to reassure anyone about.
+  if (m < 180) return { text: `Only ${label} before the show`, tone: TIGHT, icon: "alert-circle" };
+  return { text: `Lands ${label} before the show`, tone: GOOD, icon: "checkmark-circle" };
+}
+
+function FlightRow({ flight, showLocal }: { flight: Flight; showLocal: string | null }) {
   const price = money(flight.price_amount, flight.price_currency);
   const direct = flight.stops === 0;
   const stops = flight.stops == null ? null
@@ -217,6 +248,18 @@ function FlightRow({ flight }: { flight: Flight }) {
         <Text style={styles.rowSub} numberOfLines={1}>
           {[flight.airline, durLabel, stops].filter(Boolean).join(" · ")}
         </Text>
+        {(() => {
+          const v = verdict(flight.minutes_before_show, flight.arrives_at, showLocal);
+          if (!v) return null;
+          return (
+            <View style={styles.verdict}>
+              <Ionicons name={v.icon as any} size={12} color={v.tone} />
+              <Text style={[styles.verdictText, { color: v.tone }]} numberOfLines={1}>
+                {v.text}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
       <View style={styles.rowEnd}>
         {price ? <Text style={styles.price}>{price}</Text> : null}
@@ -432,7 +475,8 @@ export default function PlanTrip({
               <>
                 <Text style={styles.dates}>Arriving the day before · cheapest first</Text>
                 {flights.flights.map((f, i) =>
-                  <FlightRow key={`${f.flight_number}-${i}`} flight={f} />)}
+                  <FlightRow key={`${f.flight_number}-${i}`} flight={f}
+                             showLocal={flights.show_local_start} />)}
                 <Text style={styles.footnote}>
                   Prices for planning. Booking flights isn't connected yet.
                 </Text>
@@ -450,9 +494,11 @@ export default function PlanTrip({
         ) : flights?.flights?.length ? (
           <>
             <Text style={styles.dates}>
-              Arriving the day before · cheapest first
+              Arriving the day before · cheapest that gets you there
             </Text>
-            {flights.flights.map((f, i) => <FlightRow key={`${f.flight_number}-${i}`} flight={f} />)}
+            {flights.flights.map((f, i) =>
+              <FlightRow key={`${f.flight_number}-${i}`} flight={f}
+                         showLocal={flights.show_local_start} />)}
             {/* No Book button, deliberately. Their consumer site is hotels only — /flights
                 serves the hotel homepage and every results route 404s — so there is nowhere
                 to hand a traveller over to. Booking flights would mean taking passenger
@@ -526,6 +572,8 @@ const styles = StyleSheet.create({
   // The day marker on an arrival. Accent, because "+1" changing to "+2" is the difference
   // between making the show and missing it.
   nextDay: { color: ACCENT, fontSize: 12, fontWeight: "800" },
+  verdict: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+  verdictText: { fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
   hereRow: {
     flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 4, marginTop: 4,
   },

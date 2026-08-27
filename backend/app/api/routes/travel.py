@@ -12,7 +12,8 @@ the second.
 import re
 import unicodedata
 import uuid as _uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from urllib.parse import quote
 from uuid import UUID
 
@@ -145,6 +146,53 @@ def _to_flight(f: dict) -> Flight:
         price_amount=_num(price.get("totalFare")),
         price_currency="INR",
     )
+
+
+# Before this hour, a "start time" is not a start time. 45 of our 5,902 upcoming shows convert
+# to the small hours — Copenhagen 02:00, London 01:00 — which is what Ticketmaster's date-only
+# fallback produces once a timezone is applied: midnight UTC shifted sideways. Concerts do not
+# start at 2am, so those are treated as unpublished rather than compared against.
+#
+# The threshold has to be this low, not higher. Midnight-UTC rows are OVERWHELMINGLY genuine US
+# evening shows — New York 20:00, Chicago 19:00, 400-odd of them — so excluding every midnight
+# UTC row would have thrown away real data to catch a handful of placeholders.
+EARLIEST_PLAUSIBLE_HOUR = 10
+
+
+def _show_local_start(ev: Event):
+    """When the show starts, on the clock of the city it happens in. None if unknowable.
+
+    starts_at is a true UTC instant and `timezone` is the venue's zone ("Europe/London"), so
+    this conversion is exact — 17:00 UTC becomes 18:00 in London during BST.
+
+    Local time is the whole point. A flight's arrival comes back as local airport time with no
+    timezone attached, and the airport is in the same city as the venue, so comparing the two
+    local clocks is correct without knowing the offset. Comparing a local arrival against a UTC
+    show time would be wrong by that offset — hours, in either direction.
+    """
+    if ev.starts_at is None or not ev.timezone:
+        return None
+    try:
+        local = ev.starts_at.astimezone(ZoneInfo(ev.timezone)).replace(tzinfo=None)
+    except Exception:
+        return None                      # unknown zone name; say nothing rather than guess
+    if local.hour < EARLIEST_PLAUSIBLE_HOUR:
+        return None
+    return local
+
+
+def _minutes_before(arrives_at, show_local) -> int | None:
+    """Minutes from landing to the first note, or None if either end is unknown."""
+    if not arrives_at or show_local is None:
+        return None
+    try:
+        # No timezone in the supplier's string; it is local airport time, same city as the show.
+        arrival = datetime.fromisoformat(str(arrives_at).replace("Z", ""))
+        if arrival.tzinfo is not None:
+            arrival = arrival.replace(tzinfo=None)
+    except Exception:
+        return None
+    return int((show_local - arrival).total_seconds() // 60)
 
 
 def _event_place(db: Session, ev: Event) -> tuple:
@@ -337,12 +385,30 @@ def flights_for_event(
     # slicing that raw showed twenty near-identical Kuwait Airways fares while cheaper ones
     # sat further down the list. Price is the question a traveller is asking here.
     parsed = [_to_flight(f) for f in offers if isinstance(f, dict)]
-    parsed.sort(key=lambda f: (f.price_amount is None, f.price_amount or 0,
-                               f.duration_minutes or 0))
+
+    # Does this flight actually get them there in time? The one thing an airline site and a
+    # ticket site each cannot answer, because neither knows about the other half. Computed on
+    # both local clocks — see _show_local_start.
+    show_local = _show_local_start(ev)
+    for f in parsed:
+        f.minutes_before_show = _minutes_before(f.arrives_at, show_local)
+
+    # CHEAPEST FIRST. The search returns up to 199 offers in the supplier's own order, and
+    # slicing that raw showed twenty near-identical Kuwait Airways fares while cheaper ones
+    # sat further down the list. Price is the question a traveller is asking here.
+    #
+    # But a flight that does not arrive in time is not an answer at any price, so those sink
+    # below the ones that do rather than heading the list. They are still shown: a cheap fare
+    # plus a night in a hotel is a real plan, and the row says plainly that it lands late.
+    def in_time(f):
+        return f.minutes_before_show is None or f.minutes_before_show >= 0
+    parsed.sort(key=lambda f: (not in_time(f), f.price_amount is None,
+                               f.price_amount or 0, f.duration_minutes or 0))
     return TravelOptions(
         status="ok" if offers else "unavailable",
         reason=None if offers else f"No flights found from {from_code} to {to_code} on {depart_on}.",
         flights=parsed[:20],
+        show_local_start=show_local.isoformat() if show_local else None,
     )
 
 

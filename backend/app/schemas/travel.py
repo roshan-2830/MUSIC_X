@@ -42,6 +42,11 @@ class Flight(BaseModel):
     price_currency: str | None = None
     deep_link: str | None = None
     provider: str = "tripsure"
+    # Minutes between landing and the show starting, both in the destination city's own local
+    # time. Positive means you land before it starts; negative means you have missed it. None
+    # when the show's start time is not published, because a margin nobody can compute must
+    # not be presented as a comfortable one.
+    minutes_before_show: int | None = None
 
 
 class TravelOptions(BaseModel):
@@ -65,6 +70,11 @@ class TravelOptions(BaseModel):
     # it. Handles, not secrets — useless without the server's API key.
     doc_key: str | None = None
     search_token: str | None = None
+    # When the show starts, on the clock of the city it happens in. Sent so the screen can say
+    # "lands the day before" by comparing calendar days rather than guessing from a margin —
+    # 23h55 and 24h05 are the same situation and a 24-hour cliff described them differently.
+    # None when the start time is not published.
+    show_local_start: str | None = None
 
 
 class StayBase(BaseModel):
