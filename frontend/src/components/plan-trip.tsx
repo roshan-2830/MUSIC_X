@@ -61,28 +61,33 @@ function BookButton({ url }: { url: string }) {
   );
 }
 
+/** How long, in the form a traveller reads: 11h45, not 705 minutes. */
+function duration(mins: number | null): string | null {
+  if (!mins) return null;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h ? `${h}h${String(m).padStart(2, "0")}` : `${m}m`;
+}
+
 function FlightRow({ flight }: { flight: Flight }) {
   const price = money(flight.price_amount, flight.price_currency);
-  const stops = flight.stops == null ? "" : flight.stops === 0 ? "Direct" : `${flight.stops} stop${flight.stops > 1 ? "s" : ""}`;
+  const stops = flight.stops == null ? null
+    : flight.stops === 0 ? "Direct"
+    : `${flight.stops} stop${flight.stops > 1 ? "s" : ""}`;
   return (
     <View style={styles.row}>
       <View style={styles.thumb}><Ionicons name="airplane" size={18} color={MUTED} /></View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {hhmm(flight.departs_at)} → {hhmm(flight.arrives_at)}
+          {flight.origin ? `  ${flight.origin}–${flight.destination}` : ""}
         </Text>
         <Text style={styles.rowSub} numberOfLines={1}>
-          {[flight.airline, flight.flight_number, stops].filter(Boolean).join(" · ")}
+          {[flight.airline, duration(flight.duration_minutes), stops].filter(Boolean).join(" · ")}
         </Text>
       </View>
       <View style={styles.rowEnd}>
         {price ? <Text style={styles.price}>{price}</Text> : null}
-        {flight.deep_link ? (
-          <Pressable style={styles.book} onPress={() => Linking.openURL(flight.deep_link!)}>
-            <Text style={styles.bookText}>Book</Text>
-            <Ionicons name="open-outline" size={11} color="#101204" />
-          </Pressable>
-        ) : null}
       </View>
     </View>
   );
@@ -192,7 +197,19 @@ export default function PlanTrip({
             <Text style={styles.emptyText}>Set your city in your profile and we'll find flights.</Text>
           </View>
         ) : flights?.flights?.length ? (
-          flights.flights.map((f, i) => <FlightRow key={`${f.flight_number}-${i}`} flight={f} />)
+          <>
+            <Text style={styles.dates}>
+              Arriving the day before · cheapest first
+            </Text>
+            {flights.flights.map((f, i) => <FlightRow key={`${f.flight_number}-${i}`} flight={f} />)}
+            {/* No Book button, deliberately. Their consumer site is hotels only — /flights
+                serves the hotel homepage and every results route 404s — so there is nowhere
+                to hand a traveller over to. Booking flights would mean taking passenger
+                details and payment ourselves, which is a decision, not a missing button. */}
+            <Text style={styles.footnote}>
+              Prices for planning. Booking flights isn't connected yet.
+            </Text>
+          </>
         ) : (
           <Empty options={flights} kind="Flight" />
         )
@@ -251,6 +268,7 @@ const styles = StyleSheet.create({
   bookWideText: { color: "#101204", fontSize: 15, fontWeight: "800" },
   empty: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 22 },
   emptyText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
+  footnote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 12, fontStyle: "italic" },
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },
   promiseText: { color: MUTED, fontSize: 11, lineHeight: 16, flex: 1 },
 });

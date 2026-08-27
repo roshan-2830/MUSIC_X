@@ -38,10 +38,16 @@ class Settings(BaseSettings):
     # on the hotels host answers "Missing Authentication Token", which is API Gateway's
     # phrasing for a route that does not exist there — so the flights base URL is its own
     # setting and flights stay dark until it is supplied.
+    # Hotels and flights are separate services with SEPARATE credentials — a different
+    # tenant AND a different key, not just a different host. Sharing one pair, as the first
+    # version did, would have authenticated against the wrong service.
     tripsure_base_url: str = ""
-    tripsure_flights_base_url: str = ""
     tripsure_tenant_id: str = ""
     tripsure_api_key: str = ""
+
+    tripsure_flight_base_url: str = ""
+    tripsure_flight_tenant_id: str = ""
+    tripsure_flight_api_key: str = ""
 
     # Spotify (added later, when Premium is available)
     spotify_client_id: str = ""

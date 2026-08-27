@@ -89,27 +89,35 @@ def _to_stay(h: dict) -> Stay:
 
 
 def _to_flight(f: dict) -> Flight:
-    price = _first(f, "price", "fare", "totalFare", default={})
-    if isinstance(price, dict):
-        amount = _num(_first(price, "totalFare", "amount", "total", "grandTotal"))
-        currency = _first(price, "currency", "currencyCode")
-    else:
-        amount, currency = _num(price), _first(f, "currency", "currencyCode")
-    segs = _first(f, "segments", "legs", default=[]) or []
-    first_seg = segs[0] if segs else {}
-    last_seg = segs[-1] if segs else {}
+    """One offer, from the shape a live search actually returned.
+
+    Confirmed 2026-08-27 against DEL-BOM (199 offers): each offer is
+    { provider, fareSourceCode, validatingCarrier, segments[], PriceSummaries[] }. The first
+    version guessed at `price.amount` and `departureTime`; the real names are
+    PriceSummaries[0].totalFare and segments[].departureDateTime, so every offer would have
+    rendered blank.
+
+    `stops` is counted from the segments rather than read from a field: segments[].stops is
+    the stops WITHIN one leg, so a two-segment itinerary with stops=0 on each is still a
+    one-stop journey. Reading that field would have called every connection direct.
+    """
+    segs = f.get("segments") or []
+    first, last = (segs[0] if segs else {}), (segs[-1] if segs else {})
+    prices = f.get("PriceSummaries") or []
+    price = prices[0] if prices else {}
+    total_mins = sum(int(sg.get("durationInMins") or 0) for sg in segs) or None
+    within = sum(int(sg.get("stops") or 0) for sg in segs)
     return Flight(
-        airline=_first(first_seg, "airline", "carrier", "airlineName") or _first(f, "airline"),
-        flight_number=_first(first_seg, "flightNumber", "flight_number", "number"),
-        origin=_first(first_seg, "origin", "from", "departureAirport"),
-        destination=_first(last_seg, "destination", "to", "arrivalAirport"),
-        departs_at=_first(first_seg, "departureTime", "departure_date_time", "departsAt"),
-        arrives_at=_first(last_seg, "arrivalTime", "arrival_date_time", "arrivesAt"),
-        stops=len(segs) - 1 if segs else None,
-        duration_minutes=_first(f, "durationMinutes", "duration_minutes", "totalDuration"),
-        price_amount=amount,
-        price_currency=currency,
-        deep_link=_first(f, "deepLink", "bookingUrl", "url"),
+        airline=first.get("airlineName") or first.get("airlineCode"),
+        flight_number=first.get("flightNumber"),
+        origin=first.get("departureAirport"),
+        destination=last.get("arrivalAirport"),
+        departs_at=first.get("departureDateTime"),
+        arrives_at=last.get("arrivalDateTime"),
+        stops=max(0, len(segs) - 1) + within,
+        duration_minutes=total_mins,
+        price_amount=_num(price.get("totalFare")),
+        price_currency="INR",
     )
 
 
@@ -250,15 +258,28 @@ def flights_for_event(
     trace = tripsure.new_trace_id()
 
     def code_for(q: str) -> str | None:
-        # Already an IATA code? Take it. Otherwise resolve the name.
+        """A city name to the airport people actually fly into.
+
+        The field is `airport_code`, confirmed against the live service. The first version
+        read iataCode / code / iata — none of which exist — so every lookup failed and the
+        tab said it could not find an airport for Delhi.
+
+        Ranked by their own popularity_score, which matters wherever a city has several:
+        "London" returns Heathrow among others, and the busiest is the one a traveller means.
+        A city match is preferred first, because a query can also match an airport whose name
+        merely contains the word.
+        """
         if len(q) == 3 and q.isalpha():
-            return q.upper()
+            return q.upper()          # already a code
         hits = tripsure.suggest_airports(q, trace_id=trace) or []
-        for h in hits:
-            c = _first(h, "iataCode", "code", "iata")
-            if c:
-                return str(c).upper()
-        return None
+        if not hits:
+            return None
+        ranked = sorted(hits, key=lambda h: -float(h.get("popularity_score") or 0))
+        same_city = [h for h in ranked
+                     if (h.get("city") or "").strip().lower() == q.strip().lower()]
+        best = (same_city or ranked)[0]
+        code = best.get("airport_code")
+        return str(code).upper() if code else None
 
     from_code, to_code = code_for(origin), code_for(city_name)
     if not (from_code and to_code):
@@ -272,8 +293,14 @@ def flights_for_event(
     if offers is None:
         return TravelOptions(status="unavailable",
                              reason="We could not reach our travel provider just now.")
+    # CHEAPEST FIRST. The search returns up to 199 offers in the supplier's own order, and
+    # slicing that raw showed twenty near-identical Kuwait Airways fares while cheaper ones
+    # sat further down the list. Price is the question a traveller is asking here.
+    parsed = [_to_flight(f) for f in offers if isinstance(f, dict)]
+    parsed.sort(key=lambda f: (f.price_amount is None, f.price_amount or 0,
+                               f.duration_minutes or 0))
     return TravelOptions(
         status="ok" if offers else "unavailable",
         reason=None if offers else f"No flights found from {from_code} to {to_code} on {depart_on}.",
-        flights=[_to_flight(f) for f in offers[:20] if isinstance(f, dict)],
+        flights=parsed[:20],
     )

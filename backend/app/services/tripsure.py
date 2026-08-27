@@ -42,10 +42,21 @@ from app.core.config import settings
 TIMEOUT = 20.0
 
 
+def _creds(flights: bool) -> tuple:
+    """(base_url, tenant, key) for the service being called.
+
+    Hotels and flights are separate services with separate tenants AND separate keys, not
+    one account on two hosts. Sharing a pair authenticates against the wrong service.
+    """
+    if flights:
+        return (settings.tripsure_flight_base_url, settings.tripsure_flight_tenant_id,
+                settings.tripsure_flight_api_key)
+    return (settings.tripsure_base_url, settings.tripsure_tenant_id, settings.tripsure_api_key)
+
+
 def configured(flights: bool = False) -> bool:
-    """Whether we hold enough to call at all. Flights need their own host."""
-    base = settings.tripsure_flights_base_url if flights else settings.tripsure_base_url
-    return bool(base and settings.tripsure_tenant_id and settings.tripsure_api_key)
+    """Whether we hold enough to call this service at all."""
+    return all(_creds(flights))
 
 
 def new_trace_id() -> str:
@@ -58,10 +69,12 @@ def new_trace_id() -> str:
     return str(uuid.uuid4())
 
 
-def _headers(trace_id: str | None = None, user_id: str | None = None) -> dict:
+def _headers(trace_id: str | None = None, user_id: str | None = None,
+             flights: bool = False) -> dict:
+    _base, tenant, key = _creds(flights)
     h = {
-        "x-tenant-id": settings.tripsure_tenant_id,
-        "x-api-key": settings.tripsure_api_key,
+        "x-tenant-id": tenant,
+        "x-api-key": key,
         "x-trace-id": trace_id or new_trace_id(),
         "Content-Type": "application/json",
     }
@@ -91,11 +104,11 @@ def _unwrap(payload: dict, key: str = "data"):
 
 
 def _call(method: str, base: str, path: str, *, trace_id=None, user_id=None,
-          json_body=None, params=None, unwrap_key="data"):
+          json_body=None, params=None, unwrap_key="data", flights=False, timeout=None):
     url = f"{base.rstrip('/')}{path}"
     try:
-        r = httpx.request(method, url, headers=_headers(trace_id, user_id),
-                          json=json_body, params=params, timeout=TIMEOUT)
+        r = httpx.request(method, url, headers=_headers(trace_id, user_id, flights),
+                          json=json_body, params=params, timeout=timeout or TIMEOUT)
     except Exception as e:
         print(f"[tripsure] {method} {path} unreachable: {type(e).__name__}")
         return None
@@ -291,16 +304,21 @@ def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int 
 # ---------------------------------------------------------------- flights
 
 def suggest_airports(query: str, trace_id: str | None = None) -> list | None:
-    """Airports matching a city or code — flight search speaks IATA, an event does not."""
+    """Airports matching a city or code — flight search speaks IATA, an event does not.
+
+    Path confirmed against the live service. The integration guide's quick reference lists
+    `/api/v1/autosuggest/airports`, which answers 404 with "Unknown service prefix: 'v1'";
+    the service name has to come first, as the Postman collection has it. Real paths are
+    {BASE}/discovery/... and {BASE}/booking/..., where BASE already ends in /api.
+    """
     if not configured(flights=True) or not query:
         return None
-    data = _call("GET", settings.tripsure_flights_base_url, "/api/v1/autosuggest/airports",
-                 params={"q": query}, trace_id=trace_id)
+    base = settings.tripsure_flight_base_url
+    data = _call("GET", base, "/discovery/api/v1/autosuggest/airports",
+                 params={"q": query}, trace_id=trace_id, flights=True)
     if data is None:
         return None
-    if isinstance(data, list):
-        return data
-    return data.get("airports") or data.get("suggestions") or []
+    return data if isinstance(data, list) else []
 
 
 def search_flights(origin: str, destination: str, depart_on: str, *, adults: int = 1,
@@ -308,8 +326,11 @@ def search_flights(origin: str, destination: str, depart_on: str, *, adults: int
                    trace_id: str | None = None) -> list | None:
     """One-way offers between two IATA codes on a date.
 
-    One-way by design for now: the return leg depends on how long someone stays for a
-    festival, which is a question the trip planner asks and a search box cannot assume.
+    One-way by design: the return leg depends on how long someone stays for a festival, which
+    a trip planner asks and a search box cannot assume.
+
+    Slow by nature — a live search fans out to suppliers and took 9.5 seconds for DEL-BOM, so
+    it gets its own generous timeout rather than the shared one.
     """
     if not configured(flights=True) or not (origin and destination and depart_on):
         return None
@@ -324,11 +345,14 @@ def search_flights(origin: str, destination: str, depart_on: str, *, adults: int
         "nearby_airports": False, "resident_fare": False,
         "currency": currency, "nationality": "IN",
     }
-    data = _call("POST", settings.tripsure_flights_base_url,
-                 "/discovery/api/v1/flights/search", json_body=body, trace_id=trace_id)
+    data = _call("POST", settings.tripsure_flight_base_url,
+                 "/discovery/api/v1/flights/search", json_body=body,
+                 trace_id=trace_id, flights=True, timeout=45.0)
     if data is None:
         return None
-    for key in ("offers", "flights", "itineraries", "results"):
-        if isinstance(data.get(key), list):
-            return data[key]
-    return data if isinstance(data, list) else []
+    # Confirmed against a live search: data.searchResult.ONWARD, 199 offers for DEL-BOM.
+    # ONWARD is the outbound leg; a return search would add its own key, which is why the
+    # direction is named rather than assumed to be the only list present.
+    result = (data.get("searchResult") or {}) if isinstance(data, dict) else {}
+    onward = result.get("ONWARD")
+    return onward if isinstance(onward, list) else []
