@@ -113,6 +113,19 @@ def _to_flight(f: dict) -> Flight:
     `stops` is counted from the segments rather than read from a field: segments[].stops is
     the stops WITHIN one leg, so a two-segment itinerary with stops=0 on each is still a
     one-stop journey. Reading that field would have called every connection direct.
+
+    `duration_minutes` is TIME IN THE AIR, not the journey, and the screen says so for any
+    flight with a connection. There is nothing here to build a journey total from: no
+    offer-level duration, stopDetails is null on every segment, and the timestamps carry no
+    timezone. LHR-LIS-MAD sums to 4h05 in the air; subtracting the local clocks gives 6h40,
+    but Madrid is an hour ahead of Lisbon so the truth is 5h40. Presenting either number as
+    "the journey" would be inventing it.
+
+    Currency is INR and cannot be otherwise. Their listing endpoint refuses anything else
+    outright — "Only INR currency is supported" — and the flight search silently ignores the
+    parameter: LHR-MAD returned byte-identical fares for INR, GBP and EUR. So the rupee prices
+    on a London-Madrid flight are their account's, not a bug of ours, and relabelling them
+    would turn a confusing display into a false one.
     """
     segs = f.get("segments") or []
     first, last = (segs[0] if segs else {}), (segs[-1] if segs else {})

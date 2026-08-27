@@ -35,6 +35,21 @@ function hhmm(iso: string | null): string {
   return isNaN(d.getTime()) ? "—" : d.toTimeString().slice(0, 5);
 }
 
+/** Whole days between departing and arriving, in the airports' own local dates.
+ *
+ *  Without this the tab printed "19:50 -> 10:05" for an overnight connection, which reads as
+ *  arriving before you left. The supplier's timestamps carry no timezone, so they are local
+ *  airport times — which is exactly what a ticket shows, so comparing their DATES is right even
+ *  though subtracting their clocks would not be.
+ */
+function dayOffset(from: string | null, to: string | null): number {
+  if (!from || !to) return 0;
+  const a = new Date(from), b = new Date(to);
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return 0;
+  const day = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((day(b) - day(a)) / 86400000);
+}
+
 /** The honest empty state. A travel section that says nothing at all reads as broken; one
  *  that says "no hotels here" when the truth is "we could not ask" is worse than broken. */
 function Empty({ options, kind }: { options: TravelOptions | null; kind: string }) {
@@ -178,19 +193,29 @@ function duration(mins: number | null): string | null {
 
 function FlightRow({ flight }: { flight: Flight }) {
   const price = money(flight.price_amount, flight.price_currency);
+  const direct = flight.stops === 0;
   const stops = flight.stops == null ? null
-    : flight.stops === 0 ? "Direct"
+    : direct ? "Direct"
     : `${flight.stops} stop${flight.stops > 1 ? "s" : ""}`;
+  // The supplier gives flying time per leg and nothing else — no journey total, no layover
+  // lengths, and timestamps without a timezone, so a real door-to-door duration cannot be
+  // computed without inventing it. For a direct flight the two are the same thing; for a
+  // connection the number is labelled rather than passed off as the journey. A "4h05" beside
+  // an overnight arrival was the tab claiming something untrue.
+  const dur = duration(flight.duration_minutes);
+  const durLabel = dur ? (direct ? dur : `${dur} in the air`) : null;
+  const plus = dayOffset(flight.departs_at, flight.arrives_at);
   return (
     <View style={styles.row}>
       <View style={styles.thumb}><Ionicons name="airplane" size={18} color={MUTED} /></View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {hhmm(flight.departs_at)} → {hhmm(flight.arrives_at)}
+          {plus > 0 ? <Text style={styles.nextDay}> +{plus}</Text> : null}
           {flight.origin ? `  ${flight.origin}–${flight.destination}` : ""}
         </Text>
         <Text style={styles.rowSub} numberOfLines={1}>
-          {[flight.airline, duration(flight.duration_minutes), stops].filter(Boolean).join(" · ")}
+          {[flight.airline, durLabel, stops].filter(Boolean).join(" · ")}
         </Text>
       </View>
       <View style={styles.rowEnd}>
@@ -498,6 +523,9 @@ const styles = StyleSheet.create({
   emptyText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
   footnote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 12, fontStyle: "italic" },
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },
+  // The day marker on an arrival. Accent, because "+1" changing to "+2" is the difference
+  // between making the show and missing it.
+  nextDay: { color: ACCENT, fontSize: 12, fontWeight: "800" },
   hereRow: {
     flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 4, marginTop: 4,
   },
