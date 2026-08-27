@@ -11,8 +11,15 @@ class Stay(BaseModel):
     address: str | None = None
     lat: float | None = None
     lng: float | None = None
-    # Where booking happens. We never take the payment — the PRD bars it in the schema — so
-    # this always leads to the supplier, and the referral disclosure sits beside it.
+    # From the live response: "0 kms", "1.2 kms" — distance from the search point, which for
+    # us is the venue's city.
+    distance: str | None = None
+    # "Refundable" / "Non-Refundable", and what the rate includes ("Room Only").
+    refundability: str | None = None
+    board_basis: str | None = None
+    # Who actually holds the inventory — the live response says Makemytrip. Shown because a
+    # traveller deciding where to sleep is entitled to know who they are buying from.
+    supplier: str | None = None
     deep_link: str | None = None
     provider: str = "tripsure"
 
@@ -43,5 +50,8 @@ class TravelOptions(BaseModel):
     reason: str | None = None
     check_in: str | None = None
     check_out: str | None = None
+    # Where "Book a hotel" goes: Tripsure's own results page, pre-filled with this city and
+    # these dates. There is no per-hotel URL, so the hand-over is at city level.
+    booking_url: str | None = None
     stays: list[Stay] = []
     flights: list[Flight] = []

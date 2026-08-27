@@ -48,6 +48,19 @@ function Empty({ options, kind }: { options: TravelOptions | null; kind: string 
   );
 }
 
+/** One button for the tab, not one per hotel: Tripsure has no per-property URL — every
+ *  /stays/hotel/{key} variant 404s — so the hand-over is at city level, pre-filled with the
+ *  show's dates. */
+function BookButton({ url }: { url: string }) {
+  return (
+    <Pressable style={styles.bookWide} onPress={() => Linking.openURL(url)}>
+      <Ionicons name="bed-outline" size={16} color="#101204" />
+      <Text style={styles.bookWideText}>Book a hotel</Text>
+      <Ionicons name="open-outline" size={13} color="#101204" />
+    </Pressable>
+  );
+}
+
 function StayRow({ stay }: { stay: Stay }) {
   const price = money(stay.price_amount, stay.price_currency);
   return (
@@ -62,19 +75,13 @@ function StayRow({ stay }: { stay: Stay }) {
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>{stay.name}</Text>
         <Text style={styles.rowSub} numberOfLines={1}>
-          {stay.rating != null ? `★ ${stay.rating.toFixed(1)}` : ""}
-          {stay.rating != null && stay.address ? " · " : ""}
-          {stay.address ?? ""}
+          {[stay.distance, stay.board_basis, stay.refundability].filter(Boolean).join(" · ")}
         </Text>
+        {stay.supplier ? <Text style={styles.supplier}>via {stay.supplier}</Text> : null}
       </View>
       <View style={styles.rowEnd}>
         {price ? <Text style={styles.price}>{price}</Text> : null}
-        {stay.deep_link ? (
-          <Pressable style={styles.book} onPress={() => Linking.openURL(stay.deep_link!)}>
-            <Text style={styles.bookText}>Book</Text>
-            <Ionicons name="open-outline" size={11} color="#101204" />
-          </Pressable>
-        ) : null}
+        {price ? <Text style={styles.perNight}>per night</Text> : null}
       </View>
     </View>
   );
@@ -188,9 +195,15 @@ export default function PlanTrip({
               </Text>
             ) : null}
             {stays.stays.map((s, i) => <StayRow key={`${s.name}-${i}`} stay={s} />)}
+            {stays.booking_url ? <BookButton url={stays.booking_url} /> : null}
           </>
         ) : (
-          <Empty options={stays} kind="Stay" />
+          <>
+            <Empty options={stays} kind="Stay" />
+            {/* The link needs no API call, so it still works when the listing endpoint does
+                not — which is exactly what happened on the day this was built. */}
+            {stays?.booking_url ? <BookButton url={stays.booking_url} /> : null}
+          </>
         )
       ) : null}
 
@@ -254,6 +267,13 @@ const styles = StyleSheet.create({
     borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10,
   },
   bookText: { color: "#101204", fontSize: 12, fontWeight: "800" },
+  bookWide: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 13, marginTop: 14,
+  },
+  bookWideText: { color: "#101204", fontSize: 15, fontWeight: "800" },
+  perNight: { color: MUTED, fontSize: 10 },
+  supplier: { color: MUTED, fontSize: 11, marginTop: 2 },
   empty: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 22 },
   emptyText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },

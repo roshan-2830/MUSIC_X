@@ -629,6 +629,13 @@ export type Stay = {
   address: string | null;
   lat: number | null;
   lng: number | null;
+  /** "0 kms", "2.76 kms" — how far from the search point. */
+  distance: string | null;
+  refundability: string | null;
+  board_basis: string | null;
+  /** Who holds the inventory. The live response says Makemytrip for some, Tripsure for
+   *  others — a traveller is entitled to know who they are buying from. */
+  supplier: string | null;
   deep_link: string | null;
   provider: string;
 };
@@ -655,12 +662,16 @@ export type TravelOptions = {
   reason: string | null;
   check_in: string | null;
   check_out: string | null;
+  /** Where "Book a hotel" goes — Tripsure's own results page, pre-filled with this city and
+   *  these dates. Built from the autosuggest result, so it survives a listing outage. */
+  booking_url: string | null;
   stays: Stay[];
   flights: Flight[];
 };
 
 const NO_TRAVEL: TravelOptions = {
-  status: "unavailable", reason: null, check_in: null, check_out: null, stays: [], flights: [],
+  status: "unavailable", reason: null, check_in: null, check_out: null,
+  booking_url: null, stays: [], flights: [],
 };
 
 /** Somewhere to stay for the night of the show. Dates come from the event, not the user. */

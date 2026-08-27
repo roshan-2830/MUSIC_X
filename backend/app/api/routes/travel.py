@@ -47,23 +47,35 @@ def _num(v):
 
 
 def _to_stay(h: dict) -> Stay:
-    price = _first(h, "price", "totalPrice", "minPrice", "fare", default={})
-    if isinstance(price, dict):
-        amount = _num(_first(price, "amount", "total", "value"))
-        currency = _first(price, "currency", "currencyCode")
-    else:
-        amount, currency = _num(price), _first(h, "currency", "currencyCode")
-    geo = _first(h, "coordinates", "geoCode", "location", default={}) or {}
+    """One hotel, from the shape a live call actually returned.
+
+    Confirmed 2026-08-27 against Mumbai (1,183 results): each entry is
+    { hotelKey, hotelInfo{...}, priceSummary[{...}] }. The first version guessed at
+    `name` and `price.amount` and would have rendered every one of those 1,183 hotels as
+    "Unnamed property" with no price — the shape was never in the collection, and guessing
+    is what the hedge was hiding.
+    """
+    info = h.get("hotelInfo") or {}
+    prices = h.get("priceSummary") or []
+    price = prices[0] if prices else {}
+    board = price.get("boardBasis") or {}
     return Stay(
-        name=str(_first(h, "name", "hotelName", "title", default="Unnamed property")),
-        image_url=_first(h, "image", "imageUrl", "thumbnail", "heroImage"),
-        price_amount=amount,
-        price_currency=currency,
-        rating=_num(_first(h, "starRating", "rating", "stars")),
-        address=_first(h, "address", "addressLine", "fullAddress"),
-        lat=_num(_first(geo, "lat", "latitude")),
-        lng=_num(_first(geo, "lon", "lng", "longitude")),
-        deep_link=_first(h, "deepLink", "bookingUrl", "url"),
+        name=str(info.get("name") or "Unnamed property"),
+        image_url=info.get("image"),
+        # `price` is the stay total; pricePerNightPerRoom is the nightly rate. The nightly
+        # one is what a card should show, because it is comparable between two hotels.
+        price_amount=_num(price.get("pricePerNightPerRoom") or price.get("price")),
+        price_currency="INR",
+        # Their `category` is a word, not a number — "Villa", "Hotel" — so it is not a star
+        # rating and must not be shown as one.
+        rating=None,
+        address=info.get("address") or info.get("city"),
+        lat=_num(info.get("latitude")),
+        lng=_num(info.get("longitude")),
+        distance=info.get("distanceFromOrigin"),
+        refundability=price.get("refundability"),
+        board_basis=board.get("description") if isinstance(board, dict) else None,
+        supplier=price.get("partnerName"),
     )
 
 
@@ -145,12 +157,24 @@ def stays_for_event(
         return TravelOptions(status="no_location",
                              reason=f"Our travel provider does not recognise {city_name}.", **dates)
 
-    hotels = tripsure.search_hotels(matches[0], check_in.isoformat(),
+    # A CITY, never a state: searching a state returns 500 after an 11-second timeout.
+    place = tripsure.best_location(matches)
+    hand_over = tripsure.results_url(place, check_in.isoformat(), check_out.isoformat(),
+                                     adults=adults)
+    hotels = tripsure.search_hotels(place, check_in.isoformat(),
                                     check_out.isoformat(), adults=adults, trace_id=trace)
     if hotels is None:
-        return TravelOptions(status="unavailable",
-                             reason="We could not reach our travel provider just now.", **dates)
+        # The hand-over link still works: it is a URL on their consumer site, built from the
+        # autosuggest result, and needs no further call. So a listing outage costs the list
+        # but not the ability to book — measured 2026-08-27, when /api/hotel/listing began
+        # answering 500 to the very request that had returned 1,227 hotels minutes earlier
+        # while autosuggest stayed healthy.
+        return TravelOptions(
+            status="unavailable", booking_url=hand_over,
+            reason="We can't show prices right now — this opens the booking page instead.",
+            **dates)
     return TravelOptions(
+        booking_url=hand_over,
         status="ok" if hotels else "unavailable",
         reason=None if hotels else f"No stays available in {city_name} for those dates.",
         **dates,

@@ -143,6 +143,60 @@ def suggest_location(query: str, trace_id: str | None = None) -> list | None:
     return data.get("locationSuggestions") or []
 
 
+# Tripsure's own consumer site, where a booking is completed. Found on their homepage, not
+# in the API docs: every "Hotels in <city>" link carries exactly the fields the autosuggest
+# API returns, so a search we ran can be handed over pre-filled.
+#
+# There is no per-hotel route — /stays/hotel/{key} and every variant 404s — so Book opens the
+# city's results page for the right dates, not the specific property. Worth asking Tripsure
+# whether a per-hotel URL exists.
+WEB_BASE = "https://www.tripsure.com"
+
+
+def results_url(location: dict, check_in: str, check_out: str,
+                adults: int = 2, rooms: int = 1) -> str:
+    """The hand-over link: their results page, pre-filled from the search we just ran."""
+    from urllib.parse import urlencode
+    coords = location.get("coordinates") or {}
+    q = {
+        "destination": location.get("name"),
+        "locId": location.get("id"),
+        "locName": location.get("name"),
+        "locType": location.get("type"),
+        "city": location.get("city") or location.get("name"),
+        "country": location.get("country"),
+        "lat": coords.get("lat") or location.get("lat"),
+        "lon": coords.get("lon") or location.get("lon"),
+        "checkIn": check_in,
+        "checkOut": check_out,
+        "adults": adults,
+        "rooms": rooms,
+    }
+    return f"{WEB_BASE}/stays/results?" + urlencode({k: v for k, v in q.items() if v is not None})
+
+
+def best_location(suggestions: list) -> dict | None:
+    """The suggestion worth searching — a CITY, not a state or a region.
+
+    Measured 2026-08-27: searching a State returns HTTP 500 after an 11-second upstream
+    timeout. "goa" resolves to Goa the State and fails; "mumbai" and "bengaluru" resolve to
+    City and return 933 KB and 1.4 MB of hotels. Taking suggestions[0] blindly, as the first
+    version did, meant a whole class of destinations answered with a server error.
+    """
+    if not suggestions:
+        return None
+    for want in ("City", "Locality", "Area", "Hotel"):
+        for s in suggestions:
+            if (s.get("type") or "") == want:
+                return s
+    # A State's own popular_locations are cities — better than searching the state itself.
+    for s in suggestions:
+        for pop in (s.get("popular_locations") or []):
+            if (pop.get("type") or "") == "City":
+                return pop
+    return suggestions[0]
+
+
 def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int = 2,
                   currency: str = "INR", trace_id: str | None = None) -> list | None:
     """Hotels available in a location for those dates.
@@ -179,12 +233,11 @@ def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int 
                  json_body=body, trace_id=trace_id)
     if data is None:
         return None
-    # Their listing shape is not pinned down until a live call succeeds, so accept the
-    # plausible container names rather than guessing one and returning nothing.
-    for key in ("hotels", "hotelList", "results", "properties"):
-        if isinstance(data.get(key), list):
-            return data[key]
-    return data if isinstance(data, list) else []
+    # Confirmed against a live call: response.hotels, each { hotelKey, hotelInfo,
+    # priceSummary[] }. The guessed names the first version tried are gone — there is no
+    # need to hedge about a shape we have now seen.
+    hotels = data.get("hotels")
+    return hotels if isinstance(hotels, list) else []
 
 
 # ---------------------------------------------------------------- flights
