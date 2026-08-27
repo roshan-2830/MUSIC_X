@@ -33,6 +33,7 @@ MONEY. Search, fare and booking amounts are decimal rupees. PAYMENT amounts are 
 paise (amount_inr_paise = totalFare x 100). Nothing here touches payment, and that unit
 change is the first thing to get wrong when it does.
 """
+import time
 import uuid
 
 import httpx
@@ -114,14 +115,55 @@ def _unwrap(payload: dict, key: str = "data"):
 
 
 def _call(method: str, base: str, path: str, *, trace_id=None, user_id=None,
-          json_body=None, params=None, unwrap_key="data", flights=False, timeout=None):
+          json_body=None, params=None, unwrap_key="data", flights=False, timeout=None,
+          retries: int = 0, retry_budget: float = 45.0):
+    """One call to Tripsure, optionally retried.
+
+    Retries exist because their preprod fails at random rather than for a reason. Measured
+    within one minute: Madrid returned 1,090 hotels in 15.2s, then a 500 after 11s, then three
+    instant 500s in 0.2s each. The second Madrid attempt in an earlier run succeeded with 1,073
+    hotels. Nothing about the request changed.
+
+    Only transport errors and 5xx are retried. A 4xx is an answer — "Only INR currency is
+    supported" will say the same thing however many times it is asked — and retrying a 401 or
+    403 just spends time confirming a key or an allowlist is still wrong.
+
+    The pause matters. Those 0.2s 500s arrive immediately after a heavy request, which reads as
+    throttling rather than breakage, so hammering straight away would collect the same refusal.
+
+    `retry_budget` caps total elapsed time rather than attempts. A phone is waiting on this: two
+    retries at a 35s timeout would be a minute and a half of spinner, and someone would have
+    put the phone down long before. Whichever limit is reached first ends it.
+    """
     url = f"{base.rstrip('/')}{path}"
+    started = time.monotonic()
+    for attempt in range(retries + 1):
+        again, value = _attempt(method, url, path, trace_id=trace_id, user_id=user_id,
+                                json_body=json_body, params=params, unwrap_key=unwrap_key,
+                                flights=flights, timeout=timeout)
+        if not again:
+            return value
+        spent = time.monotonic() - started
+        if attempt >= retries or spent >= retry_budget:
+            if retries:
+                print(f"[tripsure] {method} {path} gave up after {attempt + 1} "
+                      f"attempt(s), {spent:.1f}s")
+            return None
+        # 2s, then 4s. Long enough to clear a throttle, short enough that someone holding a
+        # phone has not given up.
+        time.sleep(min(2.0 * (attempt + 1), 4.0))
+    return None
+
+
+def _attempt(method: str, url: str, path: str, *, trace_id, user_id, json_body, params,
+             unwrap_key, flights, timeout):
+    """(retry_worth_it, value) for a single request."""
     try:
         r = httpx.request(method, url, headers=_headers(trace_id, user_id, flights),
                           json=json_body, params=params, timeout=timeout or TIMEOUT)
     except Exception as e:
         print(f"[tripsure] {method} {path} unreachable: {type(e).__name__}")
-        return None
+        return True, None
     if r.status_code in (401, 403):
         # Distinguished on purpose. A resource-policy denial is an allowlist problem and no
         # amount of retrying or re-keying fixes it; a missing route means the wrong host.
@@ -135,15 +177,19 @@ def _call(method: str, base: str, path: str, *, trace_id=None, user_id=None,
                 "no such route on this host — this is NOT the network; wrong base URL"
                 if "Missing Authentication Token" in body else "check tenant and key")
         print(f"[tripsure] {method} {path} -> {r.status_code}: {hint}")
-        return None
+        return False, None
     if r.status_code >= 400:
         print(f"[tripsure] {method} {path} -> {r.status_code} {r.text[:120]}")
-        return None
+        # 5xx is theirs and often momentary. 429 is the one 4xx worth repeating: it means slow
+        # down, not stop, and this service demonstrably throttles — instant 500s arrive right
+        # after a heavy request. Every other 4xx is an answer about the request itself and will
+        # say the same thing however many times it is asked.
+        return r.status_code >= 500 or r.status_code == 429, None
     try:
-        return _unwrap(r.json(), unwrap_key)
+        return False, _unwrap(r.json(), unwrap_key)
     except Exception:
         print(f"[tripsure] {method} {path} returned non-JSON")
-        return None
+        return False, None
 
 
 # ---------------------------------------------------------------- hotels
@@ -304,8 +350,11 @@ def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int 
         "currency": currency,
         "fetchFromCache": False,
     }
+    # 35s, not the shared 20s. A successful Madrid listing was measured at 15.2s and Mumbai
+    # returns over 1,200 rows, so 20s was close enough to the real duration that ordinary slow
+    # answers were being thrown away as failures.
     data = _call("POST", settings.tripsure_base_url, "/api/hotel/listing",
-                 json_body=body, trace_id=trace_id)
+                 json_body=body, trace_id=trace_id, timeout=35.0, retries=2)
     if data is None:
         return None
     # Confirmed against a live call: docKey, token, totalCount and hotels[], each row
