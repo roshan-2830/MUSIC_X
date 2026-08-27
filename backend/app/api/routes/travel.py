@@ -173,8 +173,15 @@ def stays_for_event(
         # tell them something we already knew.
         return TravelOptions(
             status="unavailable",
-            reason=f"We can't find stays near {city_name} yet — our travel partner doesn't "
-                   f"cover it.",
+            # NOT "doesn't cover it" — I claimed that and it was wrong. Their own site
+            # prefetches show 503s scattered across countries (Pattaya 200 / Bangkok 503,
+            # Lucknow 200 / Indore 503), and a London search that returned hotels earlier in
+            # the day returns none now on their own site with their own parameters. That is a
+            # service having a bad time, not a map of where they operate — and the difference
+            # matters, because one is temporary and the other would be a reason to find
+            # another supplier.
+            reason=f"No stays available near {city_name} right now — worth trying again "
+                   f"later.",
             **dates)
     return TravelOptions(
         booking_url=hand_over,

@@ -156,21 +156,33 @@ WEB_BASE = "https://www.tripsure.com"
 def results_url(location: dict, check_in: str, check_out: str,
                 adults: int = 2, rooms: int = 1) -> str:
     """The hand-over link: their results page, pre-filled from the search we just ran."""
+    import json
     from urllib.parse import urlencode
+
     coords = location.get("coordinates") or {}
+    # Copied from a URL their own site produced, captured in a browser rather than guessed.
+    # Two things were missing from the first version: `state`, which their API documents as
+    # REQUIRED ("When mapSearch is false, city, state, country name and country code are
+    # required"), and the guests structure. Without them the search box loaded reading
+    # "Travellers" with no occupancy set.
     q = {
         "destination": location.get("name"),
         "locId": location.get("id"),
         "locName": location.get("name"),
         "locType": location.get("type"),
         "city": location.get("city") or location.get("name"),
+        "state": location.get("state"),
         "country": location.get("country"),
         "lat": coords.get("lat") or location.get("lat"),
         "lon": coords.get("lon") or location.get("lon"),
         "checkIn": check_in,
         "checkOut": check_out,
         "adults": adults,
+        "children": 0,
         "rooms": rooms,
+        # Their own shape: one entry per room, "a" adults and "c" children's ages.
+        "guests": json.dumps([{"a": adults, "c": []} for _ in range(max(1, rooms))],
+                             separators=(",", ":")),
     }
     return f"{WEB_BASE}/stays/results?" + urlencode({k: v for k, v in q.items() if v is not None})
 
