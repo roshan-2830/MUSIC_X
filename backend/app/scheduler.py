@@ -17,18 +17,28 @@ from app.services.refresh import refresh_catalogue, sweep_catalogue
 
 # Broad discovery sweep cadence (default every 3h) and the deeper daily refresh (default 24h).
 SWEEP_INTERVAL_HOURS = float(os.getenv("SWEEP_INTERVAL_HOURS", "3"))
-REFRESH_INTERVAL_HOURS = float(os.getenv("REFRESH_INTERVAL_HOURS", "24"))
+# 3h, not 24h. It was daily because a re-verify cost one Ticketmaster request per event —
+# 6,583 of them, more than the whole 5,000-a-day quota, so it could only be afforded once and
+# even then only for the soonest 2,000. Batched at 150 ids per request the same pass is 44
+# requests and under four minutes, so there is no longer a reason to make a cancellation wait
+# up to a day to reach anyone. Eight runs a day come to roughly 750 requests including the
+# festival sweep — a sixth of the quota.
+REFRESH_INTERVAL_HOURS = float(os.getenv("REFRESH_INTERVAL_HOURS", "3"))
 # Artist-page enrichment: daily, and bounded per stage. These are free community APIs
 # (Deezer, Wikipedia, Last.fm), so the limit is about being a good citizen rather than
 # about cost — a run that completes beats one that gets throttled halfway.
 ENRICH_INTERVAL_HOURS = float(os.getenv("ENRICH_INTERVAL_HOURS", "24"))
 ENRICH_LIMIT = int(os.getenv("ENRICH_LIMIT", "300"))
 
-# A deep refresh is one Ticketmaster request per upcoming event — about 3,800 today —
-# against a free tier of 5,000 a day shared with the sweeps. So it runs at most once per
-# CALENDAR DAY, however many times the process restarts. Day granularity is not a
-# simplification: `last_verified` is a DATE column, so a day is the finest the stored
-# evidence can distinguish, and an "hours since" guard would have been false precision.
+# The startup guard still exists, and still works to the calendar day, but it now guards
+# against something narrower than it used to. It was there because a refresh cost ~3,800
+# requests and five restarts would have burned the day's quota; batching made a refresh 44
+# requests, so the risk it protects against is now mostly wasted minutes rather than a spent
+# quota. Kept because restarting a dev server ten times should still not run ten full passes.
+#
+# Day granularity is not a simplification: `last_verified` is a DATE column, so a day is the
+# finest the stored evidence can distinguish, and an "hours since" guard would be false
+# precision. With the interval now at 3h the scheduled job covers the rest of the day anyway.
 
 
 def _refresh_due(today=None) -> tuple:
