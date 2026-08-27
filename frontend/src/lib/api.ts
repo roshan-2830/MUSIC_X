@@ -638,6 +638,10 @@ export type Stay = {
   supplier: string | null;
   deep_link: string | null;
   provider: string;
+  /** Supplier identity, sent back when someone marks this one as their base so the server can
+   *  fetch the property's own record. Opaque handles — they authenticate nothing. */
+  hotel_id: string | null;
+  supplier_provider: string | null;
 };
 
 export type Flight = {
@@ -667,11 +671,43 @@ export type TravelOptions = {
   booking_url: string | null;
   stays: Stay[];
   flights: Flight[];
+  /** The search these stays came out of. Passed back verbatim when picking a base, because a
+   *  property's details can only be asked for inside the search that found it. */
+  doc_key: string | null;
+  search_token: string | null;
+};
+
+/** Where this person is sleeping for this show, as they told us.
+ *
+ *  Not a booking, and `source` keeps that honest: 'picked' means they pointed at it. Tripsure's
+ *  booking flow would require Music X to take the payment and a PAN number, so nothing here
+ *  has been paid for and it must never be shown as a reservation. */
+export type StayBase = {
+  name: string;
+  hotel_id: string | null;
+  provider: string | null;
+  address: string | null;
+  city: string | null;
+  postal_code: string | null;
+  lat: number | null;
+  lng: number | null;
+  check_in: string | null;
+  check_out: string | null;
+  /** The supplier's own strings — "12:00 PM", sometimes prose. Shown, never parsed. */
+  check_in_time: string | null;
+  check_out_time: string | null;
+  star_rating: number | null;
+  image_url: string | null;
+  source: "picked" | "booked";
+  metres_to_venue: number | null;
+  /** Null beyond 3 km: "157 min walk" is true and useless, and reads as a broken sum. */
+  walk_minutes: number | null;
+  directions_url: string | null;
 };
 
 const NO_TRAVEL: TravelOptions = {
   status: "unavailable", reason: null, check_in: null, check_out: null,
-  booking_url: null, stays: [], flights: [],
+  booking_url: null, stays: [], flights: [], doc_key: null, search_token: null,
 };
 
 /** Somewhere to stay for the night of the show. Dates come from the event, not the user. */
@@ -688,4 +724,44 @@ export async function getFlights(eventId: string, origin: string): Promise<Trave
   );
   if (!res.ok) return { ...NO_TRAVEL, reason: "Could not load flights." };
   return res.json();
+}
+
+
+/** "This is where I'm staying." The server fetches the property's own address, coordinates and
+ *  check-in time rather than trusting what this screen happens to hold, so the record is the
+ *  hotel's rather than a search row's. PUT, so tapping twice leaves one base. */
+export async function setStayBase(
+  eventId: string,
+  hotel: { hotel_id: string; provider: string | null; image_url: string | null },
+  ctx: { doc_key: string | null; search_token: string | null },
+): Promise<StayBase> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/stay`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({
+      hotel_id: hotel.hotel_id,
+      provider: hotel.provider,
+      image_url: hotel.image_url,
+      doc_key: ctx.doc_key,
+      search_token: ctx.search_token,
+    }),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+/** The base they already chose, or null. */
+export async function getStayBase(eventId: string): Promise<StayBase | null> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/stay`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function clearStayBase(eventId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/events/${eventId}/stay`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
 }

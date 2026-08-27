@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Image, LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
+import { Image, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Stay } from "../lib/api";
@@ -13,6 +13,9 @@ const TILE_BG = "#e8e2d9";
 /** Hotel pills. Red is the convention for lodging on a map and it reads at a glance against
  *  a light basemap — the venue keeps the app's accent so the anchor stays distinguishable. */
 const HOTEL = "#c5321f";
+/** The one they chose. Neither red nor the accent, so three things stay distinguishable on one
+ *  map: the venue, the hotels, and the bed they picked. */
+const PICKED = "#17171c";
 const HEIGHT = 300;
 
 /** Every hotel we can place, not a curated few.
@@ -43,11 +46,18 @@ export default function StayMap({
   lng,
   venue,
   stays,
+  onPick,
+  pickedHotelId,
+  picking,
 }: {
   lat: number;
   lng: number;
   venue: string | null;
   stays: Stay[];
+  /** Tapping a pin says "this is where I'm staying". Omitted, the map stays read-only. */
+  onPick?: (s: Stay) => void;
+  pickedHotelId?: string | null;
+  picking?: boolean;
 }) {
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
@@ -81,16 +91,35 @@ export default function StayMap({
         ? placeable.map((s, i) => {
             const p = grid.project(s.lat!, s.lng!);
             const label = priceLabel(s);
+            const mine = pickedHotelId != null && s.hotel_id === pickedHotelId;
+            // A hotel with no supplier id cannot be looked up, so it is shown but not
+            // offered — better than a tap that fails for reasons nobody can see.
+            const tappable = !!onPick && !!s.hotel_id && !picking;
             return (
-              <View key={`${s.name}-${i}`} style={[styles.pinWrap, { left: p.x, top: p.y }]}>
-                <View style={styles.pill}>
-                  <Ionicons name="bed" size={10} color="#fff" />
+              <Pressable
+                key={`${s.hotel_id ?? s.name}-${i}`}
+                onPress={tappable ? () => onPick!(s) : undefined}
+                disabled={!tappable}
+                // The pill is ~20px tall; the slop makes it a thumb-sized target without
+                // making the pill itself bigger and blurring the cluster's shape.
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  mine ? `${s.name}, your base` : `Stay at ${s.name}`
+                }
+                style={[styles.pinWrap, { left: p.x, top: p.y },
+                        mine && styles.pinWrapPicked]}
+              >
+                <View style={[styles.pill, mine && styles.pillPicked]}>
+                  <Ionicons name={mine ? "checkmark" : "bed"} size={10} color="#fff" />
                   {label ? <Text style={styles.pillText}>{label}</Text> : null}
                 </View>
                 {/* The tail, so the pill points at its coordinate instead of floating over
                     it — the same reason the venue marker has one. */}
-                <View style={styles.tailWrap}><View style={styles.tail} /></View>
-              </View>
+                <View style={styles.tailWrap}>
+                  <View style={[styles.tail, mine && styles.tailPicked]} />
+                </View>
+              </Pressable>
             );
           })
         : null}
@@ -107,7 +136,9 @@ export default function StayMap({
 
       <Text style={styles.attr}>© OpenStreetMap</Text>
       {placeable.length ? (
-        <Text style={styles.count}>{placeable.length} stays near the venue</Text>
+        <Text style={styles.count}>
+          {onPick ? "Tap a price to set your base" : `${placeable.length} stays near the venue`}
+        </Text>
       ) : null}
     </View>
   );
@@ -124,6 +155,8 @@ const styles = StyleSheet.create({
   // Anchored so the TAIL sits on the coordinate: the pill is lifted by its own height, and
   // centred horizontally by half its minimum width.
   pinWrap: { position: "absolute", alignItems: "center", marginLeft: -30, marginTop: -30, zIndex: 2 },
+  // Above every other hotel, so the chosen one is never buried by a cheaper neighbour.
+  pinWrapPicked: { zIndex: 4 },
   pill: {
     flexDirection: "row", alignItems: "center", gap: 3,
     backgroundColor: HOTEL, borderRadius: 6, paddingVertical: 3, paddingHorizontal: 6,
@@ -131,9 +164,11 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.35, shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 }, elevation: 3,
   },
+  pillPicked: { backgroundColor: PICKED, borderWidth: 1.5, borderColor: "#fff" },
   pillText: { color: "#fff", fontSize: 11, fontWeight: "800" },
   tailWrap: { width: 10, height: 5, alignItems: "center", overflow: "hidden" },
   tail: { width: 8, height: 8, backgroundColor: HOTEL, transform: [{ rotate: "45deg" }], marginTop: -5 },
+  tailPicked: { backgroundColor: PICKED },
 
   venueLayer: {
     position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 5,
