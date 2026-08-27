@@ -9,12 +9,15 @@ Every response carries a `status`. "No hotels in this city" and "we could not as
 different claims, and a screen that cannot tell them apart will imply the first while meaning
 the second.
 """
+import re
+import unicodedata
 import uuid as _uuid
 from datetime import timedelta
 from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user_id
@@ -22,8 +25,9 @@ from app.db.session import get_db
 from app.models.city import City
 from app.models.event import Event
 from app.models.hotel_booking import HotelBooking
+from app.models.profile import Profile
 from app.models.venue import Venue
-from app.schemas.travel import Flight, Stay, StayBase, TravelOptions
+from app.schemas.travel import Flight, Stay, StayBase, TravelContext, TravelOptions
 from app.services import tripsure
 
 router = APIRouter(prefix="/events", tags=["travel"])
@@ -558,3 +562,112 @@ def clear_stay_base(
         db.delete(row)
         db.commit()
     return None
+
+
+# ---------------------------------------------------------------- do they have to travel?
+
+# Same city, or near enough that a flight is an absurd suggestion. 40 km covers the cases our
+# own catalogue creates: Brooklyn and New York are separate city rows 5 km apart, as are
+# Cambridge/Boston, Hollywood/Los Angeles and Newcastle/Newcastle Upon Tyne. Ten such pairs.
+LOCAL_KM = 40
+# Beyond this a flight is the sensible answer. Under it, someone drives or takes a train, and
+# selling them a plane ticket for a two-hour drive is the same mistake in the other direction.
+REGIONAL_KM = 250
+
+
+def city_centre(db: Session, city_id) -> tuple | None:
+    """A city's position, taken as the median of its own venues.
+
+    NOT the cities table's own lat/lng, which cannot be trusted: our Nottingham row sits
+    3,394 km from Nottingham's venues, Madrid holds Catalonia's coordinates, Portland ME and
+    Portland OR share a row, and six cities sit at (0, 0). Deciding "are you local" off those
+    would tell someone in Nottingham to fly to Nottingham.
+
+    The median rather than the mean, so one venue filed against the wrong city cannot drag the
+    centre. Verified: London 51.5256,-0.1177; Nottingham 52.9557,-1.1488; Madrid 40.4361,
+    -3.7025 — all correct, and all wrong in the cities table.
+
+    None when the city has no placeable venues (124 of 1,110). The caller must then say it
+    cannot tell rather than guess.
+    """
+    if not city_id:
+        return None
+    row = db.execute(text("""
+        select percentile_cont(0.5) within group (order by v.lat) as lat,
+               percentile_cont(0.5) within group (order by v.lng) as lng
+        from venues v
+        where v.city_id = :cid and v.lat is not null and v.lng is not null
+    """), {"cid": str(city_id)}).fetchone()
+    if row is None or row.lat is None or row.lng is None:
+        return None
+    return float(row.lat), float(row.lng)
+
+
+def _norm_city(name: str | None) -> str:
+    """A city name flattened for comparison — accents folded, case and punctuation dropped."""
+    if not name:
+        return ""
+    folded = unicodedata.normalize("NFD", name)
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", "", folded.lower())
+
+
+@router.get("/{event_id}/travel-context", response_model=TravelContext)
+def travel_context(
+    event_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Local, regional, or far — so the tab can stop offering flights to everyone.
+
+    Decided here rather than on the phone because the phone holds city NAMES, and a name
+    cannot answer this: "Newcastle" and "Newcastle Upon Tyne" are one place, and no string
+    comparison yields the 40 km rule. Both city ids and reliable venue coordinates only exist
+    on this side.
+
+    Cheap: two small queries against our own tables, no supplier involved. Safe to call on
+    every event page.
+    """
+    ev = db.get(Event, event_id)
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    venue = db.get(Venue, ev.venue_id) if ev.venue_id else None
+    event_city = db.get(City, venue.city_id) if venue and venue.city_id else None
+    directions = _directions_url(None, None,
+                                venue.lat if venue else None,
+                                venue.lng if venue else None,
+                                venue.name if venue else None)
+    common = dict(venue_name=venue.name if venue else None,
+                  event_city=event_city.name if event_city else None,
+                  directions_url=directions)
+
+    prof = db.get(Profile, _uuid.UUID(user_id))
+    home = db.get(City, prof.home_city_id) if prof and prof.home_city_id else None
+    if home is None:
+        # Distinguished from 'far' on purpose. Answering 'far' would show flights and quietly
+        # assume this person is travelling; the tab should ask instead.
+        return TravelContext(kind="unknown", reason="no_home_city", **common)
+    common["origin_city"] = home.name
+    if venue is None or venue.city_id is None:
+        return TravelContext(kind="unknown", reason="unknown_venue_city", **common)
+
+    # An id match is exact and needs no arithmetic — the common case, and the only one that
+    # cannot be wrong.
+    if home.id == venue.city_id:
+        return TravelContext(kind="local", distance_km=0.0, **common)
+
+    a, b = city_centre(db, home.id), city_centre(db, venue.city_id)
+    if a and b:
+        km = _metres(a[0], a[1], b[0], b[1]) / 1000.0
+        kind = "local" if km <= LOCAL_KM else "regional" if km <= REGIONAL_KM else "far"
+        return TravelContext(kind=kind, distance_km=round(km, 1), **common)
+
+    # One of the cities has no venues to locate it by. A flattened name match is the last
+    # honest signal — it catches the duplicate rows our ingestion creates for one place.
+    if _norm_city(home.name) and _norm_city(home.name) == _norm_city(event_city.name if event_city else None):
+        return TravelContext(kind="local", **common)
+
+    # Cannot measure it. 'far' shows flights, which is exactly what the tab did before any of
+    # this existed, so an unmeasurable pair behaves as it always has rather than regressing.
+    return TravelContext(kind="far", reason="unmeasured", **common)

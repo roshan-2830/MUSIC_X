@@ -98,3 +98,23 @@ class StayBase(BaseModel):
     # Where "Directions" goes. A Google Maps deep link, which is free and unmetered and opens
     # the app people already have, with live transit times we could not produce ourselves.
     directions_url: str | None = None
+
+
+class TravelContext(BaseModel):
+    """Whether this person has to travel to this show at all.
+
+    The Getting there tab offered flights to everyone, so someone at home in London opening a
+    London gig was shown flights to London. This says which of them is looking.
+    """
+    # local — in the city, or close enough to be. regional — a drive or a train.
+    # far — a flight is the sensible answer. unknown — we cannot tell, and say so.
+    kind: str
+    reason: str | None = None
+    distance_km: float | None = None
+    origin_city: str | None = None
+    venue_name: str | None = None
+    event_city: str | None = None
+    # Directions to the venue with no origin set, so the map app starts from wherever the
+    # phone is. That is the right question for someone already in the city, and it is the one
+    # thing we could not answer by looking anything up.
+    directions_url: str | None = None
