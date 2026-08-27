@@ -22,7 +22,9 @@ Two rules hold across every backfill in this file:
     reads as musical and is not a disambiguation stub. An artist with no confident match
     keeps a NULL, and the page shows nothing rather than asserting the wrong act.
 """
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from sqlalchemy import text
@@ -117,8 +119,90 @@ def _in_session(fn, rows: list, label: str) -> None:
 
 # ---------------------------------------------------------------- popularity
 
-def backfill_popularity(limit: int = 400, pause: float = 0.1, batch: int = 40) -> dict:
+# ------------------------------------------------------- fetching in parallel
+
+# Requests per second we allow ourselves PER SOURCE, whatever the worker count. These are
+# community APIs given away for nothing, and the cost of being throttled is a run that stops
+# halfway — worse than a run that takes longer.
+#
+# Deezer publishes 50 requests per 5 seconds; 8/s leaves headroom for anything else in the
+# process using it. Last.fm does not publish a figure and the widely-honoured convention is
+# about 5/s per key, so 4.
+#
+# THE LIMITER COUNTS ARTISTS, NOT REQUESTS, and that distinction cost Wikipedia twice its
+# intended budget. `fetch_artist_bio` makes two calls — a search then a summary — inside a
+# single slot, so a measured 5.4 artists/s was really about 11 requests/s at Wikipedia while
+# the number here said 6. Halved to 3, which is the ~6 requests/s the comment always claimed.
+# Every other source is one call per artist, where the two are the same thing.
+RATES = {"deezer": 8.0, "lastfm": 4.0, "wikipedia": 3.0}
+# High enough to keep the rate limiter as the thing that decides the pace, rather than latency.
+# A ~300 ms round trip at 8/s needs three in flight; eight leaves room for a slow one.
+WORKERS = 8
+
+
+class _Rate:
+    """A shared throttle: no more than `per_sec` requests leave this process for one source.
+
+    The limiter, not the pool size, is what protects the API. Threads make requests overlap so
+    latency stops being the bottleneck; without a limiter, eight workers against a 200 ms
+    endpoint would be 40 requests a second at whoever is on the other end.
+    """
+
+    def __init__(self, per_sec: float):
+        self._gap = 1.0 / per_sec
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            due = max(now, self._next)
+            self._next = due + self._gap
+        delay = due - now
+        if delay > 0:
+            time.sleep(delay)
+
+
+def _parallel(todo: list, fetch_one, *, source: str, label: str):
+    """Yield (aid, name, value) for each artist, fetched concurrently.
+
+    Order is not preserved and does not matter: every result is written by artist id, and the
+    stages already separate fetching from the database entirely — writes happen on this thread,
+    in batches, exactly as before. That separation is why this is a safe change; a SQLAlchemy
+    session must not be shared across threads and none is.
+
+    A fetch that raises yields None rather than stopping the stage, which is what the sequential
+    version did with its per-artist try/except.
+    """
+    rate = _Rate(RATES.get(source, 4.0))
+    total = len(todo)
+
+    def one(item):
+        aid, name = item
+        rate.wait()
+        try:
+            return aid, name, fetch_one(name)
+        except Exception:
+            return aid, name, None
+
+    started = time.monotonic()
+    done = 0
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        for aid, name, value in pool.map(one, todo):
+            done += 1
+            if done % 200 == 0:
+                per_sec = done / max(time.monotonic() - started, 0.001)
+                print(f"[enrich] {label} {done}/{total} ({per_sec:.1f}/s)")
+            yield aid, name, value
+
+
+
+def backfill_popularity(limit: int = 1500, pause: float = 0.0, batch: int = 60) -> dict:
     """Cache Deezer followers and Last.fm listeners on the artist row.
+
+    `pause` is retained for callers that pass it and is no longer used: the pace is set by the
+    shared per-source rate limiter in _parallel, which throttles correctly no matter how many
+    requests are in flight. A per-artist sleep could not do that once fetches overlap.
 
     MXS reads these instead of calling two APIs per artist while scoring, and the two
     sources cover different blind spots: Deezer knows chart acts, Last.fm knows small
@@ -142,12 +226,19 @@ def backfill_popularity(limit: int = 400, pause: float = 0.1, batch: int = 40) -
         if ok:
             a.popularity_checked_on = date.today()
 
-    for aid, name in todo:
+    # Both sources for one artist are fetched together, so the pair stays a unit and the
+    # Last.fm `ok` flag still decides whether this artist counts as checked. Paced to the
+    # slower of the two — Last.fm — because that is the one that throttles.
+    def both(name):
         try:
             fans = deezer.artist_fans(name)
         except Exception:
             fans = None
         listeners, _plays, ok = lastfm.artist_listeners(name)
+        return fans, listeners, ok
+
+    for aid, name, got in _parallel(todo, both, source="lastfm", label="popularity"):
+        fans, listeners, ok = got if got else (None, None, False)
         pending.append((aid, fans, listeners, ok))
 
         totals["artists"] += 1
@@ -157,7 +248,6 @@ def backfill_popularity(limit: int = 400, pause: float = 0.1, batch: int = 40) -
             totals["lastfm"] += 1
         if not fans and not listeners:
             totals["neither"] += 1
-        time.sleep(pause)
 
         if len(pending) >= batch:
             _in_session(write, pending, "popularity")
@@ -171,7 +261,7 @@ def backfill_popularity(limit: int = 400, pause: float = 0.1, batch: int = 40) -
 
 # -------------------------------------------------------------------- photos
 
-def backfill_images(limit: int = 400, pause: float = 0.1, batch: int = 40) -> dict:
+def backfill_images(limit: int = 1500, pause: float = 0.0, batch: int = 60) -> dict:
     """Cache a Deezer photo on artists who have none.
 
     `deezer.artist_image` returns a photo only when a result's name matches ours exactly
@@ -194,18 +284,14 @@ def backfill_images(limit: int = 400, pause: float = 0.1, batch: int = 40) -> di
         if a and url:
             a.image_url = url
 
-    for aid, name in todo:
-        try:
-            url = deezer.artist_image(name)
-        except Exception:
-            url = None
+    for aid, name, url in _parallel(todo, deezer.artist_image,
+                                    source="deezer", label="images"):
         if url:
             pending.append((aid, url))
             totals["found"] += 1
         else:
             totals["no_match"] += 1
         totals["artists"] += 1
-        time.sleep(pause)
 
         if len(pending) >= batch:
             _in_session(write, pending, "images")
@@ -219,7 +305,7 @@ def backfill_images(limit: int = 400, pause: float = 0.1, batch: int = 40) -> di
 
 # ---------------------------------------------------------------------- bios
 
-def backfill_bios(limit: int = 200, pause: float = 0.2, batch: int = 25) -> dict:
+def backfill_bios(limit: int = 1500, pause: float = 0.0, batch: int = 50) -> dict:
     """Cache a Wikipedia bio, its source label, and the URL it came from.
 
     Wikipedia is the only bio source. Last.fm also returns a bio blob, but it is
@@ -248,18 +334,15 @@ def backfill_bios(limit: int = 200, pause: float = 0.2, batch: int = 25) -> dict
         if url:
             a.wiki_url = url
 
-    for aid, name in todo:
-        try:
-            bio, source, url = wikipedia.fetch_artist_bio(name)
-        except Exception:
-            bio, source, url = None, None, None
+    for aid, name, got in _parallel(todo, wikipedia.fetch_artist_bio,
+                                    source="wikipedia", label="bios"):
+        bio, bio_source, url = got if got else (None, None, None)
         if bio:
-            pending.append((aid, bio, source, url))
+            pending.append((aid, bio, bio_source, url))
             totals["found"] += 1
         else:
             totals["no_page"] += 1
         totals["artists"] += 1
-        time.sleep(pause)
 
         if len(pending) >= batch:
             _in_session(write, pending, "bios")
@@ -273,7 +356,7 @@ def backfill_bios(limit: int = 200, pause: float = 0.2, batch: int = 25) -> dict
 
 # ------------------------------------------------------------------- similar
 
-def backfill_similar(limit: int = 200, pause: float = 0.2, batch: int = 20) -> dict:
+def backfill_similar(limit: int = 1500, pause: float = 0.0, batch: int = 40) -> dict:
     """Cache Last.fm similar artists so the 'you might also like' strip is never empty.
 
     Photos for the similar acts are taken from artists we ALREADY hold, not from a fresh
@@ -310,23 +393,19 @@ def backfill_similar(limit: int = 200, pause: float = 0.2, batch: int = 20) -> d
         if a:
             a.similar_checked_on = today
 
-    for aid, name in todo:
-        try:
-            rows, ok = lastfm.similar_artists_checked(name, limit=20)
-        except Exception:
-            rows, ok = [], False
+    for aid, name, got in _parallel(todo, lambda n: lastfm.similar_artists_checked(n, limit=20),
+                                    source="lastfm", label="similar"):
+        rows, ok = got if got else ([], False)
 
         totals["artists"] += 1
         if not ok:
             # Not stamped, so the next run tries again.
             totals["failed"] += 1
-            time.sleep(pause)
             continue
         if rows:
             totals["with_similar"] += 1
             totals["rows"] += len(rows)
         pending.append((aid, rows))
-        time.sleep(pause)
 
         if len(pending) >= batch:
             _in_session(write, pending, "similar")

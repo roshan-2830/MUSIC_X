@@ -28,7 +28,13 @@ REFRESH_INTERVAL_HOURS = float(os.getenv("REFRESH_INTERVAL_HOURS", "3"))
 # (Deezer, Wikipedia, Last.fm), so the limit is about being a good citizen rather than
 # about cost — a run that completes beats one that gets throttled halfway.
 ENRICH_INTERVAL_HOURS = float(os.getenv("ENRICH_INTERVAL_HOURS", "24"))
-ENRICH_LIMIT = int(os.getenv("ENRICH_LIMIT", "300"))
+# 1500, up from 300. The old figure was set when every artist cost a serialised round trip
+# with a sleep after it, so 300 was about as much as a run could finish. With fetches
+# overlapping behind a per-source rate limiter the same wall-clock buys roughly five times as
+# many, and the gap is worth closing: of 6,388 artists on upcoming bills only 10% have a bio
+# and 78% a photo, and 1,512 unscored concerts are waiting on an artist nobody has looked up.
+# Set ENRICH_LIMIT higher for a one-off catch-up; it only makes the run longer.
+ENRICH_LIMIT = int(os.getenv("ENRICH_LIMIT", "1500"))
 
 # The startup guard still exists, and still works to the calendar day, but it now guards
 # against something narrower than it used to. It was there because a refresh cost ~3,800
