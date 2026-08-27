@@ -3,9 +3,11 @@ import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "r
 import { Ionicons } from "@expo/vector-icons";
 
 import {
-  clearStayBase, Flight, getFlights, getStayBase, getStays, getTravelContext, setStayBase,
-  Stay, StayBase, TravelContext, TravelOptions,
+  City, clearStayBase, Flight, getFlights, getStayBase, getStays, getTravelContext,
+  setStayBase, Stay, StayBase, TravelContext, TravelOptions,
 } from "../lib/api";
+import { useProfile } from "../lib/profile";
+import CityPicker from "./city-picker";
 import StayMap from "./stay-map";
 import VenueMap from "./venue-map";
 
@@ -40,6 +42,15 @@ function hhmm(iso: string | null): string {
  *  Hermes ships a partial Intl and the locale data is not guaranteed on device, so a formatter
  *  can silently come back with something unexpected. A seven-item array cannot. */
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "Thu 17 Sep" — the full date, for the one place it belongs: the header. */
+function dayDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
 
 function weekday(iso: string | null): string | null {
   if (!iso) return null;
@@ -75,6 +86,31 @@ function Empty({ options, kind }: { options: TravelOptions | null; kind: string 
       <Ionicons name="information-circle-outline" size={16} color={MUTED} />
       <Text style={styles.emptyText}>{line}</Text>
     </View>
+  );
+}
+
+/** "Flying from ___" — the origin, changeable in place.
+ *
+ *  Replaces a dead end. The tab used to say "Set your city in your profile and we'll find
+ *  flights" and stop there, which is what MOST people saw, because most people never set it.
+ *  Sending someone to another screen to unlock this one is the kind of thing that reads as the
+ *  app not working.
+ *
+ *  The mockup has exactly this control, and it is the last of the three pieces it specified.
+ */
+function FlyingFrom({ city, onPress }: { city: string | null; onPress: () => void }) {
+  return (
+    <>
+      <Text style={styles.fieldLabel}>FLYING FROM</Text>
+      <Pressable style={styles.field} onPress={onPress} accessibilityRole="button"
+                 accessibilityLabel={city ? `Flying from ${city}. Change` : "Choose where you're flying from"}>
+        <Ionicons name="airplane-outline" size={15} color={city ? ACCENT : MUTED} />
+        <Text style={[styles.fieldText, !city && styles.fieldTextEmpty]} numberOfLines={1}>
+          {city ?? "Choose your city"}
+        </Text>
+        <Ionicons name="chevron-down" size={15} color={MUTED} />
+      </Pressable>
+    </>
   );
 }
 
@@ -251,15 +287,22 @@ function FlightRow({ flight, showLocal }: { flight: Flight; showLocal: string | 
   // first person shown it asked what it meant. A day name needs no explaining: "19:50 -> Thu
   // 10:05" is obviously the next morning, and it keeps working for a two-day itinerary where
   // "+2" would have needed explaining twice.
+  // Both ends carry their day, not just the arrival. A lone "Sat" on the right of an arrow
+  // leaves the reader working out what day the left side was — naming both makes the crossing
+  // obvious at a glance, which is the entire job of this line.
   const landsLater = dayOffset(flight.departs_at, flight.arrives_at) > 0;
-  const arrDay = landsLater ? weekday(flight.arrives_at) : null;
+  const depDay = weekday(flight.departs_at);
+  const arrDay = landsLater ? weekday(flight.arrives_at) : depDay;
   return (
     <View style={styles.row}>
       <View style={styles.thumb}><Ionicons name="airplane" size={18} color={MUTED} /></View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
+          {depDay ? <Text style={styles.dayTag}>{depDay} </Text> : null}
           {hhmm(flight.departs_at)} →{" "}
-          {arrDay ? <Text style={styles.nextDay}>{arrDay} </Text> : null}
+          {/* Accent only when the day CHANGES. Painting both the same colour would have made
+              the one thing worth noticing disappear into the pattern. */}
+          <Text style={landsLater ? styles.nextDay : styles.dayTag}>{arrDay} </Text>
           {hhmm(flight.arrives_at)}
         </Text>
         <Text style={styles.rowSub} numberOfLines={1}>
@@ -318,6 +361,8 @@ export default function PlanTrip({
   const [base, setBase] = useState<StayBase | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
+  const [cityOpen, setCityOpen] = useState(false);
+  const { setHomeCity } = useProfile();
 
   // Fetched on first visit to a tab, not on mount. Two supplier calls for a section nobody
   // opened would be paid for by every event page view.
@@ -346,6 +391,17 @@ export default function PlanTrip({
   // Loaded once on mount, not with the tab: a base that has already been chosen is the answer
   // to "where am I staying", and waiting for a supplier call to show it would hide a fact we
   // already hold. Cheap — our own database, no supplier involved.
+  // Re-asked whenever the ORIGIN changes, not just the event. Locality depends on where this
+  // person says they live, so a stale answer would keep showing "you're already in London" to
+  // someone who has just told us they are in Delhi — and the cached flight list would still be
+  // from the old city.
+  useEffect(() => {
+    setCtx(null);
+    setCtxDone(false);
+    setFlights(null);
+    setWantFlights(false);
+  }, [homeCity]);
+
   useEffect(() => {
     let alive = true;
     getStayBase(eventId).then((b) => { if (alive) setBase(b); });
@@ -353,7 +409,7 @@ export default function PlanTrip({
     // event page, and the Getting there tab cannot render honestly without the answer.
     getTravelContext(eventId).then((t) => { if (alive) { setCtx(t); setCtxDone(true); } });
     return () => { alive = false; };
-  }, [eventId]);
+  }, [eventId, homeCity]);
 
   const pick = async (s: Stay) => {
     if (!s.hotel_id) return;
@@ -371,6 +427,18 @@ export default function PlanTrip({
       setPickError("We couldn't save that just now — try again in a moment.");
     } finally {
       setPicking(false);
+    }
+  };
+
+  // Saved to the profile, not held on this screen. It is the same fact the profile calls a home
+  // city, and asking twice for one answer is how a form earns a reputation. The effect above
+  // then clears the cached context and flights, so the tab re-decides from scratch.
+  const chooseCity = async (c: City) => {
+    setCityOpen(false);
+    try {
+      await setHomeCity(c.id);
+    } catch {
+      setPickError("We couldn't save that city — try again.");
     }
   };
 
@@ -491,10 +559,11 @@ export default function PlanTrip({
             {ctx.kind === "regional" && wantFlights && flights?.flights?.length ? (
               <>
                 <Text style={styles.dates}>
-                  {flights.flights[0]?.origin
-                    ? `${flights.flights[0].origin} → ${flights.flights[0].destination} · `
-                    : ""}
-                  cheapest that gets you there
+                  {[dayDate(flights.flights[0]?.departs_at ?? null),
+                    flights.flights[0]?.origin
+                      ? `${flights.flights[0].origin} → ${flights.flights[0].destination}`
+                      : null,
+                    "cheapest that gets you there"].filter(Boolean).join(" · ")}
                 </Text>
                 {flights.flights.map((f, i) =>
                   <FlightRow key={`${f.flight_number}-${i}`} flight={f}
@@ -509,17 +578,21 @@ export default function PlanTrip({
             ) : null}
           </>
         ) : !homeCity ? (
-          <View style={styles.empty}>
-            <Ionicons name="information-circle-outline" size={16} color={MUTED} />
-            <Text style={styles.emptyText}>Set your city in your profile and we'll find flights.</Text>
-          </View>
+          <>
+            <FlyingFrom city={null} onPress={() => setCityOpen(true)} />
+            <Text style={styles.footnote}>
+              Tell us where you're starting and we'll find flights to the show.
+            </Text>
+          </>
         ) : flights?.flights?.length ? (
           <>
+            <FlyingFrom city={homeCity} onPress={() => setCityOpen(true)} />
             <Text style={styles.dates}>
-              {flights.flights[0]?.origin
-                ? `${flights.flights[0].origin} → ${flights.flights[0].destination} · `
-                : ""}
-              cheapest that gets you there
+              {[dayDate(flights.flights[0]?.departs_at ?? null),
+                flights.flights[0]?.origin
+                  ? `${flights.flights[0].origin} → ${flights.flights[0].destination}`
+                  : null,
+                "cheapest that gets you there"].filter(Boolean).join(" · ")}
             </Text>
             {flights.flights.map((f, i) =>
               <FlightRow key={`${f.flight_number}-${i}`} flight={f}
@@ -533,9 +606,16 @@ export default function PlanTrip({
             </Text>
           </>
         ) : (
-          <Empty options={flights} kind="Flight" />
+          <>
+            {/* Also here, deliberately. A city that returns no flights would otherwise be its
+                own dead end, with no way to correct a wrong choice from this screen. */}
+            <FlyingFrom city={homeCity} onPress={() => setCityOpen(true)} />
+            <Empty options={flights} kind="Flight" />
+          </>
         )
       ) : null}
+
+      <CityPicker visible={cityOpen} onClose={() => setCityOpen(false)} onSelect={chooseCity} />
 
       {/* Required by the covenant, not decoration: the fee is disclosed on the surface where
           the booking happens, and it states plainly that it buys no placement. */}
@@ -600,8 +680,22 @@ const styles = StyleSheet.create({
   // arrival rather than part of it. Accent coloured, because landing on a different day is the
   // difference between making the show and missing it.
   nextDay: { color: ACCENT, fontSize: 14, fontWeight: "800" },
+  // The ordinary day, when nothing has crossed midnight: present so both ends read alike, and
+  // muted so it does not compete with the times themselves.
+  dayTag: { color: MUTED, fontSize: 14, fontWeight: "700" },
   verdict: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   verdictText: { fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
+  fieldLabel: {
+    color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8,
+    marginTop: 14, marginBottom: 6,
+  },
+  field: {
+    flexDirection: "row", alignItems: "center", gap: 9,
+    borderWidth: 1, borderColor: LINE, borderRadius: 11,
+    paddingVertical: 12, paddingHorizontal: 12, backgroundColor: "#0f0f14",
+  },
+  fieldText: { color: "#f4f4f6", fontSize: 14, fontWeight: "700", flex: 1 },
+  fieldTextEmpty: { color: MUTED, fontWeight: "600" },
   hereRow: {
     flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 4, marginTop: 4,
   },
