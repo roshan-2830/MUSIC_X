@@ -157,8 +157,16 @@ def stays_for_event(
         return TravelOptions(status="no_location",
                              reason=f"Our travel provider does not recognise {city_name}.", **dates)
 
-    # A CITY, never a state: searching a state returns 500 after an 11-second timeout.
-    place = tripsure.best_location(matches)
+    # Verified against the VENUE's own coordinates, not just the city name. "Highland" the
+    # city name matched Genting Highlands, Malaysia — 14,180 km from the California venue.
+    venue = db.get(Venue, ev.venue_id) if ev.venue_id else None
+    place = tripsure.best_location(
+        matches, venue.lat if venue else None, venue.lng if venue else None)
+    if place is None:
+        return TravelOptions(
+            status="no_location",
+            reason=f"We can't match {city_name} to a place our travel partner knows.",
+            **dates)
     hand_over = tripsure.results_url(place, check_in.isoformat(), check_out.isoformat(),
                                      adults=adults)
     hotels = tripsure.search_hotels(place, check_in.isoformat(),

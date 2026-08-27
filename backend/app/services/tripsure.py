@@ -187,26 +187,62 @@ def results_url(location: dict, check_in: str, check_out: str,
     return f"{WEB_BASE}/stays/results?" + urlencode({k: v for k, v in q.items() if v is not None})
 
 
-def best_location(suggestions: list) -> dict | None:
-    """The suggestion worth searching — a CITY, not a state or a region.
+def _km(la1, lo1, la2, lo2) -> float:
+    import math
+    r = math.radians
+    h = (math.sin((r(la2) - r(la1)) / 2) ** 2
+         + math.cos(r(la1)) * math.cos(r(la2)) * math.sin((r(lo2) - r(lo1)) / 2) ** 2)
+    return 2 * 6371 * math.asin(math.sqrt(h))
 
-    Measured 2026-08-27: searching a State returns HTTP 500 after an 11-second upstream
-    timeout. "goa" resolves to Goa the State and fails; "mumbai" and "bengaluru" resolve to
-    City and return 933 KB and 1.4 MB of hotels. Taking suggestions[0] blindly, as the first
-    version did, meant a whole class of destinations answered with a server error.
+
+# How far a matched location may sit from the venue and still be the same place. Generous
+# enough for a venue outside the city it is named after, tight enough to reject another
+# continent.
+MAX_MATCH_KM = 80
+
+
+def best_location(suggestions: list, venue_lat: float | None = None,
+                  venue_lng: float | None = None) -> dict | None:
+    """The suggestion that is actually where the show is — verified against the venue.
+
+    A NAME IS NOT A PLACE, and trusting one produced the worst bug in this integration.
+    'Yaamava Resort & Casino' is in Highland, CALIFORNIA. Tripsure's top City match for
+    "Highland" is Genting Highlands, MALAYSIA, and the first version took it: the Stay tab
+    offered hotels 14,180 km away, and because the map fitted them it zoomed out to a view of
+    two continents with every pin off-screen. The map looking broken was the symptom; the
+    hotels being on the wrong side of the planet was the fault.
+
+    Worse, none of the five "Highland" suggestions IS Highland, California — the others are
+    in Maryland, Michigan, Illinois and Wisconsin. So there is no answer to pick, and any
+    choice would have been wrong. Which is the point: the venue's own coordinates are the
+    only evidence that settles it, and we have them.
+
+    Returns None when nothing is near the venue. That is a real answer — better a tab that
+    says it cannot find stays than one confidently listing another country's hotels.
     """
     if not suggestions:
         return None
-    for want in ("City", "Locality", "Area", "Hotel"):
+
+    def near(s) -> bool:
+        if venue_lat is None or venue_lng is None:
+            return True     # nothing to check against; fall back to ranking alone
+        c = s.get("coordinates") or {}
+        la, lo = c.get("lat") or s.get("lat"), c.get("lon") or s.get("lon")
+        if la is None or lo is None:
+            return False
+        return _km(venue_lat, venue_lng, la, lo) <= MAX_MATCH_KM
+
+    # A City first, then the looser place types — but only ones that are actually here.
+    for want in ("City", "Locality", "Area", "Region", "MultiCity", "State"):
         for s in suggestions:
-            if (s.get("type") or "") == want:
+            if (s.get("type") or "") == want and near(s):
                 return s
-    # A State's own popular_locations are cities — better than searching the state itself.
+    # A state's own popular_locations are cities; try those before giving up.
     for s in suggestions:
         for pop in (s.get("popular_locations") or []):
-            if (pop.get("type") or "") == "City":
+            if near(pop):
                 return pop
-    return suggestions[0]
+    return None
 
 
 def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int = 2,

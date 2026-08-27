@@ -7,14 +7,25 @@
 
 export const TILE = 256;
 
-/** CARTO's Voyager basemap, from OpenStreetMap data. Plain images, no API key.
+/** The tile host. Two have already failed this app, in different ways:
  *
- *  NOT tile.openstreetmap.org: measured 2026-08-26, that host answers this app with HTTP 200
- *  and a 6,987-byte "Access denied" placeholder — identical bytes for every tile — so the map
- *  would silently draw grey with nothing to catch it.
+ *   • tile.openstreetmap.org answers with HTTP 200 and a 6,987-byte "Access denied"
+ *     placeholder — identical bytes for every tile, so nothing catches it and the map
+ *     silently draws grey.
+ *   • basemaps.cartocdn.com served real tiles this morning and by afternoon was burning
+ *     "API KEY REQUIRED — carto.com/basemaps/apikey" diagonally across every one. Still
+ *     HTTP 200, still ~33 KB, and unusable.
+ *
+ *  So a keyless public host is borrowed time, and the honest fix is a keyed provider with a
+ *  free tier — MapTiler allows 100k tiles a month. TILE_HOST reads an env var so a key can
+ *  be dropped in without touching this file; the default keeps the app working today.
  */
+const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY ?? "";
+
 export const tileUrl = (z: number, x: number, y: number) =>
-  `https://basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
+  MAPTILER_KEY
+    ? `https://api.maptiler.com/maps/streets-v2/${z}/${x}/${y}.png?key=${MAPTILER_KEY}`
+    : `https://tile.openstreetmap.de/${z}/${x}/${y}.png`;
 
 /** Where a lat/lng falls, in pixels, across the whole world at this zoom. */
 export function worldPixel(lat: number, lng: number, z: number) {
@@ -41,13 +52,20 @@ export function tileGrid(
   centerLat: number, centerLng: number, zoom: number, width: number, height: number,
 ): TileGrid {
   const { n, x: px, y: py } = worldPixel(centerLat, centerLng, zoom);
-  // One extra tile each side, so a partial tile never leaves a gap at the edge.
-  const cols = Math.ceil(width / TILE) + 2;
-  const rows = Math.ceil(height / TILE) + 2;
-  const tx0 = Math.floor(px / TILE) - 1;
-  const ty0 = Math.floor(py / TILE) - 1;
-  const gridLeft = width / 2 - (px - tx0 * TILE);
-  const gridTop = height / 2 - (py - ty0 * TILE);
+
+  // Anchor on the box's own top-left in world pixels. The first version anchored on the
+  // CENTRE tile and added a tile of margin, which covers a phone-width box by luck and
+  // fails as the box grows: at 340px the offset came out negative and covered fine, at
+  // 1740px it came out +530 and left a 530px grey band down the left of the map.
+  const worldLeft = px - width / 2;
+  const worldTop = py - height / 2;
+  const tx0 = Math.floor(worldLeft / TILE);
+  const ty0 = Math.floor(worldTop / TILE);
+  // Always in (-TILE, 0], so the grid can never start to the right of the box edge.
+  const gridLeft = -(worldLeft - tx0 * TILE);
+  const gridTop = -(worldTop - ty0 * TILE);
+  const cols = Math.ceil((width - gridLeft) / TILE);
+  const rows = Math.ceil((height - gridTop) / TILE);
 
   const tiles: TileGrid["tiles"] = [];
   for (let ry = 0; ry < rows; ry++) {
