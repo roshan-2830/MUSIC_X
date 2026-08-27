@@ -7,6 +7,7 @@ import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleS
 import { EventDetail, fetchEvent } from "../lib/api";
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
+import ExploreNearby from "./explore-nearby";
 import PlanTrip from "./plan-trip";
 import { coverColor, flagEmoji, hashHue } from "../lib/format";
 import { useProfile } from "../lib/profile";
@@ -302,6 +303,25 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               Renders nothing at all when we know neither the venue's location nor a city to
               search — an empty heading is worse than no heading. */}
           <AroundVenue eventId={ev.id} />
+
+          {/* Bookable activities, which is a different thing from the free places above and is
+              kept in its own card for exactly that reason: everything in "Around the venue" is
+              unpaid, and this one pays us. Merging them would put a commissioned list and an
+              uncommissioned one under one heading and one disclosure, which is the kind of blur
+              the app's covenant exists to prevent.
+
+              Coordinates are passed because the component's map fallback uses them. The widget
+              itself cannot take them — verified against the live endpoint, which ignores
+              latitude/longitude entirely — so it is asked for the venue and city by name. */}
+          <ExploreNearby
+            lat={ev.venue_lat ?? null}
+            lng={ev.venue_lng ?? null}
+            venueName={ev.venue_name}
+            city={ev.city}
+            // The show's own currency where the seller published one, so an activity price
+            // sits in the same money as the ticket beside it.
+            currency={ev.price_from_currency ?? "EUR"}
+          />
 
           <PlanTrip
             eventId={ev.id}
