@@ -1,0 +1,30 @@
+{
+  "changes": [
+    "ab065a11-4351-4e41-aae6-340bdc9b7cdc",
+    "63b3d30d-c782-44dc-81d0-fe4dfa17390b",
+    "53229ede-8963-4908-9f81-4c349345f0e9"
+  ],
+  "events": [
+    {
+      "id": "20d8c2cc-1761-4f22-b464-a930e97eba92",
+      "title": "McFly",
+      "status": "scheduled",
+      "starts_at": "2026-08-27T15:00:00+00:00",
+      "price": null
+    },
+    {
+      "id": "26fde5db-711f-48e7-82e1-fa5b26678154",
+      "title": "Shakira",
+      "status": "scheduled",
+      "starts_at": "2026-09-27T18:30:00+00:00",
+      "price": null
+    },
+    {
+      "id": "47aa6f52-191e-4207-9c6e-c5819afcb365",
+      "title": "Foo Fighters: TAKE COVER TOUR 2026",
+      "status": "scheduled",
+      "starts_at": "2026-09-21T00:30:00+00:00",
+      "price": null
+    }
+  ]
+}

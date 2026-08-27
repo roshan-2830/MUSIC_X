@@ -63,6 +63,21 @@ export default function FestivalCard({
 
       <Text style={styles.name} numberOfLines={2}>{festival.name}</Text>
       <Text style={styles.meta} numberOfLines={1}>{meta}</Text>
+
+      {/* The score, shown exactly as a concert card shows it. Festivals had none — the card
+          rendered artwork, name, dates and city and stopped — so scoring 404 of them changed
+          nothing a user could see. An unscored festival says so rather than showing nothing,
+          which is the same promise the concert card makes: absence stated, never implied. */}
+      <View style={styles.foot}>
+        {festival.mxs != null ? (
+          <View style={styles.mxsPill}><Text style={styles.mxsText}>{festival.mxs.toFixed(1)}/10</Text></View>
+        ) : (
+          <View style={styles.noscorePill}><Text style={styles.noscoreText}>No rating yet</Text></View>
+        )}
+        {festival.artists_count ? (
+          <Text style={styles.acts}>{festival.artists_count} acts</Text>
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -90,4 +105,13 @@ const styles = StyleSheet.create({
   },
   name: { color: "#f4f4f6", fontSize: 16, fontWeight: "800", lineHeight: 20 },
   meta: { color: MUTED, fontSize: 13, marginTop: 3 },
+  foot: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
+  mxsPill: { backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 11 },
+  mxsText: { color: "#101204", fontWeight: "800", fontSize: 13 },
+  noscorePill: {
+    borderWidth: 1, borderColor: "#26262f", borderStyle: "dashed", borderRadius: 999,
+    paddingVertical: 4, paddingHorizontal: 10, backgroundColor: "#1b1b24",
+  },
+  noscoreText: { color: MUTED, fontSize: 12 },
+  acts: { color: MUTED, fontSize: 12, fontWeight: "600" },
 });

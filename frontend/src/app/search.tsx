@@ -476,6 +476,9 @@ export default function SearchScreen() {
             {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
           </Text>
         </View>
+        {/* The score, as EventRow has always shown it. Without this the "sort by rating"
+            filter above ranked festivals by a number the row never displayed. */}
+        {fest.mxs != null ? <Text style={styles.rowMxs}>{fest.mxs.toFixed(1)}</Text> : null}
       </Pressable>
     );
   }
