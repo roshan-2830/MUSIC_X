@@ -395,6 +395,63 @@ def ingest_from_ticketmaster(size: int = 100):
 MAX_REVERIFY_PER_RUN = 50000
 
 
+def _mark_missing(missing_ids: list, returned_ids: set) -> dict:
+    """Count consecutive misses, and retire a show on the SECOND one.
+
+    Two strikes because one is not evidence. A show absent from a single response could be a
+    partial answer, a supplier hiccup, or a listing mid-edit — and hiding a real concert
+    somebody holds tickets for is a far worse mistake than briefly showing one that has been
+    pulled. So the first miss only counts; the second retires.
+
+    Reversible without anyone intervening: every event that DID come back has its counter
+    cleared and its retirement lifted, so a show Ticketmaster relists reappears on the next
+    pass.
+
+    Events whose batch failed are not touched at all — they are `unchecked`, and neither
+    absence nor presence was established for them.
+    """
+    from sqlalchemy import text as _text
+
+    out = {"retired": 0, "revived": 0, "strike_one": 0}
+    db = SessionLocal()
+    try:
+        if missing_ids:
+            # One statement, so 22 misses are 1 round trip rather than 22. The second strike
+            # and the retirement stamp happen together — a row reaching 2 is retired in the
+            # same update that takes it there.
+            r = db.execute(_text("""
+                UPDATE events e
+                   SET missing_count = e.missing_count + 1,
+                       retired_at = CASE WHEN e.missing_count + 1 >= 2
+                                         THEN COALESCE(e.retired_at, now())
+                                         ELSE e.retired_at END
+                 WHERE e.id IN (SELECT es.event_id FROM event_sources es
+                                 WHERE es.source = 'ticketmaster'
+                                   AND es.source_event_id = ANY(:ids))
+                RETURNING e.missing_count
+            """), {"ids": missing_ids}).fetchall()
+            out["retired"] = sum(1 for x in r if x[0] >= 2)
+            out["strike_one"] = sum(1 for x in r if x[0] == 1)
+        if returned_ids:
+            r = db.execute(_text("""
+                UPDATE events e
+                   SET missing_count = 0, retired_at = NULL
+                 WHERE (e.missing_count > 0 OR e.retired_at IS NOT NULL)
+                   AND e.id IN (SELECT es.event_id FROM event_sources es
+                                 WHERE es.source = 'ticketmaster'
+                                   AND es.source_event_id = ANY(:ids))
+                RETURNING e.id
+            """), {"ids": list(returned_ids)}).fetchall()
+            out["revived"] = len(r)
+        db.commit()
+    finally:
+        db.close()
+    if out["retired"] or out["revived"] or out["strike_one"]:
+        print(f"[refresh] retirement — {out['strike_one']} first miss, "
+              f"{out['retired']} retired (2nd miss), {out['revived']} came back")
+    return out
+
+
 def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -> dict:
     """Deep refresh: re-fetch EVERY Ticketmaster event we have and update it in place —
     status (cancelled/postponed), dates, price — for ALL shows, not just followed artists.
@@ -444,9 +501,11 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
     # report a network blip as 150 cancellations.
     returned = {r.get("id") for r in raws if r.get("id")}
     unchecked_set = set(unchecked)
-    gone = sum(1 for i in tm_ids if i not in returned and i not in unchecked_set)
+    missing_ids = [i for i in tm_ids if i not in returned and i not in unchecked_set]
+    gone = len(missing_ids)
     print(f"[refresh] {len(raws)} returned, {gone} gone, {len(unchecked)} unchecked, "
           f"{requests} request(s) spent")
+    retired = _mark_missing(missing_ids, returned)
 
     updated, lines = 0, []
     if raws:
@@ -463,6 +522,7 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
             db.close()
     summary = {"checked": len(tm_ids), "updated": updated, "gone": gone,
                "unchecked": len(unchecked), "requests": requests,
+               "retired": retired["retired"], "revived": retired["revived"],
                "changes": len(lines)}
     print(f"[refresh] re-verify done — {summary}")
     for line in lines:

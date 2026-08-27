@@ -91,7 +91,7 @@ def list_events(
     country: str | None = Query(None, min_length=2, max_length=2),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Event).filter(Event.merged_into.is_(None))
+    q = db.query(Event).filter(Event.merged_into.is_(None), Event.retired_at.is_(None))
     # Only ongoing/upcoming shows: from the start of today onward (keep undated ones).
     cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     q = q.filter((Event.starts_at >= cutoff) | (Event.starts_at.is_(None)))
@@ -151,7 +151,7 @@ def search_local(
             .outerjoin(Artist, Event.headliner_artist_id == Artist.id)
             .outerjoin(EventArtist, EventArtist.event_id == Event.id)
             .outerjoin(LineupArtist, EventArtist.artist_id == LineupArtist.id)
-            .filter(Event.merged_into.is_(None), upcoming)
+            .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
         )
 
     # Every comparison folds accents on both sides, so "gulsen" finds Gülşen and "joao"

@@ -241,7 +241,7 @@ def artist_detail(
     for (eid,) in (
         db.query(Event.id)
         .join(Artist, Event.headliner_artist_id == Artist.id)
-        .filter(Event.merged_into.is_(None), upcoming, func.lower(Artist.name) == lname)
+        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming, func.lower(Artist.name) == lname)
         .all()
     ):
         ev_ids.add(eid)
@@ -249,7 +249,7 @@ def artist_detail(
         db.query(Event.id)
         .join(EventArtist, EventArtist.event_id == Event.id)
         .join(Artist, EventArtist.artist_id == Artist.id)
-        .filter(Event.merged_into.is_(None), upcoming, func.lower(Artist.name) == lname)
+        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming, func.lower(Artist.name) == lname)
         .all()
     ):
         ev_ids.add(eid)

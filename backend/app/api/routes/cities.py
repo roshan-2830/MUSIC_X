@@ -27,7 +27,7 @@ def search_with_shows(q: str = Query(..., min_length=1), db: Session = Depends(g
         .join(Venue, Venue.city_id == City.id)
         .join(Event, Event.venue_id == Venue.id)
         .filter(City.name.ilike(f"%{q.strip()}%"))
-        .filter(Event.merged_into.is_(None))
+        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None))
         .filter((Event.starts_at >= cutoff) | (Event.starts_at.is_(None)))
         .group_by(City.id)
         .order_by(func.count(Event.id).desc())

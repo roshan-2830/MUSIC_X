@@ -233,7 +233,7 @@ def calendar(
                        .filter(EventArtist.artist_id.in_(followed_artists)).subquery())
         lineup_matches = {r[0] for r in db.query(by_lineup.c.event_id).all()}
 
-    q = db.query(Event).filter(Event.merged_into.is_(None), window)
+    q = db.query(Event).filter(Event.merged_into.is_(None), Event.retired_at.is_(None), window)
     if mode == "mine":
         # Saved only. No follow-derived clauses: this scope answers "what am I going to",
         # and the only honest source for that is what the person bookmarked.
@@ -471,13 +471,13 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
         db.query(Event, Artist.name)
         .join(EventArtist, EventArtist.event_id == Event.id)
         .join(Artist, EventArtist.artist_id == Artist.id)
-        .filter(Event.merged_into.is_(None), upcoming)
+        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
         .all()
     )
     headliner_rows = (
         db.query(Event, Artist.name)
         .join(Artist, Event.headliner_artist_id == Artist.id)
-        .filter(Event.merged_into.is_(None), upcoming)
+        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
         .all()
     )
     # Artists from a connected Last.fm account. Kept separate from follows because the
@@ -507,7 +507,7 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
             db.query(Event, Genre.name)
             .join(EventGenre, EventGenre.event_id == Event.id)
             .join(Genre, EventGenre.genre_id == Genre.id)
-            .filter(Event.merged_into.is_(None), upcoming)
+            .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
             .all()
         )
         for ev, gname in genre_rows:

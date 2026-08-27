@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import (
-    Column, String, Text, Boolean, Numeric, Date, DateTime,
+    Column, String, Text, Boolean, Integer, Numeric, Date, DateTime,
     ForeignKey, Uuid, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -40,6 +40,14 @@ class Event(Base):
     # Trust / verification
     confidence = Column(String, nullable=True)                # high | medium | low
     last_verified = Column(Date, nullable=True)
+
+    # Consecutive re-verify passes in which Ticketmaster did not return this event. Reset to 0
+    # by any response that does return it.
+    missing_count = Column(Integer, nullable=False, server_default="0")
+    # Stamped on the SECOND consecutive miss, never the first: one absence could be a partial
+    # answer or a listing being edited, and hiding a real show somebody holds tickets for is a
+    # worse mistake than briefly showing one that has been pulled. Cleared if it comes back.
+    retired_at = Column(DateTime(timezone=True), nullable=True)
 
     # Deduplication: if merged into another event, point to the survivor
     merged_into = Column(Uuid, ForeignKey("events.id"), nullable=True)
