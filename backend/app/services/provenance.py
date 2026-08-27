@@ -218,6 +218,23 @@ def sync_facts(db: Session, pairs: list, today: date | None = None,
     if not pairs:
         return {"added": 0, "updated": 0, "removed": 0, "untouched": 0}
 
+    # ONE payload per event. Merging ticket-type listings repointed their Ticketmaster ids
+    # onto the surviving event, so 171 events now carry more than one source id — one carries
+    # eighteen — and the deep refresh fetches each of them. Two payloads for one event walked
+    # this loop twice, and `held.pop` had already removed the row on the first pass, so the
+    # second inserted a duplicate and violated uq_event_fact_key.
+    #
+    # The richest payload wins. They describe the same show, so the one publishing the most
+    # is the fullest record of it; picking arbitrarily would make the stored facts depend on
+    # the order Ticketmaster happened to return the ids in.
+    if len({eid for eid, _, _ in pairs}) != len(pairs):
+        best: dict = {}
+        for eid, raw, url in pairs:
+            n = len(extract_facts(raw))
+            if eid not in best or n > best[eid][0]:
+                best[eid] = (n, (eid, raw, url))
+        pairs = [v[1] for v in best.values()]
+
     event_ids = [eid for eid, _, _ in pairs]
     held = {}
     for row in db.query(EventFact).filter(EventFact.event_id.in_(event_ids)).all():

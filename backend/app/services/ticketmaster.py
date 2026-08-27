@@ -69,7 +69,12 @@ def fetch_music_events(size: int = 100, months: int = 12, pages_per_window: int 
             evs = ((data.get("_embedded") or {}).get("events") or [])
             for e in evs:
                 if e.get("id"):
-                    e["_mx_keyword"] = kw
+                    # No _mx_keyword here: this is the BROAD sweep, which asks no keyword at
+                    # all. A stray `e["_mx_keyword"] = kw` copied from the festival search
+                    # raised NameError on every run — and because the caller catches broadly
+                    # ("one bad window must not kill the sweep"), it surfaced only as
+                    # "[sweep] concerts: 0" with an error line. _is_festival_listing already
+                    # reads this with .get(), so absent is the correct state.
                     seen.setdefault(e["id"], e)
             total_pages = (data.get("page") or {}).get("totalPages", 1)
             if page + 1 >= total_pages or not evs:
