@@ -717,9 +717,11 @@ def travel_context(
                                 venue.lat if venue else None,
                                 venue.lng if venue else None,
                                 venue.name if venue else None)
+    show_local = _show_local_start(ev)
     common = dict(venue_name=venue.name if venue else None,
                   event_city=event_city.name if event_city else None,
-                  directions_url=directions)
+                  directions_url=directions,
+                  show_local_start=show_local.isoformat() if show_local else None)
 
     prof = db.get(Profile, _uuid.UUID(user_id))
     home = db.get(City, prof.home_city_id) if prof and prof.home_city_id else None

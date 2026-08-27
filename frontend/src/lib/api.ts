@@ -790,6 +790,10 @@ export type TravelContext = {
   event_city: string | null;
   /** Directions with no origin, so the map app starts from wherever the phone is. */
   directions_url: string | null;
+  /** When the show starts, on the clock of the city it's in. Present here as well as on the
+   *  flight search, because a local never triggers a flight search and the journey card still
+   *  needs to say what time the doors are. */
+  show_local_start: string | null;
 };
 
 export async function getTravelContext(eventId: string): Promise<TravelContext | null> {

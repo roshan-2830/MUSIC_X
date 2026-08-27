@@ -128,3 +128,7 @@ class TravelContext(BaseModel):
     # phone is. That is the right question for someone already in the city, and it is the one
     # thing we could not answer by looking anything up.
     directions_url: str | None = None
+    # When the show starts, on the clock of the city it happens in. Here as well as on the
+    # flight search because a local never triggers a flight search, and the journey card still
+    # has to be able to say what time the doors are.
+    show_local_start: str | None = None

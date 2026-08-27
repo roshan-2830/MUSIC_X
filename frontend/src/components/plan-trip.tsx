@@ -89,6 +89,39 @@ function Empty({ options, kind }: { options: TravelOptions | null; kind: string 
   );
 }
 
+/** One leg of the journey, numbered.
+ *
+ *  Numbered because it genuinely is a sequence — you land, you drop your bag, you walk to the
+ *  doors — and the numbers carry the one thing this card exists to show: that these are three
+ *  parts of one trip, not three unrelated links.
+ */
+function Leg({
+  n, last, icon, label, title, sub, children,
+}: {
+  n: number; last?: boolean; icon: string; label: string; title: string; sub?: string | null;
+  children?: React.ReactNode;
+}) {
+  return (
+    <View style={styles.leg}>
+      <View style={styles.legRail}>
+        <View style={styles.legDot}><Text style={styles.legNum}>{n}</Text></View>
+        {/* The line joining one leg to the next. Absent on the last, which is how you can see
+            it is the last. */}
+        {last ? null : <View style={styles.legLine} />}
+      </View>
+      <View style={styles.legBody}>
+        <View style={styles.legHead}>
+          <Ionicons name={icon as any} size={12} color={MUTED} />
+          <Text style={styles.legLabel}>{label}</Text>
+        </View>
+        <Text style={styles.legTitle} numberOfLines={2}>{title}</Text>
+        {sub ? <Text style={styles.legSub} numberOfLines={2}>{sub}</Text> : null}
+        {children}
+      </View>
+    </View>
+  );
+}
+
 /** "Flying from ___" — the origin, changeable in place.
  *
  *  Replaces a dead end. The tab used to say "Set your city in your profile and we'll find
@@ -114,6 +147,71 @@ function FlyingFrom({ city, onPress }: { city: string | null; onPress: () => voi
   );
 }
 
+/** Where you sleep and where the doors are — legs 2 and 3 of the same journey.
+ *
+ *  These already existed, on other tabs: the hotel on Stay, the venue on Venue map. Reading a
+ *  trip meant holding three screens in your head and doing the joining yourself, which is
+ *  exactly the work this app should be doing. The flight, the bed and the doors are one
+ *  sequence, so they are shown as one.
+ */
+function JourneyRest({
+  base, ctx, doorsLabel, onChooseStay,
+}: {
+  base: StayBase | null;
+  ctx: TravelContext | null;
+  doorsLabel: string | null;
+  onChooseStay: () => void;
+}) {
+  const away = base?.metres_to_venue;
+  const dist = away == null ? null
+    : away >= 1000 ? `${(away / 1000).toFixed(1)} km from the venue`
+    : `${away} m from the venue`;
+  // From the bed if we know it, otherwise from wherever the phone is. Both are real answers;
+  // the difference is only whether this person has told us where they are staying.
+  const dirUrl = base?.directions_url ?? ctx?.directions_url ?? null;
+  return (
+    <>
+      {/* A rule with a caption, not a heading. The flight list above is a chooser — many rows,
+          one decision — and what follows is what happens afterwards regardless of which row
+          they pick. The two need separating or the legs read as more flight options. */}
+      <View style={styles.divider}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.dividerText}>ONCE YOU LAND</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      {base ? (
+        <Leg n={1} icon="bed" label="YOUR BASE" title={base.name}
+             sub={[dist, base.walk_minutes != null ? `${base.walk_minutes} min walk` : null,
+                   base.check_in_time ? `check-in ${base.check_in_time}` : null]
+                   .filter(Boolean).join(" · ") || null} />
+      ) : (
+        <Leg n={1} icon="bed-outline" label="YOUR BASE" title="Not chosen yet"
+             sub="Pick a hotel on the Stay tab and the walk to the venue shows up here.">
+          <Pressable style={styles.legBtn} onPress={onChooseStay}>
+            <Ionicons name="map-outline" size={13} color={ACCENT} />
+            <Text style={styles.legBtnText}>Choose where you're staying</Text>
+          </Pressable>
+        </Leg>
+      )}
+
+      <Leg n={2} last icon="location" label="THE VENUE"
+           title={ctx?.venue_name ?? "The venue"}
+           sub={doorsLabel}>
+        {dirUrl ? (
+          <Pressable style={styles.dirBtn} onPress={() => Linking.openURL(dirUrl)}>
+            <Ionicons name="navigate" size={14} color="#101204" />
+            <Text style={styles.dirBtnText}>
+              {base ? "Directions from your hotel" : "Directions to the venue"}
+            </Text>
+            <Ionicons name="open-outline" size={12} color="#101204" />
+          </Pressable>
+        ) : null}
+      </Leg>
+    </>
+  );
+}
+
 /** The answer for someone who does not need a flight.
  *
  *  A local person was previously shown a flight search to the city they live in, which is the
@@ -121,7 +219,7 @@ function FlyingFrom({ city, onPress }: { city: string | null; onPress: () => voi
  *  way to the door, so that is all this shows — and the Directions link carries no origin, so
  *  the map app starts from wherever they are standing.
  */
-function NoFlightNeeded({ ctx }: { ctx: TravelContext }) {
+function NoFlightNeeded({ ctx, doorsLabel }: { ctx: TravelContext; doorsLabel: string | null }) {
   const local = ctx.kind === "local";
   const km = ctx.distance_km;
   return (
@@ -137,9 +235,11 @@ function NoFlightNeeded({ ctx }: { ctx: TravelContext }) {
               : `About ${km != null ? Math.round(km) : "—"} km away`}
           </Text>
           <Text style={styles.hereSub}>
-            {local
-              ? "No flight needed"
-              : `A drive or a train from ${ctx.origin_city ?? "home"} — no flight needed`}
+            {[local ? "No flight needed"
+                    : `A drive or a train from ${ctx.origin_city ?? "home"} — no flight needed`,
+              // A local's only real question is what time to leave the house, so the door time
+              // belongs here as much as it does on a traveller's journey card.
+              doorsLabel].filter(Boolean).join(" · ")}
           </Text>
         </View>
       </View>
@@ -450,6 +550,17 @@ export default function PlanTrip({
 
   const hasMap = lat != null && lng != null && !(lat === 0 && lng === 0);
 
+  // "Doors 20:30" — from the show's own local clock. Silent when the venue has not published a
+  // time, rather than inventing one: 494 shows carry no timezone at all and 45 more resolve to
+  // the small hours, and a made-up door time is the one thing on this card that would get
+  // somebody to the wrong place at the wrong hour.
+  const doorsLabel = (() => {
+    const iso = ctx?.show_local_start ?? flights?.show_local_start ?? null;
+    if (!iso) return null;
+    const t = hhmm(iso);
+    return t === "—" ? null : `Doors ${t}`;
+  })();
+
   return (
     <View style={styles.card}>
       <Text style={styles.h}>Plan your trip</Text>
@@ -549,7 +660,7 @@ export default function PlanTrip({
         // message asks.
         ctx && (ctx.kind === "local" || ctx.kind === "regional") ? (
           <>
-            <NoFlightNeeded ctx={ctx} />
+            <NoFlightNeeded ctx={ctx} doorsLabel={doorsLabel} />
             {ctx.kind === "regional" && !wantFlights ? (
               <Pressable style={styles.anyway} onPress={() => setWantFlights(true)}>
                 <Ionicons name="airplane-outline" size={14} color={MUTED} />
@@ -604,6 +715,8 @@ export default function PlanTrip({
             <Text style={styles.footnote}>
               Prices for planning. Booking flights isn't connected yet.
             </Text>
+            <JourneyRest base={base} ctx={ctx} doorsLabel={doorsLabel}
+                         onChooseStay={() => setTab("stay")} />
           </>
         ) : (
           <>
@@ -611,6 +724,10 @@ export default function PlanTrip({
                 own dead end, with no way to correct a wrong choice from this screen. */}
             <FlyingFrom city={homeCity} onPress={() => setCityOpen(true)} />
             <Empty options={flights} kind="Flight" />
+            {/* The rest of the journey does not depend on us finding a flight. Someone who
+                cannot get a fare from us still has a hotel and still has to reach the doors. */}
+            <JourneyRest base={base} ctx={ctx} doorsLabel={doorsLabel}
+                         onChooseStay={() => setTab("stay")} />
           </>
         )
       ) : null}
@@ -685,6 +802,32 @@ const styles = StyleSheet.create({
   dayTag: { color: MUTED, fontSize: 14, fontWeight: "700" },
   verdict: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   verdictText: { fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
+  // The journey. A rail of numbered dots down the left with a line between them, so three
+  // separate facts read as one trip rather than three cards that happen to be stacked.
+  leg: { flexDirection: "row", gap: 12, marginTop: 16 },
+  legRail: { alignItems: "center", width: 22 },
+  legDot: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(232,255,71,0.14)",
+    alignItems: "center", justifyContent: "center",
+  },
+  legNum: { color: ACCENT, fontSize: 11, fontWeight: "800" },
+  legLine: { flex: 1, width: 1.5, backgroundColor: LINE, marginTop: 5, minHeight: 14 },
+  legBody: { flex: 1, paddingBottom: 4 },
+  legHead: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 3 },
+  legLabel: { color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
+  legTitle: { color: "#f4f4f6", fontSize: 14.5, fontWeight: "800" },
+  legSub: { color: MUTED, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
+  legBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    borderWidth: 1, borderColor: "rgba(232,255,71,0.35)", borderRadius: 10,
+    paddingVertical: 10, marginTop: 10,
+  },
+  legBtnText: { color: ACCENT, fontSize: 13, fontWeight: "800" },
+
+  divider: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 20 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: LINE },
+  dividerText: { color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+
   fieldLabel: {
     color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8,
     marginTop: 14, marginBottom: 6,
