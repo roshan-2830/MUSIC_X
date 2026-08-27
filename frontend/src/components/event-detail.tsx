@@ -6,6 +6,7 @@ import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleS
 
 import { EventDetail, fetchEvent } from "../lib/api";
 import ArtistDetail from "./artist-detail";
+import AroundVenue from "./around-venue";
 import PlanTrip from "./plan-trip";
 import { coverColor, flagEmoji, hashHue } from "../lib/format";
 import { useProfile } from "../lib/profile";
@@ -296,6 +297,12 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               four worst, three had the VENUE right to within a kilometre while the CITY was
               wrong (Hollywood holding Florida's coordinates, Portland holding Oregon's).
               Dropping those maps would discard correct ones. */}
+          {/* Before the trip card, as the mockup orders it: what is around the venue is a
+              reason to go early, and it should be read before the logistics of getting there.
+              Renders nothing at all when we know neither the venue's location nor a city to
+              search — an empty heading is worse than no heading. */}
+          <AroundVenue eventId={ev.id} />
+
           <PlanTrip
             eventId={ev.id}
             venueName={ev.venue_name}

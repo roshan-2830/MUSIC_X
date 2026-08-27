@@ -3,6 +3,7 @@ from app.db.session import Base  # noqa: F401
 # Reference
 from app.models.city import City  # noqa: F401
 from app.models.venue import Venue  # noqa: F401
+from app.models.venue_place import VenuePlace  # noqa: F401
 from app.models.artist import Artist  # noqa: F401
 from app.models.artist_similar import ArtistSimilar  # noqa: F401
 from app.models.genre import Genre  # noqa: F401

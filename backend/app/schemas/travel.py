@@ -132,3 +132,37 @@ class TravelContext(BaseModel):
     # flight search because a local never triggers a flight search, and the journey card still
     # has to be able to say what time the doors are.
     show_local_start: str | None = None
+
+
+class Place(BaseModel):
+    """Somewhere near the venue. Everything here is observed, nothing is scored.
+
+    No rating and no price band, deliberately. OpenStreetMap carries neither, and the mockup's
+    "4.6" and "££" would have to be invented — which is the one thing this app promises not to
+    do. Real ones mean Google Places at roughly $32 per 1,000 lookups, and that is a decision
+    rather than a gap to paper over.
+    """
+    name: str
+    # The OSM word, shown as-is: "cafe", "museum", "park".
+    category: str
+    cuisine: str | None = None
+    website: str | None = None
+    lat: float
+    lng: float
+    distance_m: int
+    walk_minutes: int
+    # A Google Maps deep link — free, unmetered, and it opens the app people already have.
+    directions_url: str | None = None
+
+
+class NearbyPlaces(BaseModel):
+    """What's around the venue, split the way the mockup splits it."""
+    status: str                      # ok | no_location | unavailable
+    reason: str | None = None
+    venue_name: str | None = None
+    city: str | None = None
+    eat: list[Place] = []
+    do: list[Place] = []
+    # Where "see everything" goes when we hold little or nothing — a real search rather than a
+    # padded list. The mockup makes the same choice in the same words.
+    search_url: str | None = None

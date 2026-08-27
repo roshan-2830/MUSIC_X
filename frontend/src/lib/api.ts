@@ -803,3 +803,40 @@ export async function getTravelContext(eventId: string): Promise<TravelContext |
   if (!res.ok) return null;
   return res.json();
 }
+
+
+/** Somewhere near the venue. Observed, not scored.
+ *
+ *  No rating and no price band: OpenStreetMap carries neither, and the mockup's "4.6" and "££"
+ *  would have to be invented. Real ones mean paying Google Places, which is a decision rather
+ *  than a gap to paper over. */
+export type Place = {
+  name: string;
+  /** The OSM word, shown as-is: "cafe", "museum", "park". */
+  category: string;
+  cuisine: string | null;
+  website: string | null;
+  lat: number;
+  lng: number;
+  distance_m: number;
+  walk_minutes: number;
+  /** Route from the VENUE to here — that is the claim this section makes. */
+  directions_url: string | null;
+};
+
+export type NearbyPlaces = {
+  status: "ok" | "no_location" | "unavailable";
+  reason: string | null;
+  venue_name: string | null;
+  city: string | null;
+  eat: Place[];
+  do: Place[];
+  /** A real search, for when we hold little or nothing. Better than a padded list. */
+  search_url: string | null;
+};
+
+export async function getNearbyPlaces(eventId: string): Promise<NearbyPlaces | null> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/nearby`);
+  if (!res.ok) return null;
+  return res.json();
+}

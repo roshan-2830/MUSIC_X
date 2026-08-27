@@ -12,7 +12,7 @@ the second.
 import re
 import unicodedata
 import uuid as _uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
 from uuid import UUID
@@ -28,8 +28,10 @@ from app.models.event import Event
 from app.models.hotel_booking import HotelBooking
 from app.models.profile import Profile
 from app.models.venue import Venue
-from app.schemas.travel import Flight, Stay, StayBase, TravelContext, TravelOptions
-from app.services import tripsure
+from app.models.venue_place import VenuePlace
+from app.schemas.travel import (Flight, NearbyPlaces, Place, Stay, StayBase, TravelContext,
+                                TravelOptions)
+from app.services import nearby, tripsure
 
 router = APIRouter(prefix="/events", tags=["travel"])
 
@@ -752,3 +754,95 @@ def travel_context(
     # Cannot measure it. 'far' shows flights, which is exactly what the tab did before any of
     # this existed, so an unmeasurable pair behaves as it always has rather than regressing.
     return TravelContext(kind="far", reason="unmeasured", **common)
+
+
+# ---------------------------------------------------------------- around the venue
+
+# Re-asked after this long. Long, because a café does not move and Overpass is donated
+# infrastructure; the only reason to look again is that the map itself has improved.
+PLACES_TTL_DAYS = 90
+# Shown per tab. The full list is stored, so "see all" costs nothing extra later.
+PLACES_PER_TAB = 8
+
+
+def _to_place(row: VenuePlace, venue: Venue | None) -> Place:
+    return Place(
+        name=row.name,
+        category=row.category,
+        cuisine=row.cuisine,
+        website=row.website,
+        lat=row.lat,
+        lng=row.lng,
+        distance_m=row.distance_m,
+        walk_minutes=max(1, round(row.distance_m / WALK_M_PER_MIN)),
+        # From the VENUE, not from the phone. "Six minutes from the venue" is the claim this
+        # section makes, so the route it offers has to start where that claim starts.
+        directions_url=_directions_url(
+            venue.lat if venue else None, venue.lng if venue else None,
+            row.lat, row.lng, row.name),
+    )
+
+
+def _store_places(db: Session, venue: Venue, places: list) -> None:
+    """Replace this venue's cached places. Called only after a successful fetch."""
+    db.query(VenuePlace).filter(VenuePlace.venue_id == venue.id).delete()
+    for p in places:
+        db.add(VenuePlace(venue_id=venue.id, **p))
+    venue.places_fetched_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+@router.get("/{event_id}/nearby", response_model=NearbyPlaces)
+def nearby_places(event_id: UUID, db: Session = Depends(get_db)):
+    """Around the venue — somewhere to eat before doors, and something to do first.
+
+    Cached per venue for 90 days. The first person to open a given venue waits for Overpass;
+    everyone after them does not. That is not only a courtesy to a donated service — a live
+    fetch took 13.1s for Alexandra Palace, and three of four mirrors were answering 504 while
+    this was written.
+
+    `places_fetched_at` records the ATTEMPT. Without it, a venue that genuinely has nothing
+    around it — or one Overpass keeps failing on — would be re-asked, and re-waited-for, on
+    every single view.
+    """
+    ev = db.get(Event, event_id)
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+    venue = db.get(Venue, ev.venue_id) if ev.venue_id else None
+    city_name, _ = _event_place(db, ev)
+    # A search link works from a name alone, so it is offered even when nothing else can be.
+    search_url = ("https://www.google.com/maps/search/"
+                  + quote(f"restaurants near {venue.name}, {city_name or ''}".strip(", "))
+                  ) if venue else None
+
+    if not venue or venue.lat is None or venue.lng is None:
+        return NearbyPlaces(status="no_location",
+                            reason="We don't know exactly where this venue is yet.",
+                            venue_name=venue.name if venue else None, city=city_name,
+                            search_url=search_url)
+
+    stale = (venue.places_fetched_at is None
+             or (datetime.now(timezone.utc) - venue.places_fetched_at).days > PLACES_TTL_DAYS)
+    if stale:
+        found = nearby.fetch(venue.lat, venue.lng, exclude_name=venue.name)
+        if found is None:
+            # Not written down. A failed look is not the same as an empty neighbourhood, and
+            # recording it as one would hide this venue's surroundings for 90 days.
+            return NearbyPlaces(
+                status="unavailable",
+                reason="We couldn't load places around the venue just now.",
+                venue_name=venue.name, city=city_name, search_url=search_url)
+        _store_places(db, venue, found)
+
+    rows = (db.query(VenuePlace)
+              .filter(VenuePlace.venue_id == venue.id)
+              .order_by(VenuePlace.distance_m.asc())
+              .all())
+    eat = [_to_place(r, venue) for r in rows if r.bucket == "eat"][:PLACES_PER_TAB]
+    do = [_to_place(r, venue) for r in rows if r.bucket == "do"][:PLACES_PER_TAB]
+    return NearbyPlaces(
+        status="ok",
+        # Said plainly when true. A stadium in a retail park really does have nothing walkable,
+        # and that is worth knowing before someone plans to eat before the show.
+        reason=None if (eat or do) else f"Nothing walkable around {venue.name} in the map yet.",
+        venue_name=venue.name, city=city_name, eat=eat, do=do, search_url=search_url)
