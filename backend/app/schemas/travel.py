@@ -22,6 +22,11 @@ class Stay(BaseModel):
     supplier: str | None = None
     deep_link: str | None = None
     provider: str = "tripsure"
+    # Supplier identity, carried so the app can say "this one is my base" and we can then ask
+    # for the property's own record. Opaque handles, not credentials: they authenticate
+    # nothing on their own — the API key never leaves the server.
+    hotel_id: str | None = None
+    supplier_provider: str | None = None
 
 
 class Flight(BaseModel):
@@ -55,3 +60,41 @@ class TravelOptions(BaseModel):
     booking_url: str | None = None
     stays: list[Stay] = []
     flights: list[Flight] = []
+    # The search context these stays came out of. Sent back when someone marks one as their
+    # base, because a property's details can only be asked for inside the search that found
+    # it. Handles, not secrets — useless without the server's API key.
+    doc_key: str | None = None
+    search_token: str | None = None
+
+
+class StayBase(BaseModel):
+    """Where this traveller is sleeping for this show, as they told us.
+
+    Deliberately not called a booking. Tripsure's booking flow requires Music X to collect
+    the payment itself and to take a PAN number, so nothing here has been paid for — `source`
+    stays 'picked' until that changes. Showing this as a confirmed reservation would be a
+    claim we cannot support.
+    """
+    name: str
+    hotel_id: str | None = None
+    provider: str | None = None
+    address: str | None = None
+    city: str | None = None
+    postal_code: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    check_in: str | None = None
+    check_out: str | None = None
+    # The supplier's own strings, unparsed — "12:00 PM", or sometimes prose.
+    check_in_time: str | None = None
+    check_out_time: str | None = None
+    star_rating: float | None = None
+    image_url: str | None = None
+    source: str = "picked"
+    # Straight-line metres to the venue and the walk it implies. Computed here rather than
+    # stored, so it stays right if a venue's coordinates are ever corrected.
+    metres_to_venue: int | None = None
+    walk_minutes: int | None = None
+    # Where "Directions" goes. A Google Maps deep link, which is free and unmetered and opens
+    # the app people already have, with live transit times we could not produce ourselves.
+    directions_url: str | None = None

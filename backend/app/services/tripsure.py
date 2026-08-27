@@ -99,6 +99,16 @@ def _unwrap(payload: dict, key: str = "data"):
         first = errs[0] if errs else {}
         print(f"[tripsure] refused: {first.get('code')} {first.get('message')}")
         return None
+    # The hotel APIs report failure as a singular `error` STRING alongside code 200 — e.g.
+    # {"response": null, "error": "No results found.", "code": 200}. Without this, such a
+    # payload falls through to the `or payload` below and is handed back as a truthy object,
+    # so a caller checking `is None` proceeds on an error envelope: search_hotels reads no
+    # .hotels off it and reports "no stays in this city", which is a claim about the city
+    # made out of a failure of ours. Absence and failure are not the same answer.
+    err = payload.get("error")
+    if isinstance(err, str) and err.strip():
+        print(f"[tripsure] refused: {err[:120]}")
+        return None
     # `data` for search/fare/itinerary; `response` for the hotel autosuggest.
     return payload.get(key) or payload.get("response") or payload
 
@@ -259,12 +269,16 @@ def best_location(suggestions: list, venue_lat: float | None = None,
 
 
 def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int = 2,
-                  currency: str = "INR", trace_id: str | None = None) -> list | None:
+                  currency: str = "INR", trace_id: str | None = None) -> dict | None:
     """Hotels available in a location for those dates.
 
     `location` is one entry from suggest_location — passed through whole, because the listing
     call wants its id, name, type and coordinates together and reconstructing it by hand is
     how the id and the coordinates drift apart.
+
+    Returns the whole envelope, not just the rows. docKey and token live on it and are the
+    only way to ask for a property's details later, so returning `hotels` alone threw away
+    half of what the call answered.
     """
     if not configured() or not location:
         return None
@@ -294,11 +308,41 @@ def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int 
                  json_body=body, trace_id=trace_id)
     if data is None:
         return None
-    # Confirmed against a live call: response.hotels, each { hotelKey, hotelInfo,
-    # priceSummary[] }. The guessed names the first version tried are gone — there is no
-    # need to hedge about a shape we have now seen.
+    # Confirmed against a live call: docKey, token, totalCount and hotels[], each row
+    # { hotelKey, hotelInfo, priceSummary[] }. The guessed names the first version tried are
+    # gone — there is no need to hedge about a shape we have now seen.
     hotels = data.get("hotels")
-    return hotels if isinstance(hotels, list) else []
+    return {
+        "hotels": hotels if isinstance(hotels, list) else [],
+        "doc_key": data.get("docKey"),
+        "token": data.get("token"),
+    }
+
+
+def hotel_details(doc_key: str, token: str, hotel_id: str, provider: str | None = None,
+                  *, trace_id: str | None = None) -> dict | None:
+    """The property's own record: address, coordinates, check-in times, rating, amenities.
+
+    `contentOnly=True` is not an optimisation, it is the only thing that works. With it false
+    the call asks for live rates as well and answers
+    {"response": null, "error": "No results found."} — the search context has already moved
+    on by the time anyone picks a hotel. Static content is also all this is for: we are
+    answering "where is this person sleeping", not re-quoting a price.
+
+    Confirmed against a live Mumbai call — 20,231 bytes, hotelInfo carrying hotelName,
+    address, city, state, zip, latitude, longitude, checkIn "12:00 PM", checkOut "11:00 AM",
+    hotelRatings[{ratingType: "STAR", rating: 3.0}], description and hotelAmenities.
+    """
+    if not configured() or not (doc_key and token and hotel_id):
+        return None
+    data = _call("POST", settings.tripsure_base_url, "/api/hotel/details",
+                 json_body={"docKey": doc_key, "token": token, "hotelId": str(hotel_id),
+                            "contentOnly": True, "provider": provider},
+                 trace_id=trace_id)
+    if not isinstance(data, dict):
+        return None
+    info = data.get("hotelInfo")
+    return info if isinstance(info, dict) else None
 
 
 # ---------------------------------------------------------------- flights

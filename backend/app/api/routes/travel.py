@@ -9,17 +9,21 @@ Every response carries a `status`. "No hotels in this city" and "we could not as
 different claims, and a screen that cannot tell them apart will imply the first while meaning
 the second.
 """
+import uuid as _uuid
 from datetime import timedelta
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.core.security import get_current_user_id
 from app.db.session import get_db
 from app.models.city import City
 from app.models.event import Event
+from app.models.hotel_booking import HotelBooking
 from app.models.venue import Venue
-from app.schemas.travel import Flight, Stay, TravelOptions
+from app.schemas.travel import Flight, Stay, StayBase, TravelOptions
 from app.services import tripsure
 
 router = APIRouter(prefix="/events", tags=["travel"])
@@ -75,9 +79,10 @@ def _to_stay(h: dict) -> Stay:
         # one is what a card should show, because it is comparable between two hotels.
         price_amount=_num(price.get("pricePerNightPerRoom") or price.get("price")),
         price_currency="INR",
-        # Their `category` is a word, not a number — "Villa", "Hotel" — so it is not a star
-        # rating and must not be shown as one.
-        rating=None,
+        # `category` is a word — "Villa", "Hotel" — and was the reason this said None. But
+        # `starRating` is a separate field and is a real rating ("3"), so the card can show
+        # one after all. Coerced through _num because it arrives as a string.
+        rating=_num(info.get("starRating")),
         address=info.get("address") or info.get("city"),
         lat=_num(info.get("latitude")),
         lng=_num(info.get("longitude")),
@@ -85,6 +90,10 @@ def _to_stay(h: dict) -> Stay:
         refundability=price.get("refundability"),
         board_basis=board.get("description") if isinstance(board, dict) else None,
         supplier=price.get("partnerName"),
+        # Kept so the app can point at this exact property later. hotelKey is the id the
+        # details call wants; a live call confirmed it equals priceSummary[].hotelId.
+        hotel_id=str(h["hotelKey"]) if h.get("hotelKey") is not None else None,
+        supplier_provider=price.get("provider"),
     )
 
 
@@ -186,8 +195,18 @@ def stays_for_event(
             **dates)
     hand_over = tripsure.results_url(place, check_in.isoformat(), check_out.isoformat(),
                                      adults=adults)
-    hotels = tripsure.search_hotels(place, check_in.isoformat(),
-                                    check_out.isoformat(), adults=adults, trace_id=trace)
+    found = tripsure.search_hotels(place, check_in.isoformat(),
+                                   check_out.isoformat(), adults=adults, trace_id=trace)
+    if found is None:
+        # Could not ask. Said plainly, because until the listing returned its envelope this
+        # was indistinguishable from an empty result and the screen reported a timeout of
+        # ours as a fact about the city. Their preprod times out often enough that this is
+        # the common case, not a corner.
+        return TravelOptions(
+            status="unavailable",
+            reason="We couldn't reach our travel provider just now — worth trying again.",
+            **dates)
+    hotels = found.get("hotels") or []
     if not hotels:
         # NO BUTTON when we found nothing, and this is a correction of the opposite choice.
         # The hand-over link needs no API call, so it was offered even when the listing
@@ -225,6 +244,10 @@ def stays_for_event(
         reason=None if hotels else f"No stays available in {city_name} for those dates.",
         **dates,
         stays=parsed[:20],
+        # Passed to the app so it can name a property when someone picks one. Sent back to us
+        # unchanged; they are search handles and unusable without the server's key.
+        doc_key=(found or {}).get("doc_key"),
+        search_token=(found or {}).get("token"),
     )
 
 
@@ -304,3 +327,234 @@ def flights_for_event(
         reason=None if offers else f"No flights found from {from_code} to {to_code} on {depart_on}.",
         flights=parsed[:20],
     )
+
+
+# ---------------------------------------------------------------- where they're staying
+
+# A brisk walking pace. Used only to turn metres into a sentence a person can act on —
+# "15 min walk" answers "can I walk it after the encore" in a way "1.2 km" does not.
+WALK_M_PER_MIN = 80
+# Past this we give the distance and no walking time. A hotel 12.5 km out really is "157 min
+# walk", and printing that is worse than printing nothing: nobody walks it, so the number
+# reads as a broken calculation rather than as advice. The distance still shows.
+WALK_MAX_M = 3000
+
+
+def _fresh_context(db: Session, ev: Event, check_in, check_out, adults: int,
+                   trace: str) -> tuple:
+    """A new (doc_key, token) for this event's city, or (None, None).
+
+    Needed because a search context expires. Someone can open the stay map, background the
+    app, and tap a hotel an hour later — by then the token they hold is dead and the details
+    call answers "No results found." Rather than tell them their own choice failed, we quietly
+    run the search again and retry with a live context.
+
+    This repeats the resolve-then-search sequence from stays_for_event on purpose. Folding
+    both into one helper meant rewriting a path that is verified working end to end, and the
+    duplication here is three calls long and only ever runs on the retry.
+    """
+    city_name, _ = _event_place(db, ev)
+    if not city_name:
+        return None, None
+    matches = tripsure.suggest_location(city_name, trace_id=trace)
+    if not matches:
+        return None, None
+    venue = db.get(Venue, ev.venue_id) if ev.venue_id else None
+    place = tripsure.best_location(matches, venue.lat if venue else None,
+                                  venue.lng if venue else None)
+    if place is None:
+        return None, None
+    found = tripsure.search_hotels(place, check_in.isoformat(), check_out.isoformat(),
+                                   adults=adults, trace_id=trace)
+    if not found:
+        return None, None
+    return found.get("doc_key"), found.get("token")
+
+
+def _directions_url(from_lat, from_lng, to_lat, to_lng, to_name: str | None) -> str | None:
+    """A Google Maps deep link from the bed to the doors.
+
+    A link, not a rendered route, and that is the whole point. Google's Directions API bills
+    per lookup and would still leave us drawing turn-by-turn ourselves; this costs nothing,
+    needs no key, and opens the map app people already trust — with live transit times in
+    every city, which we could not produce at any price.
+    """
+    if to_lat is None or to_lng is None:
+        return None
+    dest = f"{to_lat},{to_lng}"
+    url = ("https://www.google.com/maps/dir/?api=1"
+           f"&destination={quote(dest)}&travelmode=transit")
+    if from_lat is not None and from_lng is not None:
+        url += f"&origin={quote(f'{from_lat},{from_lng}')}"
+    return url
+
+
+def _to_base(row: HotelBooking, venue: Venue | None) -> StayBase:
+    metres = walk = None
+    if (venue and venue.lat is not None and venue.lng is not None
+            and row.lat is not None and row.lng is not None):
+        metres = int(round(_metres(row.lat, row.lng, venue.lat, venue.lng)))
+        if metres <= WALK_MAX_M:
+            walk = max(1, round(metres / WALK_M_PER_MIN))
+    return StayBase(
+        name=row.name,
+        hotel_id=row.hotel_id,
+        provider=row.provider,
+        address=row.address,
+        city=row.city,
+        postal_code=row.postal_code,
+        lat=row.lat,
+        lng=row.lng,
+        check_in=row.check_in.isoformat() if row.check_in else None,
+        check_out=row.check_out.isoformat() if row.check_out else None,
+        check_in_time=row.check_in_time,
+        check_out_time=row.check_out_time,
+        star_rating=float(row.star_rating) if row.star_rating is not None else None,
+        image_url=row.image_url,
+        source=row.source or "picked",
+        metres_to_venue=metres,
+        walk_minutes=walk,
+        directions_url=_directions_url(
+            row.lat, row.lng,
+            venue.lat if venue else None, venue.lng if venue else None,
+            venue.name if venue else None),
+    )
+
+
+def _star(info: dict):
+    """The STAR rating out of hotelRatings[], ignoring the other kinds.
+
+    Live shape: [{"ratingType": "STAR", "rating": 3.0}]. Other rating types appear on some
+    properties, so taking [0] blindly would occasionally show a guest score as a star count.
+    """
+    for r in info.get("hotelRatings") or []:
+        if isinstance(r, dict) and str(r.get("ratingType", "")).upper() == "STAR":
+            return _num(r.get("rating"))
+    return None
+
+
+@router.put("/{event_id}/stay", response_model=StayBase)
+def set_stay_base(
+    event_id: UUID,
+    hotel_id: str = Body(...),
+    provider: str | None = Body(None),
+    doc_key: str | None = Body(None),
+    search_token: str | None = Body(None),
+    image_url: str | None = Body(None),
+    nights: int = Query(1, ge=1, le=14),
+    adults: int = Query(2, ge=1, le=8),
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """"This is where I'm staying" — recorded against the show, with the property's own record.
+
+    PUT, not POST: one base per person per show, so sending it twice must not leave two.
+
+    The address and coordinates are fetched from the supplier rather than taken from the
+    request. The app already holds a name and a rough position from the listing, and it would
+    have been less code to store those — but then the record would be whatever the phone
+    happened to have, and "where is this person sleeping" would be answered from a search row
+    instead of from the property. The details call also gives the check-in time, which the
+    listing does not carry at all.
+
+    Nothing here is a booking. Tripsure's booking flow needs Music X to take the payment and a
+    PAN number, which is a decision the business has not made, so `source` stays 'picked'.
+    """
+    ev = db.get(Event, event_id)
+    if not ev:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if not tripsure.configured():
+        raise HTTPException(status_code=503, detail="No travel provider is connected yet.")
+    if not ev.starts_at:
+        raise HTTPException(status_code=409,
+                            detail="This show has no confirmed date, so a stay cannot be set.")
+
+    trace = tripsure.new_trace_id()
+    check_in = ev.starts_at.date()
+    check_out = check_in + timedelta(days=nights)
+
+    info = None
+    if doc_key and search_token:
+        info = tripsure.hotel_details(doc_key, search_token, hotel_id, provider,
+                                      trace_id=trace)
+    if info is None:
+        # The context the app was holding has expired, or it never had one. Search again.
+        fresh_key, fresh_token = _fresh_context(db, ev, check_in, check_out, adults, trace)
+        if fresh_key and fresh_token:
+            info = tripsure.hotel_details(fresh_key, fresh_token, hotel_id, provider,
+                                          trace_id=trace)
+    if info is None:
+        # 502, not 500: our side worked and the supplier did not answer usefully. Nothing is
+        # written, so a retry is clean — better than storing a name with no address and
+        # calling that "where you're staying".
+        raise HTTPException(
+            status_code=502,
+            detail="We couldn't get this hotel's details from our travel partner just now.")
+
+    row = (db.query(HotelBooking)
+             .filter(HotelBooking.user_id == _uuid.UUID(user_id),
+                     HotelBooking.event_id == event_id)
+             .one_or_none())
+    if row is None:
+        row = HotelBooking(user_id=_uuid.UUID(user_id), event_id=event_id, name="")
+        db.add(row)
+
+    row.name = str(info.get("hotelName") or "Your hotel")
+    row.hotel_id = str(hotel_id)
+    row.provider = provider
+    row.address = info.get("address")
+    row.city = info.get("city")
+    row.postal_code = info.get("zip")
+    row.lat = _num(info.get("latitude"))
+    row.lng = _num(info.get("longitude"))
+    row.check_in = check_in
+    row.check_out = check_out
+    row.check_in_time = info.get("checkIn")
+    row.check_out_time = info.get("checkOut")
+    row.star_rating = _star(info)
+    # Kept from the listing: the details payload's imagery is a different shape and the app
+    # already has a picture that matches the card the person tapped.
+    if image_url:
+        row.image_url = image_url
+    row.source = "picked"
+    db.commit()
+    db.refresh(row)
+
+    venue = db.get(Venue, ev.venue_id) if ev.venue_id else None
+    return _to_base(row, venue)
+
+
+@router.get("/{event_id}/stay", response_model=StayBase | None)
+def get_stay_base(
+    event_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Where this person is staying for this show, or null if they haven't said."""
+    row = (db.query(HotelBooking)
+             .filter(HotelBooking.user_id == _uuid.UUID(user_id),
+                     HotelBooking.event_id == event_id)
+             .one_or_none())
+    if row is None:
+        return None
+    ev = db.get(Event, event_id)
+    venue = db.get(Venue, ev.venue_id) if ev and ev.venue_id else None
+    return _to_base(row, venue)
+
+
+@router.delete("/{event_id}/stay", status_code=204)
+def clear_stay_base(
+    event_id: UUID,
+    user_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Not staying there after all. Deletes rather than flags — an un-picked hotel is not a
+    fact worth keeping, and leaving it behind would keep it in any later trip summary."""
+    row = (db.query(HotelBooking)
+             .filter(HotelBooking.user_id == _uuid.UUID(user_id),
+                     HotelBooking.event_id == event_id)
+             .one_or_none())
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    return None
