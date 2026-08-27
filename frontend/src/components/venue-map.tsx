@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Image, LayoutChangeEvent, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { TILE, tileGrid } from "../lib/slippy";
+
 const ACCENT = "#e8ff47";
 const INK = "#1a1a20";
 const LINE = "#26262f";
@@ -12,7 +14,6 @@ const TILE_BG = "#e8e2d9";
 /** Street level — close enough to read the surrounding roads, wide enough to place the
  *  venue in its neighbourhood. */
 const ZOOM = 16;
-const TILE = 256;
 const HEIGHT = 200;
 
 /** Pin geometry. The POINT marks the venue, not the middle of the photo, so the whole
@@ -20,37 +21,7 @@ const HEIGHT = 200;
 const PHOTO = 44;
 const POINTER = 9;
 
-/** CARTO's Voyager basemap, drawn from OpenStreetMap data. Plain images, no API key — and
- *  unlike an embed they cache with the screen, so a saved show-day kit still draws its map
- *  with no signal.
- *
- *  NOT tile.openstreetmap.org. Measured 2026-08-26: that host answers this app with HTTP
- *  200 and a 6,987-byte "Access denied" placeholder carrying an `x-blocked` header —
- *  identical bytes for every tile, whatever the User-Agent. Because the status is 200,
- *  nothing catches it; the map simply draws grey.
- *
- *  Voyager over CARTO's dark style because it is what the reference looks like: a cream
- *  ground, yellow main roads, white side streets, green parks. Compared against
- *  light_all (too grey) and OSM's own render (much pinker, busier) on the same Bengaluru
- *  tile before choosing.
- *
- *  One constant, so moving to a paid host (MapTiler, Thunderforest, Stadia) is a one-line
- *  change — worth doing before real traffic: CARTO's CDN is free for light use, not a
- *  licence for an app at scale.
- */
-const TILE_URL = (z: number, x: number, y: number) =>
-  `https://basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
 
-/** Web Mercator: where this lat/lng falls, in pixels, across the whole world at this zoom. */
-function worldPixel(lat: number, lng: number, z: number) {
-  const n = Math.pow(2, z);
-  const r = (lat * Math.PI) / 180;
-  return {
-    n,
-    x: ((lng + 180) / 360) * n * TILE,
-    y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n * TILE,
-  };
-}
 
 type Props = {
   lat: number;
@@ -68,35 +39,9 @@ export default function VenueMap({ lat, lng, venue, city, imageUrl }: Props) {
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
 
-  const { n, x: px, y: py } = worldPixel(lat, lng, ZOOM);
-  // Enough tiles to cover the box whatever its width, plus one either side so a partial
-  // tile never leaves a gap at the edge.
-  const cols = Math.ceil(width / TILE) + 2;
-  const rows = Math.ceil(HEIGHT / TILE) + 2;
-  const tx0 = Math.floor(px / TILE) - 1;
-  const ty0 = Math.floor(py / TILE) - 1;
-  // Put the grid's top-left at the box centre, then pull it back by where the venue sits
-  // inside the grid — so the venue lands exactly in the middle.
-  const left = width / 2 - (px - tx0 * TILE);
-  const top = HEIGHT / 2 - (py - ty0 * TILE);
-
-  const tiles = [];
-  for (let ry = 0; ry < rows; ry++) {
-    for (let rx = 0; rx < cols; rx++) {
-      const ty = ty0 + ry;
-      // Above the north pole or below the south there is no tile. Wrap x so a venue near
-      // the antimeridian still draws a continuous map.
-      if (ty < 0 || ty >= n) continue;
-      const tx = ((((tx0 + rx) % n) + n) % n);
-      tiles.push(
-        <Image
-          key={`${rx}-${ry}`}
-          source={{ uri: TILE_URL(ZOOM, tx, ty) }}
-          style={[styles.tile, { left: rx * TILE, top: ry * TILE }]}
-        />,
-      );
-    }
-  }
+  // The grid comes from lib/slippy, shared with the Stay map. Two copies of Web Mercator
+  // would drift, and a projection that disagrees with its own tiles misplaces every marker.
+  const grid = width > 0 ? tileGrid(lat, lng, ZOOM, width, HEIGHT) : null;
 
   const directions = () =>
     Linking.openURL(
@@ -108,7 +53,14 @@ export default function VenueMap({ lat, lng, venue, city, imageUrl }: Props) {
   return (
     <>
       <View style={styles.frame} onLayout={onLayout}>
-        {width > 0 ? <View style={[styles.grid, { left, top }]}>{tiles}</View> : null}
+        {grid ? (
+          <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}>
+            {grid.tiles.map((t) => (
+              <Image key={t.key} source={{ uri: t.url }}
+                     style={[styles.tile, { left: t.left, top: t.top }]} />
+            ))}
+          </View>
+        ) : null}
 
         {/* Centred by a full-bleed flex layer rather than a percentage transform —
             percentage translate is a recent React Native addition, and getting it wrong

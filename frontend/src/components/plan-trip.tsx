@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Flight, getFlights, getStays, Stay, TravelOptions } from "../lib/api";
+import StayMap from "./stay-map";
 import VenueMap from "./venue-map";
 
 const ACCENT = "#e8ff47";
@@ -58,32 +58,6 @@ function BookButton({ url }: { url: string }) {
       <Text style={styles.bookWideText}>Book a hotel</Text>
       <Ionicons name="open-outline" size={13} color="#101204" />
     </Pressable>
-  );
-}
-
-function StayRow({ stay }: { stay: Stay }) {
-  const price = money(stay.price_amount, stay.price_currency);
-  return (
-    <View style={styles.row}>
-      <View style={styles.thumb}>
-        {stay.image_url ? (
-          <Image source={{ uri: stay.image_url }} style={styles.fill} contentFit="cover" transition={120} />
-        ) : (
-          <Ionicons name="bed-outline" size={20} color={MUTED} />
-        )}
-      </View>
-      <View style={styles.rowBody}>
-        <Text style={styles.rowTitle} numberOfLines={1}>{stay.name}</Text>
-        <Text style={styles.rowSub} numberOfLines={1}>
-          {[stay.distance, stay.board_basis, stay.refundability].filter(Boolean).join(" · ")}
-        </Text>
-        {stay.supplier ? <Text style={styles.supplier}>via {stay.supplier}</Text> : null}
-      </View>
-      <View style={styles.rowEnd}>
-        {price ? <Text style={styles.price}>{price}</Text> : null}
-        {price ? <Text style={styles.perNight}>per night</Text> : null}
-      </View>
-    </View>
   );
 }
 
@@ -194,14 +168,18 @@ export default function PlanTrip({
                 {stays.check_in} → {stays.check_out} · near {venueName ?? city}
               </Text>
             ) : null}
-            {stays.stays.map((s, i) => <StayRow key={`${s.name}-${i}`} stay={s} />)}
+            {/* A map, not a list. Twenty rows of hotel names answer a question nobody asked;
+                the question is "is there anywhere near the venue", and a pin per hotel around
+                a marked venue answers it at a glance. Prices ride on the pins. Booking
+                happens on Tripsure's own page, so there is nothing here to tap through. */}
+            {hasMap ? (
+              <StayMap lat={lat!} lng={lng!} venue={venueName} stays={stays.stays} />
+            ) : null}
             {stays.booking_url ? <BookButton url={stays.booking_url} /> : null}
           </>
         ) : (
           <>
             <Empty options={stays} kind="Stay" />
-            {/* The link needs no API call, so it still works when the listing endpoint does
-                not — which is exactly what happened on the day this was built. */}
             {stays?.booking_url ? <BookButton url={stays.booking_url} /> : null}
           </>
         )
@@ -256,7 +234,6 @@ const styles = StyleSheet.create({
     width: 46, height: 46, borderRadius: 10, backgroundColor: "#1b1b24",
     alignItems: "center", justifyContent: "center", overflow: "hidden",
   },
-  fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   rowBody: { flex: 1 },
   rowTitle: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
   rowSub: { color: MUTED, fontSize: 12, marginTop: 2 },
@@ -272,8 +249,6 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 13, marginTop: 14,
   },
   bookWideText: { color: "#101204", fontSize: 15, fontWeight: "800" },
-  perNight: { color: MUTED, fontSize: 10 },
-  supplier: { color: MUTED, fontSize: 11, marginTop: 2 },
   empty: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 22 },
   emptyText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },
