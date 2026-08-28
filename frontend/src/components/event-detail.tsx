@@ -8,6 +8,7 @@ import { EventDetail, fetchEvent, getGoing, Going, getNearbyPlaces, NearbyPlaces
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
 import GoingRow, { InvitedBanner } from "./going-row";
+import PlanCard from "./plan-card";
 import GoingSheet from "./going-sheet";
 import InviteSheet from "./invite-sheet";
 import ExploreNearby from "./explore-nearby";
@@ -270,6 +271,10 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           <InvitedBanner going={going} />
 
           <GoingRow going={going} onPress={() => setGoingOpen(true)} />
+
+          {/* Straight after the personal lines and before the line-up: the tracker is about this
+              reader's own plan, which is nearer to them than the bill or the trip logistics. */}
+          <PlanCard eventId={id} saved={saved} onSaveRequested={() => toggle(ev)} />
 
           {invitedToast ? (
             <View style={styles.invited}>

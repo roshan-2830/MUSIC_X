@@ -978,3 +978,95 @@ export async function getMyInvites(): Promise<ReceivedInvite[]> {
   if (!res.ok) return [];
   return res.json();
 }
+
+
+/* ------------------------------------------------------------- your plan */
+
+export type PlanStep = {
+  key: "interested" | "planning" | "confirmed" | "attended";
+  label: string;
+  reached: boolean;
+  current: boolean;
+  /** Only "Attended" is ever locked, and only before the show. */
+  locked: boolean;
+};
+
+export type PlanTicket = {
+  provider: string | null;
+  reference: string | null;
+  /** 'pasted' | 'photo' | 'declared' — not equally strong, so not blurred into one. */
+  source: string | null;
+  at: string | null;
+};
+
+/** The plan card. `state` is derived on the server from the hotel, invites, note and ticket, so
+ *  it can never drift out of step with them. */
+export type Plan = {
+  saved: boolean;
+  state: "" | "interested" | "planning" | "confirmed" | "attended";
+  steps: PlanStep[];
+  headline: string | null;
+  hint: string | null;
+  past: boolean;
+  has_base: boolean;
+  has_invited: boolean;
+  has_note: boolean;
+  reminder_level: "minimal" | "normal" | "high";
+  note: string | null;
+  ticket: PlanTicket | null;
+};
+
+/** What the parser made of a pasted confirmation. `confident: false` is not an error — it is
+ *  "we could not tell", which is the honest answer when we cannot. */
+export type PasteResult = {
+  confident: boolean;
+  provider: string | null;
+  reference: string | null;
+  matched: string[];
+  missing: string[];
+  message: string | null;
+  plan: Plan | null;
+};
+
+export async function getPlan(eventId: string): Promise<Plan | null> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/plan`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function planWrite(path: string, method: string, body?: unknown): Promise<Plan | null> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export const setPlanReminder = (eventId: string, level: string) =>
+  planWrite(`/events/${eventId}/plan/reminder`, "PUT", { level });
+
+export const setPlanNote = (eventId: string, note: string | null) =>
+  planWrite(`/events/${eventId}/plan/note`, "PUT", { note });
+
+export const declareTicket = (eventId: string) =>
+  planWrite(`/events/${eventId}/plan/ticket/declare`, "POST");
+
+export const clearTicket = (eventId: string) =>
+  planWrite(`/events/${eventId}/plan/ticket`, "DELETE");
+
+export const markAttended = (eventId: string) =>
+  planWrite(`/events/${eventId}/plan/attended`, "POST");
+
+export async function pasteTicket(eventId: string, text: string): Promise<PasteResult | null> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/plan/ticket/paste`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
