@@ -866,10 +866,18 @@ export type Goer = {
   booked: boolean;
 };
 
-/** Only ever counts people YOU follow. Not a public headcount. */
+/** Only ever counts people YOU follow. Not a public headcount.
+ *
+ *  `people` is EVERYONE, not just the faces that fit on the line — the sheet behind the line
+ *  groups them, and the list is small enough that a second request would be a round trip for
+ *  data already in hand. */
 export type Going = {
   people: Goer[];
   total: number;
+  /** Has a ticket. */
+  going_count: number;
+  /** Saved the show, no ticket claimed. */
+  interested_count: number;
   /** Written by the server so the phrasing lives in one place. */
   summary: string | null;
 };

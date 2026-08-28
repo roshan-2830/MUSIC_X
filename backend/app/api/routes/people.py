@@ -219,10 +219,17 @@ def who_is_going(
     rows.sort(key=lambda r: (not bool(r[1]), (r[0].display_name or "").lower()))
     people = [GoerOut(id=p.id, display_name=p.display_name, avatar_url=p.avatar_url,
                       booked=bool(b)) for p, b in rows]
-    shown = people[:GOING_FACES]
-    names = [p.display_name or "Someone" for p in shown]
-    return GoingOut(people=shown, total=len(people),
-                    summary=_phrase(names, len(people) - len(names)))
+    # The whole list, not the three that fit on the line. Tapping the line opens a sheet that
+    # groups them, and the list is small enough by construction — people the caller follows who
+    # saved this one show — that a second request would be a round trip for data already here.
+    names = [p.display_name or "Someone" for p in people[:GOING_FACES]]
+    return GoingOut(
+        people=people,
+        total=len(people),
+        going_count=sum(1 for p in people if p.booked),
+        interested_count=sum(1 for p in people if not p.booked),
+        summary=_phrase(names, len(people) - len(names)),
+    )
 
 
 @router.post("/events/{event_id}/invites", response_model=InviteResult, status_code=201)

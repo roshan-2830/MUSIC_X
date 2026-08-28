@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Going } from "../lib/api";
@@ -18,11 +18,25 @@ const LINE = "#26262f";
  * Faces are not tappable yet — there is no profile screen to land on, and a name that looks
  * like a link and does nothing is worse than one that does not.
  */
-export default function GoingRow({ going }: { going: Going | null }) {
+export default function GoingRow({
+  going,
+  onPress,
+}: {
+  going: Going | null;
+  /** Opens the sheet that splits them into ticket-holders and interested. */
+  onPress?: () => void;
+}) {
   if (!going || !going.total || !going.summary) return null;
-  const withTickets = going.people.filter((p) => p.booked).length;
+  const withTickets = going.going_count;
+  const interested = going.interested_count;
   return (
-    <View style={styles.wrap}>
+    <Pressable
+      style={styles.wrap}
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${going.summary}. See who.`}
+    >
       <View style={styles.faces}>
         {going.people.map((p, i) => (
           // Overlapped deliberately: a cluster reads as "a few people", where a neat row of
@@ -39,15 +53,17 @@ export default function GoingRow({ going }: { going: Going | null }) {
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.text} numberOfLines={2}>{going.summary}</Text>
-        {withTickets ? (
-          // Said separately because it is a different claim. Saving a show is an intention;
-          // having a ticket is a fact, and only the person themselves can tell us it.
-          <Text style={styles.sub}>
-            {withTickets === 1 ? "1 has a ticket" : `${withTickets} have tickets`}
-          </Text>
-        ) : null}
+        {/* The two counts side by side, because they are different claims. Saving a show is an
+            intention; having a ticket is a fact, and only the person can tell us it. */}
+        <Text style={styles.sub} numberOfLines={1}>
+          {[
+            withTickets ? `${withTickets} with tickets` : null,
+            interested ? `${interested} interested` : null,
+          ].filter(Boolean).join(" · ")}
+        </Text>
       </View>
-    </View>
+      {onPress ? <Ionicons name="chevron-forward" size={16} color={MUTED} /> : null}
+    </Pressable>
   );
 }
 

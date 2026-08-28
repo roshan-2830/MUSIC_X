@@ -31,13 +31,22 @@ class GoerOut(BaseModel):
 
 
 class GoingOut(BaseModel):
-    """The "who else is going" line, ready to render.
+    """The "who else is going" line, and the full list behind it.
 
     `total` counts only people the caller follows. A public headcount would be a different
     feature and a different privacy question; this one answers "does anyone I know go to this".
+
+    EVERYONE is returned, not the three whose faces fit on the line. The list is small by
+    construction — people the caller follows who saved this one show — so a second request to
+    open a sheet would be a round trip to fetch what we already had.
     """
     people: list[GoerOut] = []
     total: int = 0
+    # Split out because they are different claims and the sheet groups by them. `booked` is only
+    # ever true because the person said so: a purchase happens on Ticketmaster and is never
+    # reported back to us.
+    going_count: int = 0
+    interested_count: int = 0
     # Already-rendered sentence, so the phrasing lives in one place rather than being
     # reassembled by every screen that shows it.
     summary: str | None = None

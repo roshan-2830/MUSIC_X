@@ -8,6 +8,7 @@ import { EventDetail, fetchEvent, getGoing, Going, getNearbyPlaces, NearbyPlaces
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
 import GoingRow from "./going-row";
+import GoingSheet from "./going-sheet";
 import InviteSheet from "./invite-sheet";
 import ExploreNearby from "./explore-nearby";
 import PlanTrip from "./plan-trip";
@@ -117,6 +118,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
   const [places, setPlaces] = useState<NearbyPlaces | null>(null);
   const [placesLoading, setPlacesLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [goingOpen, setGoingOpen] = useState(false);
   const [invitedToast, setInvitedToast] = useState<string | null>(null);
   const { homeCountry, homeCity } = useProfile();
 
@@ -263,7 +265,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           {/* Directly under the rating, because it answers the same question in a different
               currency: the score says whether the show is good, this says whether anyone you
               know will be there. */}
-          <GoingRow going={going} />
+          <GoingRow going={going} onPress={() => setGoingOpen(true)} />
 
           {invitedToast ? (
             <View style={styles.invited}>
@@ -540,6 +542,13 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           <ArtistDetail name={artistName} onClose={() => setArtistName(null)} />
         ) : null}
       </Modal>
+
+      <GoingSheet
+        visible={goingOpen}
+        onClose={() => setGoingOpen(false)}
+        going={going}
+        eventTitle={ev?.title ?? null}
+      />
 
       <InviteSheet
         visible={inviteOpen}
