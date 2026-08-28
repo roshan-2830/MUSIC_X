@@ -15,7 +15,11 @@ class Artist(Base):
     image_url = Column(String, nullable=True)
 
     bio = Column(Text, nullable=True)          # real bio from a cited source (never fabricated)
-    bio_source = Column(String, nullable=True)  # e.g. "Wikipedia"
+    bio_source = Column(String, nullable=True)   # e.g. "Wikipedia"
+    # When we last ASKED Wikipedia, found or not. Without it every run re-tried the same
+    # artists with no article — 3,000 requests to find 6 bios. Re-tried after 30 days, so an
+    # act who gets a page later is still picked up.
+    bio_checked_on = Column(Date, nullable=True)
 
     # Where a reader can go and check us. Both are real URLs or NULL — we never
     # build a /wiki/<Name> guess, because the wrong namesake is worse than no link.

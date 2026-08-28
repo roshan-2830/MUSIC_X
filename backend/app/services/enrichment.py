@@ -37,7 +37,7 @@ from app.services import deezer, lastfm, wikipedia
 from app.services.deezer import _norm
 
 
-def _todo(column: str, limit: int) -> list[tuple]:
+def _todo(column: str, limit: int, *, stale_days: int | None = None) -> list[tuple]:
     """(id, name) for artists with an upcoming show that still need `column` filled.
 
     Ordered by how likely the page is to be OPENED — not by how many dates the act has.
@@ -54,9 +54,18 @@ def _todo(column: str, limit: int) -> list[tuple]:
     stage has not fetched yet — which is fine, it is the stage that creates the signal
     the other four rank on.
 
+    `stale_days` turns the column from "is it filled" into "when did we last look". Without it
+    a stage whose column stays NULL on a miss re-asks about the same artists on every run, which
+    is exactly what the bio stage was doing: 3,000 Wikipedia requests a pass to find 6 bios,
+    because the artists with articles were filled long ago and the rest are residencies and
+    tribute acts Wikipedia rightly has no page for. With it they drain out of the queue and come
+    back after the window, so an act who gets an article later is still found.
+
     Read with its own short-lived session and handed back as plain tuples, so no
     connection is held open across the network calls that follow.
     """
+    where = (f"a.{column} IS NULL" if stale_days is None else
+             f"(a.{column} IS NULL OR a.{column} < current_date - {int(stale_days)})")
     db: Session = SessionLocal()
     try:
         return [(r[0], r[1]) for r in db.execute(text(f"""
@@ -86,7 +95,7 @@ def _todo(column: str, limit: int) -> list[tuple]:
                      WHERE f.followable_type = 'artist' AND f.followable_id = a.id) AS follows,
                    COUNT(*) AS shows   -- appearances by any route
             FROM artists a JOIN upcoming u ON u.artist_id = a.id
-            WHERE a.{column} IS NULL
+            WHERE {where}
             GROUP BY a.id, a.name, a.deezer_fans
             ORDER BY follows DESC, a.deezer_fans DESC NULLS LAST, shows DESC
             LIMIT :lim
@@ -134,6 +143,9 @@ def _in_session(fn, rows: list, label: str) -> None:
 # single slot, so a measured 5.4 artists/s was really about 11 requests/s at Wikipedia while
 # the number here said 6. Halved to 3, which is the ~6 requests/s the comment always claimed.
 # Every other source is one call per artist, where the two are the same thing.
+# How long a "no Wikipedia page" answer is trusted before asking again.
+BIO_RETRY_DAYS = 30
+
 RATES = {"deezer": 8.0, "lastfm": 4.0, "wikipedia": 3.0}
 # High enough to keep the rate limiter as the thing that decides the pace, rather than latency.
 # A ~300 ms round trip at 8/s needs three in flight; eight leaves room for a slow one.
@@ -320,7 +332,9 @@ def backfill_bios(limit: int = 1500, pause: float = 0.0, batch: int = 50) -> dic
     Slower pause than the other backfills: this is two Wikipedia calls per artist
     (search, then summary) against a shared community API, so we do not lean on it.
     """
-    todo = _todo("bio", limit)
+    # Selected on the STAMP, not on the bio being NULL, so an artist with no Wikipedia page
+    # leaves the queue instead of being re-asked every three hours. 30 days back in.
+    todo = _todo("bio_checked_on", limit, stale_days=BIO_RETRY_DAYS)
     totals = {"artists": 0, "found": 0, "no_page": 0}
     pending = []
 
@@ -329,16 +343,22 @@ def backfill_bios(limit: int = 1500, pause: float = 0.0, batch: int = 50) -> dic
         a = db.get(Artist, aid)
         if not a:
             return
-        a.bio = bio
-        a.bio_source = source
-        if url:
-            a.wiki_url = url
+        # Stamped for everyone we looked up, including the misses — that is the whole point of
+        # the column. Only the text is conditional.
+        a.bio_checked_on = date.today()
+        if bio:
+            a.bio = bio
+            a.bio_source = source
+            if url:
+                a.wiki_url = url
 
     for aid, name, got in _parallel(todo, wikipedia.fetch_artist_bio,
                                     source="wikipedia", label="bios"):
         bio, bio_source, url = got if got else (None, None, None)
+        # Misses are queued as well as hits. They carry no text, but they carry the fact that we
+        # looked — without that the artist is picked again on the very next run.
+        pending.append((aid, bio, bio_source, url))
         if bio:
-            pending.append((aid, bio, bio_source, url))
             totals["found"] += 1
         else:
             totals["no_page"] += 1
