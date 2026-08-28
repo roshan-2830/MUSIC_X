@@ -141,36 +141,74 @@ def deliver_pending(limit: int = 500) -> dict:
                 jobs.append((n, t))
         db.commit()
 
+        # Token rows Expo has told us are gone. Collected across the whole pass and deleted at
+        # the END of it, not inside the chunk that discovered them. Deleting mid-pass was a real
+        # bug: one device row is shared by every notification waiting for that person, so a
+        # token dropped in chunk 1 was still referenced by chunk 2, and touching the deleted row
+        # raised ObjectDeletedError and aborted the pass. Found by a chunking test, not by luck.
+        dead: set = set()
+
         for i in range(0, len(jobs), BATCH):
             chunk = jobs[i:i + BATCH]
-            results = _send_batch([_message(n, t.token) for n, t in chunk])
-            if not results:
-                out["failed"] += len(chunk)
-                continue           # not stamped, so the next run retries
-            dead = []
-            for (n, t), res in zip(chunk, results):
-                if (res or {}).get("status") == "ok":
-                    n.pushed_at = now
-                    out["sent"] += 1
-                    continue
-                detail = ((res or {}).get("details") or {}).get("error")
-                if detail == "DeviceNotRegistered":
-                    # Expo's instruction is to stop sending to it. The app was deleted or the
-                    # token rotated; keeping it means failing on every future send.
-                    dead.append(t.id)
-                    n.pushed_at = now
-                else:
-                    out["failed"] += 1
-                    print(f"[push] {detail or (res or {}).get('message')}")
-            if dead:
-                db.query(PushToken).filter(PushToken.id.in_(dead)).delete(
-                    synchronize_session=False)
-                out["dropped_tokens"] += len(dead)
-            db.commit()
+            # The one place this job talks to two networks at once: Expo over HTTP, and Postgres
+            # to stamp what got through. If the database connection dies while we are waiting on
+            # Expo — a laptop closing its lid mid-send — the pass must end, not raise out of the
+            # scheduler. Nothing sent is stamped, so the next run picks up exactly where this
+            # one stopped.
+            try:
+                _deliver_chunk(db, chunk, now, out, dead)
+            except Exception as e:
+                print(f"[push] pass aborted: {type(e).__name__}: {e}")
+                db.rollback()
+                out["failed"] += len(jobs) - i
+                break
             if i + BATCH < len(jobs):
                 time.sleep(0.2)          # Expo asks for restraint; this is well inside it
+
+        if dead:
+            db.query(PushToken).filter(PushToken.id.in_(dead)).delete(
+                synchronize_session=False)
+            out["dropped_tokens"] = len(dead)
+            db.commit()
     finally:
         db.close()
     if out["considered"]:
         print(f"[push] {out}")
     return out
+
+
+def _deliver_chunk(db: Session, chunk: list, now: datetime, out: dict, dead: set) -> None:
+    """One request to Expo, and the bookkeeping for its answers."""
+    # A token an earlier chunk already found to be gone. Its notification is stamped rather than
+    # retried forever: the only route to that phone no longer exists, and the bell still has it.
+    for n, t in chunk:
+        if t.id in dead:
+            n.pushed_at = now
+    live = [(n, t) for n, t in chunk if t.id not in dead]
+    if not live:
+        db.commit()
+        return
+
+    results = _send_batch([_message(n, t.token) for n, t in live])
+    if not results:
+        # Expo unreachable, or it refused the whole request. NOTHING is stamped, so the next run
+        # sends this chunk again. A notification silently lost is worse than one delayed by two
+        # minutes.
+        out["failed"] += len(live)
+        return
+
+    for (n, t), res in zip(live, results):
+        if (res or {}).get("status") == "ok":
+            n.pushed_at = now
+            out["sent"] += 1
+            continue
+        detail = ((res or {}).get("details") or {}).get("error")
+        if detail == "DeviceNotRegistered":
+            # Expo's own instruction is to stop sending to it. The app was deleted or the token
+            # rotated; keeping it means failing on every future send, forever.
+            dead.add(t.id)
+            n.pushed_at = now
+        else:
+            out["failed"] += 1
+            print(f"[push] {detail or (res or {}).get('message')}")
+    db.commit()

@@ -14,7 +14,26 @@ db_url = settings.database_url.replace("postgresql://", "postgresql+psycopg://",
 engine = create_engine(
     db_url,
     pool_pre_ping=True,
-    connect_args={"prepare_threshold": None},
+    # DISCARD CONNECTIONS OLDER THAN FIVE MINUTES. This was -1 — keep forever — and that is
+    # what turned a WiFi reconnect into a 500. A connection parked in the pool across a network
+    # change is dead, but nothing knew it: the socket looks open to us and is gone at the other
+    # end. pool_pre_ping alone did not save us, because the ping itself failed and the psycopg
+    # dialect then raised ProgrammingError while restoring autocommit — and SQLAlchemy only
+    # treats OperationalError as "this connection is dead, get another one", so the confusing
+    # error surfaced to the browser instead of a silent reconnect.
+    pool_recycle=300,
+    connect_args={
+        "prepare_threshold": None,
+        # Ask the OS to prove the connection is alive every 30s while idle. This is what makes
+        # a dead socket DETECTABLE rather than something we only discover mid-query, and it also
+        # stops the pooler and any NAT in between from quietly dropping an idle connection.
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+        # A laptop on hotel WiFi should fail in ten seconds, not hang a request for a minute.
+        "connect_timeout": 10,
+    },
 )
 
 # A factory that creates new database sessions.
