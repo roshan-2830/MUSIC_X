@@ -840,3 +840,122 @@ export async function getNearbyPlaces(eventId: string): Promise<NearbyPlaces | n
   if (!res.ok) return null;
   return res.json();
 }
+
+
+/* ------------------------------------------------------------------ people */
+
+/** Someone else on Music X. */
+export type Person = {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  home_city: string | null;
+  home_country: string | null;
+  following: boolean;
+  follows_you: boolean;
+};
+
+/** Someone you follow who is going to a show.
+ *
+ *  `booked` means they told us they have a ticket. We cannot learn that from Ticketmaster — the
+ *  purchase happens on their site and is never reported back — so it is their word, not ours. */
+export type Goer = {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  booked: boolean;
+};
+
+/** Only ever counts people YOU follow. Not a public headcount. */
+export type Going = {
+  people: Goer[];
+  total: number;
+  /** Written by the server so the phrasing lives in one place. */
+  summary: string | null;
+};
+
+export type InviteResult = { invited: number; already: number; skipped: number };
+
+export type ReceivedInvite = {
+  id: string;
+  event_id: string;
+  event_title: string | null;
+  starts_at: string | null;
+  city: string | null;
+  venue_name: string | null;
+  image_url: string | null;
+  from_name: string | null;
+  from_avatar: string | null;
+  note: string | null;
+  created_at: string | null;
+};
+
+/** Find people by the name they display. An empty query returns the people you already
+ *  follow, so the invite sheet opens on your friends rather than a blank box. */
+export async function searchPeople(q = ""): Promise<Person[]> {
+  const res = await fetch(`${API_BASE_URL}/people/search?q=${encodeURIComponent(q)}`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function followPerson(personId: string): Promise<Person | null> {
+  const res = await fetch(`${API_BASE_URL}/people/${personId}/follow`, {
+    method: "POST",
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function unfollowPerson(personId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/people/${personId}/follow`, {
+    method: "DELETE",
+    headers: await authHeaders(),
+  });
+}
+
+export async function getMyPeople(): Promise<Person[]> {
+  const res = await fetch(`${API_BASE_URL}/me/people`, { headers: await authHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/** Who, among the people you follow, is going to this show. */
+export async function getGoing(eventId: string): Promise<Going | null> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/going`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+/** Already invited by you to this show — so the sheet says Invited rather than offering twice. */
+export async function getInvitesSent(eventId: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/invites/sent`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function sendInvites(
+  eventId: string,
+  userIds: string[],
+  note?: string,
+): Promise<InviteResult> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ user_ids: userIds, note: note || null }),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+export async function getMyInvites(): Promise<ReceivedInvite[]> {
+  const res = await fetch(`${API_BASE_URL}/me/invites`, { headers: await authHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}

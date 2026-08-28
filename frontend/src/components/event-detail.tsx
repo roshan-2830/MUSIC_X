@@ -4,9 +4,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
-import { EventDetail, fetchEvent } from "../lib/api";
+import { EventDetail, fetchEvent, getGoing, Going } from "../lib/api";
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
+import GoingRow from "./going-row";
+import InviteSheet from "./invite-sheet";
 import ExploreNearby from "./explore-nearby";
 import PlanTrip from "./plan-trip";
 import { coverColor, flagEmoji, hashHue } from "../lib/format";
@@ -111,12 +113,23 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
   const [aboutOpen, setAboutOpen] = useState(false);
   const [aboutLines, setAboutLines] = useState<number | null>(null);
   const { isSaved, toggle } = useSaves();
+  const [going, setGoing] = useState<Going | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invitedToast, setInvitedToast] = useState<string | null>(null);
   const { homeCountry, homeCity } = useProfile();
 
   useEffect(() => {
     setLoading(true); setError(null); setEv(null); setShowWhy(false); setShowTrust(false);
     setAboutOpen(false); setAboutLines(null);
     fetchEvent(id).then(setEv).catch((e) => setError(String(e))).finally(() => setLoading(false));
+  }, [id]);
+
+  // Asked separately from the event itself, and after it: it needs the caller's identity where
+  // the event does not, and a slow or failed social lookup must never keep the show off screen.
+  useEffect(() => {
+    let alive = true;
+    getGoing(id).then((g) => { if (alive) setGoing(g); });
+    return () => { alive = false; };
   }, [id]);
 
   async function onShare() {
@@ -201,6 +214,12 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={20} color={saved ? ACCENT : "#f4f4f6"} />
               <Text style={[styles.segLabel, saved && styles.segLabelOn]}>{saved ? "Saved" : "Save"}</Text>
             </Pressable>
+            {/* Beside Save, before Share: inviting somebody is a decision about this show,
+                where Share is a generic escape hatch to any app on the phone. */}
+            <Pressable style={styles.segcell} onPress={() => setInviteOpen(true)}>
+              <Ionicons name="person-add-outline" size={20} color="#f4f4f6" />
+              <Text style={styles.segLabel}>Invite</Text>
+            </Pressable>
             <Pressable style={styles.segcell} onPress={onShare}>
               <Ionicons name="share-social-outline" size={20} color="#f4f4f6" />
               <Text style={styles.segLabel}>Share</Text>
@@ -231,6 +250,18 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               )}
             </View>
           )}
+
+          {/* Directly under the rating, because it answers the same question in a different
+              currency: the score says whether the show is good, this says whether anyone you
+              know will be there. */}
+          <GoingRow going={going} />
+
+          {invitedToast ? (
+            <View style={styles.invited}>
+              <Ionicons name="checkmark-circle" size={15} color="#7ef0b2" />
+              <Text style={styles.invitedText}>{invitedToast}</Text>
+            </View>
+          ) : null}
 
           {/* line-up widget */}
           {ev.lineup.length > 0 && (
@@ -499,6 +530,22 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           <ArtistDetail name={artistName} onClose={() => setArtistName(null)} />
         ) : null}
       </Modal>
+
+      <InviteSheet
+        visible={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        eventId={id}
+        eventTitle={ev?.title ?? null}
+        onSent={(n) => {
+          // Re-read after sending: somebody who was already going should join the line
+          // immediately rather than on the next open.
+          getGoing(id).then(setGoing);
+          setInvitedToast(
+            n > 0 ? `Invited ${n} ${n === 1 ? "person" : "people"}` : "They were already invited",
+          );
+          setTimeout(() => setInvitedToast(null), 4000);
+        }}
+      />
     </View>
   );
 }
@@ -531,6 +578,14 @@ const styles = StyleSheet.create({
   segcellOn: { borderColor: ACCENT },
   segScore: { color: ACCENT, fontSize: 20, fontWeight: "800" },
   segLabel: { color: "#c8c8d0", fontSize: 12, fontWeight: "700" },
+  // The confirmation after sending. A sheet that just closes leaves somebody wondering whether
+  // it worked, and an invite is not something to be unsure about.
+  invited: {
+    flexDirection: "row", alignItems: "center", gap: 7, marginTop: 10,
+    backgroundColor: "rgba(126,240,178,0.10)", borderRadius: 11,
+    paddingVertical: 10, paddingHorizontal: 12,
+  },
+  invitedText: { color: "#7ef0b2", fontSize: 13, fontWeight: "700", flex: 1 },
   segLabelOn: { color: ACCENT },
 
   whyBox: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
