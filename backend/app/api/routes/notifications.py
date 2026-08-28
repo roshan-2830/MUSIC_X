@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel
+
 from app.core.security import get_current_user_id
 from app.db.session import get_db
 from app.models.artist import Artist
@@ -20,6 +22,7 @@ from app.models.city import City
 from app.models.event import Event
 from app.models.notification import Notification
 from app.models.notification_pref import NotificationPref
+from app.models.push_token import PushToken
 from app.models.venue import Venue
 from app.schemas.notification import (
     NotificationOut, NotificationPrefsOut, NotificationPrefsUpdate, UnreadCount,
@@ -143,3 +146,58 @@ def update_prefs(body: NotificationPrefsUpdate,
     db.commit()
     db.refresh(row)
     return NotificationPrefsOut(**{f: getattr(row, f) for f in PREF_FIELDS})
+
+
+# ---------------------------------------------------------------- device registration
+
+
+class PushTokenIn(BaseModel):
+    token: str
+    platform: str | None = None
+
+
+@router.post("/push-token", status_code=204)
+def register_push_token(body: PushTokenIn,
+                        user_id: str = Depends(get_current_user_id),
+                        db: Session = Depends(get_db)):
+    """Remember that this phone can be reached.
+
+    Called on every launch, not just the first, because Expo may rotate a token at any time
+    and a stale one fails silently — the person simply stops getting notifications and has no
+    way to know. Re-registering is cheap; missing a rotation is not.
+
+    Idempotent, and the row's OWNER is updated rather than a second row added: if two accounts
+    sign in on one phone, only the one currently signed in should be notified on it.
+    """
+    uid = uuid.UUID(user_id)
+    token = (body.token or "").strip()
+    # Expo's own format. Rejecting anything else here means a malformed value can never sit in
+    # the table failing on every delivery pass.
+    if not (token.startswith("ExponentPushToken[") or token.startswith("ExpoPushToken[")):
+        raise HTTPException(status_code=422, detail="Not an Expo push token")
+
+    row = db.query(PushToken).filter(PushToken.token == token).first()
+    now = datetime.now(timezone.utc)
+    if row is None:
+        db.add(PushToken(token=token, user_id=uid,
+                         platform=(body.platform or None), last_seen_at=now))
+    else:
+        row.user_id = uid
+        row.platform = body.platform or row.platform
+        row.last_seen_at = now
+    db.commit()
+
+
+@router.delete("/push-token", status_code=204)
+def unregister_push_token(token: str = Query(...),
+                          user_id: str = Depends(get_current_user_id),
+                          db: Session = Depends(get_db)):
+    """Stop sending to this phone — sign-out, or permission withdrawn in system settings.
+
+    Scoped to the caller so one account cannot silence another's device.
+    """
+    uid = uuid.UUID(user_id)
+    (db.query(PushToken)
+       .filter(PushToken.token == token.strip(), PushToken.user_id == uid)
+       .delete(synchronize_session=False))
+    db.commit()

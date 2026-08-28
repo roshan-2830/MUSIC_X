@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from app.core.security import get_current_user_id
-from app.scheduler import (trigger_enrich_now, trigger_refresh_now,
+from app.scheduler import (trigger_enrich_now, trigger_push_now, trigger_refresh_now,
                            trigger_score_now, trigger_sweep_now)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -51,3 +51,14 @@ def score_now(user_id: str = Depends(get_current_user_id)):
     cohorts, each against its own kind. Runs in the background; watch for [score] lines."""
     trigger_score_now()
     return {"status": "scoring started — watch the server logs for [score] lines"}
+
+
+@router.post("/push")
+def push_now(user_id: str = Depends(get_current_user_id)):
+    """Deliver every notification that has not reached a phone yet, right now.
+
+    Returns the tally rather than "started", because the only reason to call this by hand is to
+    find out whether push works — and for that the counts ARE the answer. `no_device` means
+    nobody has registered a phone; `muted` means push is switched off in their preferences.
+    """
+    return trigger_push_now()

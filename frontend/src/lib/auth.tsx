@@ -1,3 +1,4 @@
+import { disablePush } from '@/hooks/use-push';
 import { Session } from "@supabase/supabase-js";
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
 
@@ -58,6 +59,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    // Forget this phone BEFORE the session goes, because unregistering is an authenticated
+    // call. Otherwise the next person to sign in on this device inherits the previous
+    // account's notifications — the token stays pointed at whoever registered it last.
+    await disablePush().catch(() => {});
     await supabase.auth.signOut();
   }
 

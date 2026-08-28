@@ -20,6 +20,7 @@ import { City, Festival, fetchEvents, getFestivals, getRecommended, MusicEvent, 
 import { useAuth } from "../lib/auth";
 import { detectCurrentCity } from "../lib/location";
 import { useProfile } from "../lib/profile";
+import { usePush } from "../hooks/use-push";
 
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
@@ -99,6 +100,11 @@ export default function HomeScreen() {
   // bumping this re-checks the unread badge (after the inbox is closed)
   const [badgeKey, setBadgeKey] = useState(0);
   const [triedLocate, setTriedLocate] = useState(false);
+
+  // Register this phone for notifications, and open the right show when one is tapped.
+  // Home is where a tap lands because this is the screen that owns the detail modal — and a
+  // reminder that drops you on a list you then have to search is barely a reminder at all.
+  usePush(setSelectedId);
 
   // the global catalogue (loaded once)
   useEffect(() => {

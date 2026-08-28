@@ -23,6 +23,10 @@ class Notification(Base):
     priority = Column(String, nullable=False, server_default="normal")  # normal | high
     is_read = Column(Boolean, nullable=False, server_default=text("false"))
 
+    # When this was delivered to a device, or NULL if it has not been. Delivery is a separate
+    # pass from creation so the several places that make notifications do not each have to
+    # remember to send one.
+    pushed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     profile = relationship("Profile")

@@ -1070,3 +1070,22 @@ export async function pasteTicket(eventId: string, text: string): Promise<PasteR
   if (!res.ok) return null;
   return res.json();
 }
+
+// ---------------------------------------------------------------- push devices
+
+export async function registerPushToken(token: string, platform: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/me/push-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ token, platform }),
+  });
+  if (!res.ok) throw new Error(`register push token failed: ${res.status}`);
+}
+
+export async function unregisterPushToken(token: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE_URL}/me/push-token?token=${encodeURIComponent(token)}`,
+    { method: "DELETE", headers: await authHeaders() },
+  );
+  if (!res.ok) throw new Error(`unregister push token failed: ${res.status}`);
+}

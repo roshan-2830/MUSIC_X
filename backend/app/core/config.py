@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_name: str = "Music X API"
+    # Optional. Only needed once push security is enabled in the EAS dashboard, at which
+    # point unauthenticated sends are rejected. Should be set before launch: without it,
+    # anybody holding one of our push tokens could send to it.
+    expo_access_token: str | None = None
 
     # Database
     database_url: str = ""

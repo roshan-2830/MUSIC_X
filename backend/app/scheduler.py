@@ -1,8 +1,10 @@
-"""In-app scheduler. Three recurring jobs while the server is up:
+"""In-app scheduler. Recurring jobs while the server is up:
 
   • sweep_catalogue   — every few hours: broad DISCOVERY of new shows (any artist) + festivals
-  • refresh_catalogue — daily: re-check + re-score followed / known artists
+  • refresh_catalogue — every few hours: re-verify every event by id (status, dates, price)
   • enrich_catalogue  — daily: fill artist pages (photo, bio, tags, similar, popularity)
+  • reminders         — hourly: time-driven alerts (on-sale, a week out, day-of)
+  • push_delivery     — every couple of minutes: send whatever has not reached a phone yet
 
 NOTE: these only fire while the backend process is running. On your Mac that means
 "while the dev server is on". For true always-on scheduling the backend must be
@@ -14,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.services.enrichment import enrich_all
 from app.services.refresh import refresh_catalogue, sweep_catalogue
+from app.services.push import deliver_pending
 from app.services.reminders import run_reminders
 
 # Broad discovery sweep cadence (default every 3h) and the deeper daily refresh (default 24h).
@@ -42,6 +45,11 @@ ENRICH_LIMIT = int(os.getenv("ENRICH_LIMIT", "1500"))
 # late is no longer a day-of reminder, and the pass is a single query over saved shows inside the
 # next eight days — no external calls at all.
 REMINDER_INTERVAL_HOURS = float(os.getenv("REMINDER_INTERVAL_HOURS", "1"))
+# Push delivery, in MINUTES. Every other job here is measured in hours because it talks to
+# somebody else's API; this one only reads our own table and posts what it finds. The whole
+# value of a notification is that it arrives while it still matters, so the gap between
+# "created" and "on the lock screen" should be the smallest thing in this file.
+PUSH_INTERVAL_MINUTES = float(os.getenv("PUSH_INTERVAL_MINUTES", "2"))
 
 # The startup guard still exists, and still works to the calendar day, but it now guards
 # against something narrower than it used to. It was there because a refresh cost ~3,800
@@ -148,6 +156,20 @@ def start_scheduler() -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
     )
 
+    scheduler.add_job(
+        deliver_pending,
+        trigger="interval",
+        minutes=PUSH_INTERVAL_MINUTES,
+        id="push_delivery",
+        replace_existing=True,
+        max_instances=1,
+        # coalesce matters more here than anywhere else: at a two-minute cadence a laptop that
+        # slept for an hour wakes owing thirty runs, and running them all would send the same
+        # backlog thirty times over. One catch-up run delivers exactly the same notifications.
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+    )
+
     # The deep refresh is the expensive one, so it gets a guard rather than a free pass.
     scheduler.add_job(
         _refresh_if_stale,
@@ -160,8 +182,9 @@ def start_scheduler() -> None:
     print(f"[scheduler] started — sweep every {SWEEP_INTERVAL_HOURS}h, "
           f"refresh every {REFRESH_INTERVAL_HOURS}h, "
           f"enrich every {ENRICH_INTERVAL_HOURS}h (limit {ENRICH_LIMIT}/stage) — "
-          f"reminders every {REMINDER_INTERVAL_HOURS}h — "
-          f"sweep, enrich and reminders also run at startup; refresh runs at startup only if "
+          f"reminders every {REMINDER_INTERVAL_HOURS}h, "
+          f"push delivery every {PUSH_INTERVAL_MINUTES}m — "
+          f"sweep, enrich, reminders and push also run at startup; refresh runs at startup only if "
           f"the catalogue was not already verified today")
 
 
@@ -200,3 +223,13 @@ def trigger_enrich_now(limit: int | None = None) -> None:
         enrich_all, id="enrich_now", replace_existing=True,
         kwargs={"limit": limit or ENRICH_LIMIT},
     )
+
+
+def trigger_push_now() -> int:
+    """Run the delivery pass immediately and IN-LINE, returning what it did.
+
+    In-line rather than queued, unlike the other triggers here: this one exists so a person can
+    tap a button and find out whether push actually works on their phone. A trigger that returns
+    "accepted" tells them nothing about whether the notification arrived.
+    """
+    return deliver_pending()
