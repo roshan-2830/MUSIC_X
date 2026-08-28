@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 
 import { getNearbyPlaces, NearbyPlaces, Place } from "../lib/api";
 
@@ -8,6 +11,10 @@ const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
 const LINE = "#26262f";
 const CARD = "#14141b";
+
+/** The mockup's numbers, kept exactly: 178px wide, 10px apart. */
+const CARD_W = 178;
+const CARD_GAP = 10;
 
 type Tab = "do" | "eat";
 
@@ -52,35 +59,84 @@ function look(category: string) {
   return LOOK[category] ?? { icon: "location", word: category.replace(/_/g, " ") };
 }
 
+/** The mockup's own hash: `h = (h * 31 + charCode) % 360`.
+ *
+ *  Kept identical so a place lands on the same colour here as in the design, and so the same
+ *  name is the same colour every time somebody opens the page — a card that changes colour on
+ *  each render reads as a glitch. */
+function hashHue(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) % 360;
+  return h;
+}
+
+/** Two hues 70 degrees apart over a near-black base — the mockup's stageGlow.
+ *
+ *  It uses two radial gradients, which React Native cannot draw without pulling in a canvas
+ *  library. A diagonal linear blend of the same two hues over the same base keeps what the
+ *  block is FOR: a distinct, recognisable colour per place where there is no photograph, rather
+ *  than eight identical grey rectangles. */
+function glow(seed: string): [string, string, string] {
+  const h = hashHue(seed);
+  return [
+    `hsl(${h}, 70%, 45%)`,
+    `hsl(${(h + 70) % 360}, 75%, 50%)`,
+    "#0c0c11",
+  ];
+}
+
 /** Cuisine reads better as a sentence than as a tag: "Restaurant · Japanese". */
 function tidy(s: string) {
   return s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 }
 
-function PlaceRow({ place, venueShort }: { place: Place; venueShort: string }) {
+function PlaceCard({ place, venueShort }: { place: Place; venueShort: string }) {
   const l = look(place.category);
   const what = [l.word, place.cuisine ? tidy(place.cuisine) : null].filter(Boolean).join(" · ");
+  const [a, b, base] = glow(place.name + place.category);
   return (
-    <View style={styles.row}>
-      <View style={styles.icon}>
-        <Ionicons name={l.icon as any} size={16} color={MUTED} />
-      </View>
+    <View style={styles.placeCard}>
+      <LinearGradient
+        colors={[a, b, base]}
+        locations={[0, 0.55, 1]}
+        start={{ x: 0.15, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.vis}
+      >
+        {/* Sits where the mockup puts its rating pill. Ours holds the walk, because that is
+            the number we actually have — a star we cannot source would be a decoration
+            pretending to be a fact. */}
+        <View style={styles.pill}>
+          <Ionicons name="walk" size={10} color="#fff" />
+          <Text style={styles.pillText}>{place.walk_minutes} min</Text>
+        </View>
+      </LinearGradient>
+
       <View style={styles.body}>
-        <Text style={styles.name} numberOfLines={1}>{place.name}</Text>
-        <Text style={styles.meta} numberOfLines={1}>
-          {what} · {place.walk_minutes} min from {venueShort}
-        </Text>
+        <Text style={styles.name} numberOfLines={2}>{place.name}</Text>
+        <View style={styles.meta}>
+          <Ionicons name={l.icon as any} size={11} color={MUTED} />
+          <Text style={styles.metaText} numberOfLines={1}>{what}</Text>
+        </View>
+        <View style={styles.foot}>
+          <Text style={styles.dist} numberOfLines={1}>
+            {place.distance_m >= 1000
+              ? `${(place.distance_m / 1000).toFixed(1)} km`
+              : `${place.distance_m} m`}
+          </Text>
+          {place.directions_url ? (
+            <Pressable
+              style={styles.go}
+              onPress={() => Linking.openURL(place.directions_url!)}
+              accessibilityRole="button"
+              accessibilityLabel={`Directions to ${place.name}`}
+            >
+              <Ionicons name="navigate" size={10} color="#101204" />
+              <Text style={styles.goText}>Go</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
-      {place.directions_url ? (
-        <Pressable
-          style={styles.go}
-          onPress={() => Linking.openURL(place.directions_url!)}
-          accessibilityRole="button"
-          accessibilityLabel={`Directions to ${place.name}`}
-        >
-          <Ionicons name="navigate-outline" size={13} color={ACCENT} />
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -146,12 +202,22 @@ export default function AroundVenue({ eventId }: { eventId: string }) {
         </View>
       ) : null}
 
+      {/* A snapping horizontal row, not a vertical list. The mockup makes this a shelf of
+          cards on purpose: eight full-width rows push the line-up and the trip card off the
+          screen, and this section is a glance rather than a directory. */}
       {!loading && data?.status === "ok" && list.length ? (
-        <>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          decelerationRate="fast"
+          snapToInterval={CARD_W + CARD_GAP}
+          snapToAlignment="start"
+          contentContainerStyle={styles.shelf}
+        >
           {list.map((p, i) => (
-            <PlaceRow key={`${p.name}-${i}`} place={p} venueShort={venueShort} />
+            <PlaceCard key={`${p.name}-${i}`} place={p} venueShort={venueShort} />
           ))}
-        </>
+        </ScrollView>
       ) : null}
 
       {empty ? (
@@ -202,21 +268,35 @@ const styles = StyleSheet.create({
   tabText: { color: MUTED, fontSize: 13, fontWeight: "700" },
   tabTextOn: { color: "#101204", fontSize: 13, fontWeight: "800" },
 
-  row: {
-    flexDirection: "row", alignItems: "center", gap: 11,
-    paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: LINE,
+  // The mockup's own measurements: 178px cards, 10px apart, 84px of colour on top.
+  // Named placeCard because `card` is already the section's own wrapper.
+  shelf: { gap: CARD_GAP, paddingVertical: 2, paddingRight: 2 },
+  placeCard: {
+    width: CARD_W, backgroundColor: "#17171d", borderWidth: 1, borderColor: LINE,
+    borderRadius: 14, overflow: "hidden",
   },
-  icon: {
-    width: 34, height: 34, borderRadius: 9, backgroundColor: "#1b1b23",
-    alignItems: "center", justifyContent: "center",
+  vis: { height: 84, justifyContent: "flex-end", padding: 8 },
+  pill: {
+    flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start",
+    backgroundColor: "rgba(11,11,15,0.78)", borderRadius: 20,
+    paddingVertical: 3, paddingHorizontal: 7,
   },
-  body: { flex: 1 },
-  name: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
-  meta: { color: MUTED, fontSize: 12, marginTop: 2 },
+  pillText: { color: "#fff", fontSize: 10.5, fontWeight: "800" },
+
+  body: { flex: 1, gap: 5, paddingHorizontal: 10, paddingTop: 10, paddingBottom: 11 },
+  name: { color: "#f4f4f6", fontSize: 12.5, fontWeight: "700", lineHeight: 16.5 },
+  meta: { flexDirection: "row", alignItems: "center", gap: 5 },
+  metaText: { color: MUTED, fontSize: 11, flex: 1 },
+  foot: {
+    marginTop: "auto", paddingTop: 7, flexDirection: "row", alignItems: "center",
+    justifyContent: "space-between", gap: 6,
+  },
+  dist: { color: "#f4f4f6", fontSize: 12, fontWeight: "800" },
   go: {
-    width: 32, height: 32, borderRadius: 9, borderWidth: 1,
-    borderColor: "rgba(232,255,71,0.35)", alignItems: "center", justifyContent: "center",
+    flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: ACCENT,
+    borderRadius: 9, paddingVertical: 6, paddingHorizontal: 9,
   },
+  goText: { color: "#101204", fontSize: 10.5, fontWeight: "800" },
 
   state: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 18 },
   stateText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },

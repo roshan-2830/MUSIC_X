@@ -220,10 +220,9 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               <Ionicons name="person-add-outline" size={20} color="#f4f4f6" />
               <Text style={styles.segLabel}>Invite</Text>
             </Pressable>
-            <Pressable style={styles.segcell} onPress={onShare}>
-              <Ionicons name="share-social-outline" size={20} color="#f4f4f6" />
-              <Text style={styles.segLabel}>Share</Text>
-            </Pressable>
+            {/* Share used to sit here as well. Two share buttons on one screen is one
+                button too many: the header already has it, at the top right, where every other
+                screen in the app puts it. Invite takes the place it was occupying. */}
           </View>
 
           {/* MXS "why" meter */}
