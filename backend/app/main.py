@@ -19,10 +19,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
-# Dev CORS — lets the web app call the API. Tighten (specific origins) before production.
+# CORS is a BROWSER rule, so this list matters only to the web app — a native build ignores
+# it entirely. Set CORS_ORIGINS to the deployed web origin(s); unset falls back to the local
+# Expo dev servers so `expo start --web` keeps working with no configuration.
+#
+# Origins must be scheme + host + port with NO trailing slash — the browser compares the
+# string literally, and "https://x.com/" never matches the Origin header "https://x.com".
+_origins = [o.strip().rstrip("/") for o in settings.cors_origins.split(",") if o.strip()]
+if not _origins:
+    _origins = ["http://localhost:8081", "http://localhost:19006", "http://localhost:3000"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

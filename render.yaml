@@ -1,0 +1,89 @@
+# Render blueprint — the API and the web app, deployed from this one repo.
+#
+# Two things here are load-bearing and easy to lose if these services are ever recreated by
+# hand in the dashboard, which is the main reason this file exists:
+#
+#   1. The API runs with --workers 1. The scheduler (app/scheduler.py) lives INSIDE the API
+#      process, so a second worker is a second copy of every recurring job: two catalogue
+#      sweeps, double the Ticketmaster spend, and every push notification sent twice.
+#   2. The web app is a single-page build (app.json sets web.output: "single"), so the static
+#      host must rewrite every unmatched path to /index.html. Without that rule the homepage
+#      works and every other URL 404s the moment someone refreshes or opens a deep link.
+
+services:
+  - type: web
+    name: musicx-api
+    runtime: python
+    rootDir: backend
+    # Starter, not Free: the free instance sleeps after 15 minutes idle, and this process IS
+    # the scheduler. A sleeping API means reminders never fire and the catalogue goes stale.
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    # Migrations run before the server binds, so a deploy can never serve code that is ahead
+    # of its schema. alembic is idempotent — on an unchanged database this is a no-op.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      # Matches the local .venv the project was built against.
+      - key: PYTHON_VERSION
+        value: "3.12.13"
+      # sync: false = "prompt me, never store it in git". Every one of these is a secret.
+      - key: DATABASE_URL          # Supabase SESSION POOLER uri, not the direct host:
+        sync: false                # the direct one is IPv6-only and unreachable from here.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: TICKETMASTER_API_KEY
+        sync: false
+      - key: LASTFM_API_KEY
+        sync: false
+      - key: SPOTIFY_CLIENT_ID
+        sync: false
+      - key: SPOTIFY_CLIENT_SECRET
+        sync: false
+      - key: TRIPSURE_BASE_URL
+        sync: false
+      - key: TRIPSURE_TENANT_ID
+        sync: false
+      - key: TRIPSURE_API_KEY
+        sync: false
+      - key: TRIPSURE_FLIGHT_BASE_URL
+        sync: false
+      - key: TRIPSURE_FLIGHT_TENANT_ID
+        sync: false
+      - key: TRIPSURE_FLIGHT_API_KEY
+        sync: false
+      # The web origin allowed to call this API from a browser. Set once the static site
+      # below has its URL. No trailing slash — the browser matches the string literally.
+      - key: CORS_ORIGINS
+        sync: false
+      # Supabase user ids permitted to hit /admin/*. Empty denies everyone, including you.
+      - key: ADMIN_USER_IDS
+        sync: false
+
+  - type: web
+    name: musicx-web
+    runtime: static
+    rootDir: frontend
+    # EXPO_PUBLIC_* values are substituted into the JS bundle by Metro during this build, so
+    # they are BUILD-time inputs. Changing one in the dashboard does nothing until a redeploy.
+    buildCommand: npm ci && npx expo export --platform web
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: EXPO_PUBLIC_API_URL   # https://musicx-api.onrender.com — https, no trailing slash
+        sync: false
+      - key: EXPO_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: EXPO_PUBLIC_SUPABASE_KEY
+        sync: false
+      - key: EXPO_PUBLIC_SPOTIFY_CLIENT_ID
+        sync: false
+      - key: EXPO_PUBLIC_GYG_PARTNER_ID
+        sync: false
+      - key: EXPO_PUBLIC_GYG_CAMPAIGN
+        sync: false

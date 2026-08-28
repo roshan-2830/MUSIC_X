@@ -12,6 +12,23 @@ class Settings(BaseSettings):
     # anybody holding one of our push tokens could send to it.
     expo_access_token: str | None = None
 
+    # Web origins allowed to call this API from a BROWSER, comma separated
+    # (e.g. "https://musicx.onrender.com,http://localhost:8081"). Native builds are not
+    # subject to CORS at all, so this list is only ever about the web app.
+    #
+    # It cannot be "*": a browser IGNORES the wildcard when credentials are allowed, so
+    # "*" plus allow_credentials is not permissive-but-sloppy, it is broken. Production
+    # must name its origins.
+    cors_origins: str = ""
+
+    # Supabase user ids allowed to hit /admin/*, comma separated. These endpoints spend real
+    # money — one /admin/refresh re-verifies the entire catalogue against Ticketmaster — so
+    # "any logged-in account" stops being a sufficient gate the moment the app is public.
+    #
+    # Empty means CLOSED, not open: an env var that failed to load should lock the owner out
+    # of their own admin routes, never hand them to every visitor.
+    admin_user_ids: str = ""
+
     # Database
     database_url: str = ""
 

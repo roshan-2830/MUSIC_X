@@ -46,3 +46,21 @@ def get_current_user_id(
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing subject")
     return user_id
+
+def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
+    """Admin-only. Verifies the caller is a logged-in user AND on the admin allowlist.
+
+    /admin/* is not the same kind of endpoint as the rest of the API: one call to
+    /admin/refresh re-verifies the whole catalogue against Ticketmaster, and /admin/enrich
+    walks thousands of artists. "Any account with a valid token" was a fine gate while the
+    only account was ours; once anyone can sign up it means any visitor can spend the day's
+    quota on our behalf.
+
+    Empty allowlist DENIES everyone, deliberately. If ADMIN_USER_IDS fails to load in
+    production, the safe failure is that we lose access to our own admin routes — not that
+    the internet gains them.
+    """
+    allowed = {u.strip() for u in settings.admin_user_ids.split(",") if u.strip()}
+    if user_id not in allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    return user_id

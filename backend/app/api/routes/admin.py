@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.core.security import get_current_user_id
+from app.core.security import require_admin
 from app.scheduler import (trigger_enrich_now, trigger_push_now, trigger_refresh_now,
                            trigger_score_now, trigger_sweep_now)
 
@@ -8,7 +8,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.post("/refresh")
-def refresh_now(limit: int | None = None, user_id: str = Depends(get_current_user_id)):
+def refresh_now(limit: int | None = None, user_id: str = Depends(require_admin)):
     """Trigger a deep refresh right now — re-verify EVERY event in the catalogue by its
     Ticketmaster id (status/dates/price), for all shows. Runs in the background. Pass
     ?limit=10 to check only a few events (quick test). Watch server logs for [refresh]."""
@@ -18,7 +18,7 @@ def refresh_now(limit: int | None = None, user_id: str = Depends(get_current_use
 
 
 @router.post("/sweep")
-def sweep_now(user_id: str = Depends(get_current_user_id)):
+def sweep_now(user_id: str = Depends(require_admin)):
     """Trigger a broad discovery sweep right now — pulls a wide batch of upcoming shows
     (any artist) + festivals, so newly announced shows appear even for un-followed artists.
     Runs in the background. Watch server logs for [sweep]."""
@@ -27,7 +27,7 @@ def sweep_now(user_id: str = Depends(get_current_user_id)):
 
 
 @router.post("/enrich")
-def enrich_now(limit: int | None = None, user_id: str = Depends(get_current_user_id)):
+def enrich_now(limit: int | None = None, user_id: str = Depends(require_admin)):
     """Fill in artist pages right now — photo, bio, genre tags, similar artists and
     popularity, for the artists who have upcoming shows, busiest first. Free sources
     only (Deezer, Wikipedia, Last.fm); no Ticketmaster budget is spent.
@@ -42,7 +42,7 @@ def enrich_now(limit: int | None = None, user_id: str = Depends(get_current_user
 
 
 @router.post("/score")
-def score_now(user_id: str = Depends(get_current_user_id)):
+def score_now(user_id: str = Depends(require_admin)):
     """Re-score every upcoming concert and festival right now — the full MXS formula, not
     the provisional artist-only score a live search writes.
 
@@ -54,7 +54,7 @@ def score_now(user_id: str = Depends(get_current_user_id)):
 
 
 @router.post("/push")
-def push_now(user_id: str = Depends(get_current_user_id)):
+def push_now(user_id: str = Depends(require_admin)):
     """Deliver every notification that has not reached a phone yet, right now.
 
     Returns the tally rather than "started", because the only reason to call this by hand is to

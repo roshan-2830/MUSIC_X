@@ -3,9 +3,22 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 
 function resolveBaseUrl(): string {
+  // A deployed build has no route to the machine that built it, so the URL has to be baked in
+  // at export time. EXPO_PUBLIC_ vars are substituted into the bundle by Metro, which is why
+  // this is read here and not fetched at runtime.
+  //
+  // MUST be https in production: the web app is served over TLS, and a browser refuses an
+  // http:// call from an https:// page as mixed content — silently, in the network tab.
+  const configured = process.env.EXPO_PUBLIC_API_URL?.trim();
+  // Trailing slash stripped because every call site below appends its own "/path".
+  if (configured) return configured.replace(/\/+$/, "");
+
+  // Unset → local development, where the API is on this same machine.
   // Web runs on the Mac itself → localhost works.
   if (Platform.OS === "web") return "http://localhost:8000";
   // On a phone/emulator, use the same host Expo is served from (your Mac's LAN IP).
+  // hostUri only exists while the Expo dev server is serving the app; in a production
+  // build it is empty, which is exactly why the override above has to come first.
   const host = (Constants.expoConfig?.hostUri ?? "").split(":")[0];
   return host ? `http://${host}:8000` : "http://localhost:8000";
 }
