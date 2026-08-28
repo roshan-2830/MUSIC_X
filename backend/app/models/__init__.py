@@ -10,6 +10,7 @@ from app.models.genre import Genre  # noqa: F401
 
 # Events
 from app.models.event import Event  # noqa: F401
+from app.models.event_invite import EventInvite  # noqa: F401
 from app.models.event_artist import EventArtist  # noqa: F401
 from app.models.event_genre import EventGenre  # noqa: F401
 from app.models.event_offer import EventOffer  # noqa: F401
