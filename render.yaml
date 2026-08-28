@@ -1,23 +1,24 @@
-# Render blueprint — the API and the web app, deployed from this one repo.
+# Render blueprint — the API only. The web app is deployed separately on Vercel, which is
+# why there is no static site here; its equivalent config lives in frontend/vercel.json.
 #
-# Two things here are load-bearing and easy to lose if these services are ever recreated by
-# hand in the dashboard, which is the main reason this file exists:
-#
-#   1. The API runs with --workers 1. The scheduler (app/scheduler.py) lives INSIDE the API
-#      process, so a second worker is a second copy of every recurring job: two catalogue
-#      sweeps, double the Ticketmaster spend, and every push notification sent twice.
-#   2. The web app is a single-page build (app.json sets web.output: "single"), so the static
-#      host must rewrite every unmatched path to /index.html. Without that rule the homepage
-#      works and every other URL 404s the moment someone refreshes or opens a deep link.
+# The load-bearing line in this file is `--workers 1`. The scheduler (app/scheduler.py) runs
+# INSIDE the API process, so a second worker is a second copy of every recurring job: two
+# catalogue sweeps, double the Ticketmaster spend, every push notification sent twice. If
+# this service is ever rebuilt by hand in the dashboard, that flag is the one to not forget.
 
 services:
   - type: web
     name: musicx-api
     runtime: python
     rootDir: backend
-    # Starter, not Free: the free instance sleeps after 15 minutes idle, and this process IS
-    # the scheduler. A sleeping API means reminders never fire and the catalogue goes stale.
-    plan: starter
+    # FREE TIER, deliberately, and it comes with a real cost: Render stops a free instance
+    # after 15 minutes without traffic. This process IS the scheduler, so while it is asleep
+    # nothing refreshes, no reminder fires, and no notification is delivered — and the first
+    # request after a sleep waits ~50s for a cold start.
+    #
+    # That is an acceptable trade while proving the deploy works end to end. Change to
+    # `starter` (and add a card) the moment real people depend on the background jobs.
+    plan: free
     buildCommand: pip install -r requirements.txt
     # Migrations run before the server binds, so a deploy can never serve code that is ahead
     # of its schema. alembic is idempotent — on an unchanged database this is a no-op.
@@ -27,7 +28,7 @@ services:
       # Matches the local .venv the project was built against.
       - key: PYTHON_VERSION
         value: "3.12.13"
-      # sync: false = "prompt me, never store it in git". Every one of these is a secret.
+      # sync: false = "prompt me in the dashboard, never store it in git". All secrets.
       - key: DATABASE_URL          # Supabase SESSION POOLER uri, not the direct host:
         sync: false                # the direct one is IPv6-only and unreachable from here.
       - key: SUPABASE_URL
@@ -54,36 +55,11 @@ services:
         sync: false
       - key: TRIPSURE_FLIGHT_API_KEY
         sync: false
-      # The web origin allowed to call this API from a browser. Set once the static site
-      # below has its URL. No trailing slash — the browser matches the string literally.
+      # The Vercel origin allowed to call this API from a browser. Set once Vercel has given
+      # the site its URL. No trailing slash — the browser matches the string literally, so
+      # "https://x.vercel.app/" never matches the Origin header "https://x.vercel.app".
       - key: CORS_ORIGINS
         sync: false
       # Supabase user ids permitted to hit /admin/*. Empty denies everyone, including you.
       - key: ADMIN_USER_IDS
-        sync: false
-
-  - type: web
-    name: musicx-web
-    runtime: static
-    rootDir: frontend
-    # EXPO_PUBLIC_* values are substituted into the JS bundle by Metro during this build, so
-    # they are BUILD-time inputs. Changing one in the dashboard does nothing until a redeploy.
-    buildCommand: npm ci && npx expo export --platform web
-    staticPublishPath: dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-    envVars:
-      - key: EXPO_PUBLIC_API_URL   # https://musicx-api.onrender.com — https, no trailing slash
-        sync: false
-      - key: EXPO_PUBLIC_SUPABASE_URL
-        sync: false
-      - key: EXPO_PUBLIC_SUPABASE_KEY
-        sync: false
-      - key: EXPO_PUBLIC_SPOTIFY_CLIENT_ID
-        sync: false
-      - key: EXPO_PUBLIC_GYG_PARTNER_ID
-        sync: false
-      - key: EXPO_PUBLIC_GYG_CAMPAIGN
         sync: false
