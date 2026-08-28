@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
-import { EventDetail, fetchEvent, getGoing, Going } from "../lib/api";
+import { EventDetail, fetchEvent, getGoing, Going, getNearbyPlaces, NearbyPlaces} from "../lib/api";
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
 import GoingRow from "./going-row";
@@ -114,6 +114,8 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
   const [aboutLines, setAboutLines] = useState<number | null>(null);
   const { isSaved, toggle } = useSaves();
   const [going, setGoing] = useState<Going | null>(null);
+  const [places, setPlaces] = useState<NearbyPlaces | null>(null);
+  const [placesLoading, setPlacesLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [invitedToast, setInvitedToast] = useState<string | null>(null);
   const { homeCountry, homeCity } = useProfile();
@@ -129,6 +131,14 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
   useEffect(() => {
     let alive = true;
     getGoing(id).then((g) => { if (alive) setGoing(g); });
+    // The first person to open a given venue waits on Overpass; everybody after them does not,
+    // because the server caches it for 90 days.
+    setPlacesLoading(true);
+    getNearbyPlaces(id).then((p) => {
+      if (!alive) return;
+      setPlaces(p);
+      setPlacesLoading(false);
+    });
     return () => { alive = false; };
   }, [id]);
 
@@ -332,7 +342,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               reason to go early, and it should be read before the logistics of getting there.
               Renders nothing at all when we know neither the venue's location nor a city to
               search — an empty heading is worse than no heading. */}
-          <AroundVenue eventId={ev.id} />
+          <AroundVenue places={places} loading={placesLoading} />
 
           {/* Bookable activities, which is a different thing from the free places above and is
               kept in its own card for exactly that reason: everything in "Around the venue" is
@@ -348,6 +358,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
             lng={ev.venue_lng ?? null}
             venueName={ev.venue_name}
             city={ev.city}
+            places={places}
             // The show's own currency where the seller published one, so an activity price
             // sits in the same money as the ticket beside it.
             currency={ev.price_from_currency ?? "EUR"}

@@ -6,6 +6,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { WebView } from "react-native-webview";
 import * as React from "react";
 
+import { NearbyPlaces } from "../lib/api";
+import CollapsibleCard from "./collapsible-card";
+import PlacesMap from "./places-map";
+
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
 const LINE = "#26262f";
@@ -143,14 +147,21 @@ export default function ExploreNearby({
   lng,
   venueName,
   city,
+  places,
   currency = "EUR",
   locale = "en-GB",
 }: {
-  /** Kept per the brief, and used: the map fallback needs them. The widget cannot take them. */
+  /** The venue. Used for the map and the map fallback — the widget itself cannot take
+   *  coordinates, which is why the query is built from names instead. */
   lat?: number | null;
   lng?: number | null;
   venueName: string | null;
   city: string | null;
+  /** The same nearby places section one shows, passed in rather than fetched again: one request
+   *  serves both, and the map is the other half of that list. GetYourGuide gives us no
+   *  coordinates for its tours — the widget renders them itself and never hands over the data —
+   *  so what can be mapped is what OpenStreetMap knows is there. */
+  places?: NearbyPlaces | null;
   currency?: string;
   locale?: string;
 }) {
@@ -194,12 +205,26 @@ export default function ExploreNearby({
   const url = frameUrl(q, currency, locale);
   const ready = canEmbed && height > 0 && !failed;
 
+  const mapPlaces = places?.status === "ok"
+    ? [...places.do, ...places.eat]
+    : [];
+  const hasMap = lat != null && lng != null && !(lat === 0 && lng === 0) && mapPlaces.length > 0;
+
   return (
-    <View style={styles.card}>
-      <Text style={styles.h}>Things to Do Near {venueName ?? "the venue"}</Text>
-      <Text style={styles.sub}>
-        Tours, tickets and experiences you can book around the show{city ? ` in ${city}` : ""}.
-      </Text>
+    <CollapsibleCard
+      title={`Things to do near ${venueName ?? "the venue"}`}
+      subtitle={`Tours, tickets and experiences you can book around the show${city ? ` in ${city}` : ""}.`}
+      count={mapPlaces.length || null}
+      icon="ticket"
+    >
+      {/* The map first, for the same reason the Stay tab opens on one: a list says what is
+          nearby, a map says whether it is all in one direction. The pins are what
+          OpenStreetMap knows is around the venue — GetYourGuide never hands us coordinates for
+          its tours, the widget draws those itself, so mapping them is not possible at this
+          tier. */}
+      {hasMap ? (
+        <PlacesMap lat={lat!} lng={lng!} venue={venueName} places={mapPlaces} />
+      ) : null}
 
       {canEmbed && !ready && !failed ? (
         <View style={styles.state}>
@@ -213,82 +238,64 @@ export default function ExploreNearby({
         // cannot be told otherwise, so it is framed as the third-party card it is rather than
         // dropped onto a dark background where it would look like a rendering fault.
         <View style={[styles.frame, { height: ready ? height : 1, opacity: ready ? 1 : 0 }]}>
-          {Platform.OS === "web"
-            ? React.createElement("iframe", {
-                src: url,
-                title: `Things to do near ${venueName ?? "the venue"}`,
-                style: { width: "100%", height: "100%", border: "0", display: "block" },
-                loading: "lazy",
-                referrerPolicy: "strict-origin-when-cross-origin",
-              })
-            : (
-              <WebView
-                source={{ uri: url }}
-                style={styles.web}
-                injectedJavaScript={BRIDGE}
-                onMessage={(e) => {
-                  try {
-                    const d = JSON.parse(e.nativeEvent.data);
-                    if (d?.height) gotHeight(d.height);
-                  } catch { /* a message we did not send */ }
-                }}
-                onError={() => setFailed(true)}
-                onHttpError={() => setFailed(true)}
-                // Booking leaves the app deliberately. The 31-day cookie has to land in the
-                // browser the person actually uses, and a WebView's cookie jar can be cleared
-                // without warning — a booking made in here might earn nothing. It is also the
-                // honest thing: a payment page belongs in a real browser with a visible URL.
-                onShouldStartLoadWithRequest={(req) => {
-                  if (req.url === url || req.url.startsWith("about:")) return true;
-                  if (/^https?:\/\//.test(req.url)) {
-                    Linking.openURL(req.url);
-                    return false;
-                  }
-                  return false;
-                }}
-                javaScriptEnabled
-                domStorageEnabled
-                scrollEnabled={false}
-                nestedScrollEnabled={false}
-                setSupportMultipleWindows={false}
-                originWhitelist={["https://*.getyourguide.com"]}
-              />
-            )}
+          <WebView
+            source={{ uri: url }}
+            style={styles.web}
+            injectedJavaScript={BRIDGE}
+            onMessage={(e) => {
+              try {
+                const d = JSON.parse(e.nativeEvent.data);
+                if (d?.height) gotHeight(d.height);
+              } catch { /* a message we did not send */ }
+            }}
+            onError={() => setFailed(true)}
+            onHttpError={() => setFailed(true)}
+            // Booking leaves the app deliberately. The 31-day cookie has to land in the browser
+            // the person actually uses, and a WebView's cookie jar can be cleared without
+            // warning — a booking made in here might earn nothing. It is also the honest thing:
+            // a payment page belongs in a real browser with a visible URL.
+            onShouldStartLoadWithRequest={(req) => {
+              if (req.url === url || req.url.startsWith("about:")) return true;
+              if (/^https?:\/\//.test(req.url)) {
+                Linking.openURL(req.url);
+                return false;
+              }
+              return false;
+            }}
+            javaScriptEnabled
+            domStorageEnabled
+            scrollEnabled={false}
+            nestedScrollEnabled={false}
+            setSupportMultipleWindows={false}
+            originWhitelist={["https://*.getyourguide.com"]}
+          />
         </View>
       ) : null}
 
-      {/* Always present, not only on failure. On web the embed stays blank until GetYourGuide
-          approves the partner id and the domain, and this link works today and earns the same
-          commission — so it is the thing that actually carries the web build. */}
-      {/* Loud wherever it is the only way through — which is web, and anywhere the embed
-          failed. Quiet underneath a working widget, where it is a "see more". */}
-      <Pressable style={[styles.btn, !ready && styles.btnLoud]}
-                 onPress={() => Linking.openURL(searchUrl(q))}>
-        <Ionicons name="ticket-outline" size={14} color={!ready ? "#101204" : ACCENT} />
-        <Text style={[styles.btnText, !ready && styles.btnTextLoud]}>
-          {ready
-            ? "Browse all activities on GetYourGuide"
-            : `See things to do near ${venueName ?? "the venue"}`}
-        </Text>
-        <Ionicons name="open-outline" size={12} color={!ready ? "#101204" : ACCENT} />
+      {/* The button that does the actual handing over. Loud, because on web it is the whole
+          mechanism and on a phone it is still the way to everything the three cards omit. */}
+      <Pressable style={styles.book} onPress={() => Linking.openURL(searchUrl(q))}>
+        <Ionicons name="ticket" size={15} color="#101204" />
+        <Text style={styles.bookText}>Book tours on GetYourGuide</Text>
+        <Ionicons name="open-outline" size={13} color="#101204" />
       </Pressable>
 
-      {!ready && lat != null && lng != null ? (
+      {!hasMap && lat != null && lng != null ? (
         <Pressable
-          style={styles.btn}
+          style={styles.alt}
           onPress={() =>
             Linking.openURL(
               `https://www.google.com/maps/search/${encodeURIComponent(
                 `things to do near ${venueName ?? ""} ${city ?? ""}`.trim())}`)}
         >
           <Ionicons name="map-outline" size={14} color={MUTED} />
-          <Text style={[styles.btnText, { color: MUTED }]}>Or look on the map</Text>
+          <Text style={styles.altText}>Or look on the map</Text>
         </Pressable>
       ) : null}
 
-      {/* Required, and not only by good manners: this section is paid, unlike everything else
-          on the page. The wording matches the covenant used elsewhere in the app, and it names
-          the amount rather than hiding behind "may earn". */}
+      {/* Required, and not only by good manners: this section is paid, unlike everything else on
+          the page. It names the amount rather than hiding behind "may earn", and it adapts —
+          without a partner id there is no commission to claim. */}
       <View style={styles.promise}>
         <Ionicons name="shield-checkmark" size={13} color="#7ef0b2" />
         <Text style={styles.promiseText}>
@@ -297,33 +304,31 @@ export default function ExploreNearby({
             : "Activities open on GetYourGuide. We earn nothing from them yet, and concert tickets never earn us anything."}
         </Text>
       </View>
-    </View>
+    </CollapsibleCard>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: CARD, borderColor: LINE, borderWidth: 1, borderRadius: 16,
-    padding: 16, marginTop: 24,
-  },
-  h: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
-  sub: { color: MUTED, fontSize: 13, marginTop: 3, marginBottom: 14, lineHeight: 18 },
-
-  frame: {
-    borderRadius: 12, overflow: "hidden", backgroundColor: "#fff", marginBottom: 4,
-  },
+  // No card/h/sub here any more: CollapsibleCard is the shell, and duplicating its padding and
+  // border produced a box inside a box.
+  frame: { borderRadius: 12, overflow: "hidden", backgroundColor: "#fff", marginTop: 12 },
   web: { flex: 1, backgroundColor: "#fff" },
 
   state: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 18 },
   stateText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
 
-  btn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
-    borderWidth: 1, borderColor: LINE, borderRadius: 11, paddingVertical: 12, marginTop: 12,
+  // The primary action of the section, so it is filled rather than outlined.
+  book: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 14, marginTop: 14,
   },
-  btnLoud: { backgroundColor: ACCENT, borderColor: ACCENT },
-  btnText: { color: ACCENT, fontSize: 13, fontWeight: "800" },
-  btnTextLoud: { color: "#101204" },
+  bookText: { color: "#101204", fontSize: 14.5, fontWeight: "800" },
+
+  alt: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
+    borderWidth: 1, borderColor: LINE, borderRadius: 11, paddingVertical: 11, marginTop: 10,
+  },
+  altText: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
 
   promise: { flexDirection: "row", gap: 7, marginTop: 14, alignItems: "flex-start" },
   promiseText: { color: MUTED, fontSize: 11.5, lineHeight: 16, flex: 1 },
