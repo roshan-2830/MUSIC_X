@@ -3,8 +3,8 @@ import {
   ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { WebView } from "react-native-webview";
 import * as React from "react";
+import type { WebViewMessageEvent, WebViewNavigation } from "react-native-webview";
 
 import { NearbyPlaces } from "../lib/api";
 import CollapsibleCard from "./collapsible-card";
@@ -89,6 +89,23 @@ function searchUrl(q: string): string {
     if (CAMPAIGN) p.set("cmp", CAMPAIGN);
   }
   return `https://www.getyourguide.com/s/?${p.toString()}`;
+}
+
+// react-native-webview is a NATIVE module, so it exists only if it was compiled into the
+// binary on the phone. A development build made before the package was installed does not have
+// it, and a plain top-level `import` of it throws while this file is still loading — which took
+// out event-detail, the calendar, and everything that reaches them. Required lazily, an absent
+// module is a value we can read instead of a crash: `canEmbed` goes false and the section falls
+// back to the link, which is what web has always shown and earns the same commission.
+let WebViewCtor: any;
+function webView(): any {
+  if (WebViewCtor !== undefined) return WebViewCtor;
+  try {
+    WebViewCtor = require("react-native-webview").WebView;
+  } catch {
+    WebViewCtor = null;
+  }
+  return WebViewCtor;
 }
 
 /** Forwards the widget's own height out of the WebView.
@@ -179,7 +196,10 @@ export default function ExploreNearby({
   //
   // So web shows the link, which works today and earns the same commission. When GetYourGuide
   // approves this partner id and this domain, the iframe can come back by deleting one line.
-  const canEmbed = Platform.OS !== "web" && !!PARTNER_ID;
+  // Native, a partner id, AND the module actually present in this binary. The third clause is
+  // the one a rebuild changes.
+  const WebView = webView();
+  const canEmbed = Platform.OS !== "web" && !!PARTNER_ID && !!WebView;
 
   const gotHeight = useCallback((h: number) => {
     if (!h || h < 80) return;
@@ -242,7 +262,7 @@ export default function ExploreNearby({
             source={{ uri: url }}
             style={styles.web}
             injectedJavaScript={BRIDGE}
-            onMessage={(e) => {
+            onMessage={(e: WebViewMessageEvent) => {
               try {
                 const d = JSON.parse(e.nativeEvent.data);
                 if (d?.height) gotHeight(d.height);
@@ -254,7 +274,7 @@ export default function ExploreNearby({
             // the person actually uses, and a WebView's cookie jar can be cleared without
             // warning — a booking made in here might earn nothing. It is also the honest thing:
             // a payment page belongs in a real browser with a visible URL.
-            onShouldStartLoadWithRequest={(req) => {
+            onShouldStartLoadWithRequest={(req: WebViewNavigation) => {
               if (req.url === url || req.url.startsWith("about:")) return true;
               if (/^https?:\/\//.test(req.url)) {
                 Linking.openURL(req.url);
