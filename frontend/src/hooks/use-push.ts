@@ -21,6 +21,7 @@
  */
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
@@ -38,17 +39,50 @@ export type PushState =
 
 type NotificationsModule = typeof import('expo-notifications');
 
+// EVERY native module expo-notifications demands the moment it is required. The package root
+// re-exports two dozen submodules and each calls requireNativeModule at ITS OWN module scope, so
+// requiring the root evaluates all of them and throws on the first one missing. Probing only the
+// one we care about would let the probe pass and the require throw anyway.
+const NEEDED = [
+  'ExpoPushTokenManager',
+  'ExpoNotificationsEmitter',
+  'ExpoNotificationsHandlerModule',
+  'ExpoNotificationPresenter',
+  'ExpoNotificationScheduler',
+  'ExpoNotificationChannelManager',
+  'ExpoTopicSubscriptionModule',
+  'ExpoBadgeModule',
+];
+
 let mod: NotificationsModule | null | undefined;   // undefined = not tried yet, null = absent
 let handlerSet = false;
 
-/** The native module, or null if this binary does not have it. Never throws. */
+/** The native module, or null if this binary does not have it. Never throws, and never asks
+ *  twice.
+ *
+ *  ASKED BEFORE REQUIRING, not by catching the failure. A try/catch around the require does keep
+ *  the app alive, but Metro hands a failed module evaluation to the error reporter BEFORE our
+ *  catch ever sees it — so the red "Cannot find native module 'ExpoPushTokenManager'" kept
+ *  appearing in the terminal even though the code had already handled it and moved on. Worse,
+ *  Metro swallows the throw and returns undefined, so the failure was never cached and every
+ *  call tried again and logged again.
+ *
+ *  requireOptionalNativeModule returns null instead of throwing, so the doomed require is never
+ *  attempted and there is nothing to report. */
 function notifications(): NotificationsModule | null {
   if (mod !== undefined) return mod;
-  try {
-    // require, not import: a failure here is a value we can handle rather than a crash at load.
-    mod = require('expo-notifications') as NotificationsModule;
-  } catch {
+  const missing = NEEDED.filter((name) => !requireOptionalNativeModule(name));
+  if (missing.length) {
     mod = null;
+    console.log(`[push] not in this build — missing ${missing.join(', ')}`);
+    return mod;
+  }
+  try {
+    mod = (require('expo-notifications') as NotificationsModule) ?? null;
+  } catch (e) {
+    // Should be unreachable now, but a cached null still beats retrying on every launch.
+    mod = null;
+    console.log('[push] expo-notifications failed to load', e);
   }
   return mod;
 }

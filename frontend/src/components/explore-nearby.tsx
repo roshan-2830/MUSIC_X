@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, View,
+  ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, TurboModuleRegistry, View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as React from "react";
@@ -100,10 +100,29 @@ function searchUrl(q: string): string {
 let WebViewCtor: any;
 function webView(): any {
   if (WebViewCtor !== undefined) return WebViewCtor;
-  try {
-    WebViewCtor = require("react-native-webview").WebView;
-  } catch {
+  // ASKED, NOT CAUGHT. A try/catch around the require keeps the app alive but does not keep the
+  // terminal quiet: Metro hands a failed module evaluation to the error reporter before our catch
+  // ever runs, so the red "RNCWebViewModule could not be found" appears anyway — for something
+  // the code has already handled. The package does exactly one thing at module scope:
+  //   TurboModuleRegistry.getEnforcing('RNCWebViewModule')
+  // and `get` is the same lookup that returns null instead of throwing. So we ask first, and the
+  // doomed require never happens.
+  // Web never embeds — see canEmbed below — so there is nothing to gain from pulling a native
+  // library into the browser bundle to then not use it.
+  if (Platform.OS === "web") {
     WebViewCtor = null;
+    return WebViewCtor;
+  }
+  if (!TurboModuleRegistry.get("RNCWebViewModule")) {
+    WebViewCtor = null;
+    console.log("[nearby] no WebView in this build — showing the link instead");
+    return WebViewCtor;
+  }
+  try {
+    WebViewCtor = require("react-native-webview").WebView ?? null;
+  } catch (e) {
+    WebViewCtor = null;      // unreachable now, but a cached null beats retrying every render
+    console.log("[nearby] WebView failed to load", e);
   }
   return WebViewCtor;
 }
