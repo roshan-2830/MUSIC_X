@@ -73,6 +73,31 @@ def _get_or_create(db, model, defaults=None, **filters):
     return obj
 
 
+def _parse_sales(raw: dict) -> tuple:
+    """(on-sale, sales-end) from Ticketmaster's sales.public.
+
+    Both nullable and both left NULL when absent. Their startTBD/startTBA flags mean the seller
+    has not announced a date, which is a different fact from "already on sale" — filling it in
+    with now() would have the app promise an on-sale alert on a day nobody chose.
+
+    Confirmed against live payloads: {"startDateTime": "2026-04-30T05:34:03Z", "startTBD": false,
+    "startTBA": false, "endDateTime": "2026-08-28T12:30:00Z"}.
+    """
+    pub = ((raw.get("sales") or {}).get("public") or {})
+    if pub.get("startTBD") or pub.get("startTBA"):
+        return None, None
+
+    def one(key):
+        v = pub.get(key)
+        if not v:
+            return None
+        try:
+            return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except Exception:
+            return None
+    return one("startDateTime"), one("endDateTime")
+
+
 def _parse_start(dates):
     start = dates.get("start", {})
     if start.get("dateTime"):
@@ -296,6 +321,11 @@ def upsert_event(db: Session, e: dict, full: bool = True):
     event.title = name
     event.starts_at = _parse_start(dates)
     event.timezone = dates.get("timezone")
+    # Captured every pass, so a seller announcing an on-sale date later is picked up by the
+    # ordinary re-verify rather than needing a backfill of its own.
+    onsale_at, sales_end_at = _parse_sales(e)
+    event.onsale_at = onsale_at
+    event.sales_end_at = sales_end_at
     event.status = _map_status(dates)
     event.headliner_artist_id = headliner.id if headliner else None
     event.venue_id = venue.id if venue else None
@@ -595,6 +625,10 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
             # sweep produced almost the entire catalogue. The payload always had this.
             "bill": [a["name"] for a in atts if a.get("name")],
             "starts_at": _parse_start(dates), "timezone": dates.get("timezone"),
+            # Read here as well as in upsert_event. THIS is the writer the nightly re-verify
+            # uses, so patching only the other one left the columns empty across the whole
+            # catalogue — 0 of 7,700 — which is how the first attempt at this failed silently.
+            "sales": _parse_sales(e),
             "status": _map_status(dates),
             "price_amt": _price_from(pr), "price_cur": pr.get("currency"),
             "image_url": _pick_image(e.get("images")),
@@ -677,6 +711,7 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
         ev.title = p["name"]
         ev.starts_at = p["starts_at"]
         ev.timezone = p["timezone"]
+        ev.onsale_at, ev.sales_end_at = p["sales"]
         ev.status = p["status"]
         ev.headliner_artist_id = head.id if head else None
         ev.venue_id = venue.id if venue else None

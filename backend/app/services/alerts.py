@@ -45,6 +45,7 @@ from app.models.event_fact import EventFact
 from app.models.follow import Follow
 from app.models.notification import Notification
 from app.models.notification_pref import NotificationPref
+from app.services import reminders
 from app.models.venue import Venue
 
 # How far back to look for shows WE ingested recently. Comfortably wider than the
@@ -157,9 +158,12 @@ def alerts_for_changes(db: Session) -> dict:
     for ce in (db.query(CalendarEntry)
                  .filter(CalendarEntry.event_id.in_(event_ids),
                          CalendarEntry.is_suggestion.is_(False)).all()):
-        savers.setdefault(ce.event_id, []).append(ce.user_id)
+        # The per-show reminder level rides along with the saver, because one of these alerts
+        # — a price drop — is governed by it. Carried here rather than fetched again inside the
+        # loop, which would be one query per notification.
+        savers.setdefault(ce.event_id, []).append((ce.user_id, ce.reminder_level))
 
-    user_ids = {u for lst in savers.values() for u in lst}
+    user_ids = {u for lst in savers.values() for u, _lvl in lst}
     prefs = {p.user_id: p for p in
              db.query(NotificationPref).filter(NotificationPref.user_id.in_(user_ids)).all()} \
         if user_ids else {}
@@ -172,7 +176,14 @@ def alerts_for_changes(db: Session) -> dict:
         if policy and ev:
             ntype, priority, pref_attr = policy
             title, body = _wording(db, c, ev)
-            for uid in savers.get(c.event_id, []):
+            for uid, level in savers.get(c.event_id, []):
+                # The PER-SHOW level, which nothing consulted before this. A price drop is
+                # interesting on a show somebody is set on and noise on twenty they merely
+                # bookmarked, which is the whole point of the control on the plan card. Safety
+                # alerts are not in the table and are never filtered.
+                if not reminders.wants(level, ntype):
+                    skipped += 1
+                    continue
                 if not _allows(prefs, uid, pref_attr):
                     skipped += 1
                     continue

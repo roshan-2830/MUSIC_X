@@ -16,10 +16,20 @@ const CARD = "#14141b";
 const GOOD = "#7ef0b2";
 const INK = "#101204";
 
+/** What each level actually sends, matching the server's own table in services/reminders.py.
+ *
+ *  "Set times" is gone from High. The mockup promised "on-sale, price drops, set times &
+ *  day-of"; Ticketmaster returns doorsTime: null on every event we hold — 0 of 7,700 — so a
+ *  quarter of that sentence described data nobody has. Three real things beat four with one
+ *  invented.
+ *
+ *  Cancellations are named on every level on purpose. They are not governed by this control and
+ *  never will be, and somebody choosing "Minimal" deserves to know that the one alert that
+ *  matters is not what they are turning down. */
 const REMINDERS: { key: "minimal" | "normal" | "high"; label: string; note: string }[] = [
-  { key: "minimal", label: "Minimal", note: "Just a heads-up the week of the show." },
-  { key: "normal", label: "Normal", note: "On-sale, a week before, and day-of." },
-  { key: "high", label: "High", note: "Everything — on-sale, price drops, set times & day-of." },
+  { key: "minimal", label: "Minimal", note: "A heads-up the week of the show. Cancellations always." },
+  { key: "normal", label: "Normal", note: "On-sale, a week before, and day-of. Cancellations always." },
+  { key: "high", label: "High", note: "All of Normal, plus price drops. Cancellations always." },
 ];
 
 /** One node on the rail, plus the line that reaches it.

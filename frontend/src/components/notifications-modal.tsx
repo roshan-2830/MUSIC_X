@@ -27,6 +27,12 @@ const LOOK: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string
   // Somebody asked you to come. Without these two an invitation arrived as a grey bell
   // labelled "Update" — the generic fallback — which is how the most personal alert in the
   // app ended up looking like the least important one.
+  // The three time-driven reminders. Without these they arrived as the generic grey bell
+  // labelled "Update" — the same fallback the invite alerts fell into — which is how a day-of
+  // reminder ends up looking less urgent than a price change.
+  on_sale:         { icon: "pricetags",   color: ACCENT, label: "On sale" },
+  reminder_week:   { icon: "time",        color: WARN,   label: "One week" },
+  reminder_day:    { icon: "flash",       color: ACCENT, label: "Tonight" },
   invite:          { icon: "person-add",  color: ACCENT, label: "Invited" },
   invite_accepted: { icon: "people",      color: GOOD,   label: "Coming" },
 };

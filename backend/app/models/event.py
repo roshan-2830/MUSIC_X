@@ -21,6 +21,10 @@ class Event(Base):
     image_url = Column(String, nullable=True)                # event/artist artwork from the source
     starts_at = Column(DateTime(timezone=True), nullable=True)
     doors_at = Column(DateTime(timezone=True), nullable=True)  # NULL = "not published"
+    # From Ticketmaster's sales.public. NULL means the seller has not set a date (their
+    # startTBD/startTBA), which is different from "already on sale" and must not be guessed.
+    onsale_at = Column(DateTime(timezone=True), nullable=True)
+    sales_end_at = Column(DateTime(timezone=True), nullable=True)
     timezone = Column(String, nullable=True)
     status = Column(String, nullable=False, server_default="scheduled")  # scheduled | postponed | cancelled
     lineup_complete = Column(Boolean, nullable=False, server_default=text("false"))

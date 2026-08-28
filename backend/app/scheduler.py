@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.services.enrichment import enrich_all
 from app.services.refresh import refresh_catalogue, sweep_catalogue
+from app.services.reminders import run_reminders
 
 # Broad discovery sweep cadence (default every 3h) and the deeper daily refresh (default 24h).
 SWEEP_INTERVAL_HOURS = float(os.getenv("SWEEP_INTERVAL_HOURS", "3"))
@@ -35,6 +36,12 @@ ENRICH_INTERVAL_HOURS = float(os.getenv("ENRICH_INTERVAL_HOURS", "24"))
 # and 78% a photo, and 1,512 unscored concerts are waiting on an artist nobody has looked up.
 # Set ENRICH_LIMIT higher for a one-off catch-up; it only makes the run longer.
 ENRICH_LIMIT = int(os.getenv("ENRICH_LIMIT", "1500"))
+# Reminders are time-driven, not change-driven, which is why they need their own cadence: the
+# alerts engine only ever fires because Ticketmaster altered something, so nothing existed to
+# notice that a show is a week away. Hourly, because a day-of reminder that arrives eleven hours
+# late is no longer a day-of reminder, and the pass is a single query over saved shows inside the
+# next eight days — no external calls at all.
+REMINDER_INTERVAL_HOURS = float(os.getenv("REMINDER_INTERVAL_HOURS", "1"))
 
 # The startup guard still exists, and still works to the calendar day, but it now guards
 # against something narrower than it used to. It was there because a refresh cost ~3,800
@@ -128,6 +135,19 @@ def start_scheduler() -> None:
         # Ticketmaster budget — so there is no reason to make it wait a day for its turn.
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
     )
+    scheduler.add_job(
+        run_reminders,
+        trigger="interval",
+        hours=REMINDER_INTERVAL_HOURS,
+        id="reminders",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        # Runs shortly after startup like the others: on a laptop the process rarely survives an
+        # hour, and a reminder that only fires if the machine stays awake is not a reminder.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+    )
+
     # The deep refresh is the expensive one, so it gets a guard rather than a free pass.
     scheduler.add_job(
         _refresh_if_stale,
@@ -140,8 +160,9 @@ def start_scheduler() -> None:
     print(f"[scheduler] started — sweep every {SWEEP_INTERVAL_HOURS}h, "
           f"refresh every {REFRESH_INTERVAL_HOURS}h, "
           f"enrich every {ENRICH_INTERVAL_HOURS}h (limit {ENRICH_LIMIT}/stage) — "
-          f"sweep and enrich also run at startup; refresh runs at startup only if the "
-          f"catalogue was not already verified today")
+          f"reminders every {REMINDER_INTERVAL_HOURS}h — "
+          f"sweep, enrich and reminders also run at startup; refresh runs at startup only if "
+          f"the catalogue was not already verified today")
 
 
 def trigger_refresh_now(limit: int | None = None) -> None:
