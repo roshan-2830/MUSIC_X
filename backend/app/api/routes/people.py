@@ -31,7 +31,7 @@ from app.models.notification import Notification
 from app.models.profile import Profile
 from app.models.venue import Venue
 from app.schemas.people import (GoerOut, GoingOut, InviteIn, InviteOut, InviteResult,
-                                PersonOut)
+                                InviterOut, PersonOut)
 
 router = APIRouter(tags=["people"])
 
@@ -202,9 +202,26 @@ def who_is_going(
     and the page says so on its own.
     """
     uid = uuid.UUID(user_id)
+
+    # Asked for first and independently of who is going. Somebody arriving from a notification
+    # needs to know why they are looking at this show, and that is true even when nobody they
+    # follow has saved it — including when they do not follow the person who invited them, which
+    # happens the moment somebody unfollows.
+    invited_by = [
+        InviterOut(id=p.id, display_name=p.display_name, avatar_url=p.avatar_url,
+                   note=inv.note,
+                   when=inv.created_at.isoformat() if inv.created_at else None)
+        for inv, p in (db.query(EventInvite, Profile)
+                         .join(Profile, Profile.id == EventInvite.from_user_id)
+                         .filter(EventInvite.event_id == event_id,
+                                 EventInvite.to_user_id == uid)
+                         .order_by(EventInvite.created_at.desc())
+                         .all())
+    ]
+
     following = _following_ids(db, uid)
     if not following:
-        return GoingOut()
+        return GoingOut(invited_by=invited_by)
 
     rows = (db.query(Profile, CalendarEntry.booked)
               .join(CalendarEntry, CalendarEntry.user_id == Profile.id)
@@ -212,7 +229,7 @@ def who_is_going(
                       Profile.id.in_(following))
               .all())
     if not rows:
-        return GoingOut()
+        return GoingOut(invited_by=invited_by)
 
     # Ticket-holders first: "has a ticket" is the stronger signal, and the faces shown are the
     # first three.
@@ -229,6 +246,7 @@ def who_is_going(
         going_count=sum(1 for p in people if p.booked),
         interested_count=sum(1 for p in people if not p.booked),
         summary=_phrase(names, len(people) - len(names)),
+        invited_by=invited_by,
     )
 
 

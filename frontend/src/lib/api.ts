@@ -871,6 +871,15 @@ export type Goer = {
  *  `people` is EVERYONE, not just the faces that fit on the line — the sheet behind the line
  *  groups them, and the list is small enough that a second request would be a round trip for
  *  data already in hand. */
+/** Who invited you to this show, and what they said. */
+export type Inviter = {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+  note: string | null;
+  when: string | null;
+};
+
 export type Going = {
   people: Goer[];
   total: number;
@@ -880,6 +889,8 @@ export type Going = {
   interested_count: number;
   /** Written by the server so the phrasing lives in one place. */
   summary: string | null;
+  /** Anyone who invited you. Usually empty; several if two friends both thought of it. */
+  invited_by: Inviter[];
 };
 
 export type InviteResult = { invited: number; already: number; skipped: number };

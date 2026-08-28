@@ -30,6 +30,20 @@ class GoerOut(BaseModel):
     booked: bool = False
 
 
+class InviterOut(BaseModel):
+    """Who invited the caller to this show, and what they said.
+
+    Carried on the "who's going" response rather than fetched separately: the event page
+    already asks that question, and somebody arriving from a notification needs to be told why
+    they are looking at this show in the same breath as who else is going.
+    """
+    id: UUID
+    display_name: str | None = None
+    avatar_url: str | None = None
+    note: str | None = None
+    when: str | None = None
+
+
 class GoingOut(BaseModel):
     """The "who else is going" line, and the full list behind it.
 
@@ -47,6 +61,9 @@ class GoingOut(BaseModel):
     # reported back to us.
     going_count: int = 0
     interested_count: int = 0
+    # Whoever invited the caller to this show, most recent first. Usually nobody, sometimes one,
+    # occasionally several — a show two friends both thought of is worth showing as two.
+    invited_by: list[InviterOut] = []
     # Already-rendered sentence, so the phrasing lives in one place rather than being
     # reassembled by every screen that shows it.
     summary: str | None = None

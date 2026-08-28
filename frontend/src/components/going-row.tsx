@@ -18,6 +18,42 @@ const LINE = "#26262f";
  * Faces are not tappable yet — there is no profile screen to land on, and a name that looks
  * like a link and does nothing is worse than one that does not.
  */
+/**
+ * "Priya invited you · come with us"
+ *
+ * The thing that was missing. Tapping an invite notification opened the event and the page said
+ * nothing about why — you arrived at a concert with no idea who had asked you or what they had
+ * written. An invitation with no trace on the thing it points at is a message that deletes
+ * itself on delivery.
+ *
+ * Above the going line, because it answers the earlier question: first why you are here, then
+ * who else is.
+ */
+export function InvitedBanner({ going }: { going: Going | null }) {
+  const invites = going?.invited_by ?? [];
+  if (!invites.length) return null;
+  const first = invites[0];
+  const others = invites.length - 1;
+  const who = first.display_name || "Someone";
+  return (
+    <View style={styles.invited}>
+      <Avatar name={who} size={30} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.invitedText} numberOfLines={2}>
+          <Text style={styles.invitedWho}>{who}</Text>
+          {others > 0 ? ` and ${others} other${others > 1 ? "s" : ""}` : ""} invited you
+        </Text>
+        {/* The note is the personal half of the invitation and the only part written by hand.
+            Quoted so it reads as their words rather than the app's. */}
+        {first.note ? (
+          <Text style={styles.invitedNote} numberOfLines={2}>“{first.note}”</Text>
+        ) : null}
+      </View>
+      <Ionicons name="mail-open-outline" size={16} color={ACCENT} />
+    </View>
+  );
+}
+
 export default function GoingRow({
   going,
   onPress,
@@ -82,5 +118,15 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: CARD,
   },
   text: { color: "#f4f4f6", fontSize: 13.5, fontWeight: "600", lineHeight: 18 },
+
+  // Accent-bordered rather than accent-filled: it is a fact worth noticing, not a button.
+  invited: {
+    flexDirection: "row", alignItems: "center", gap: 11,
+    backgroundColor: "rgba(232,255,71,0.07)", borderColor: "rgba(232,255,71,0.35)",
+    borderWidth: 1, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12,
+  },
+  invitedText: { color: "#f4f4f6", fontSize: 13.5, lineHeight: 18 },
+  invitedWho: { fontWeight: "800" },
+  invitedNote: { color: MUTED, fontSize: 12.5, marginTop: 3, fontStyle: "italic" },
   sub: { color: MUTED, fontSize: 12, marginTop: 2 },
 });

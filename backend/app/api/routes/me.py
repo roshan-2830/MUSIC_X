@@ -23,6 +23,7 @@ from app.models.venue import Venue
 from app.models.genre import Genre
 from app.models.festival import Festival
 from app.models.lastfm_account import LastfmAccount
+from app.models.notification import Notification
 from app.models.profile import Profile
 from app.models.taste_profile import TasteProfile
 from app.api.routes.festivals import _cities_for, _to_out as _festival_out
@@ -108,6 +109,55 @@ def save_event(event_id: UUID, user_id: str = Depends(get_current_user_id), db: 
     if not exists:
         db.add(CalendarEntry(user_id=uid, event_id=event_id, state="interested", is_suggestion=False))
         db.commit()
+        # Only on the FIRST save, and only inside this branch: re-saving something already saved
+        # must not tell anybody twice, and `exists` is what makes the difference.
+        _tell_inviters(db, uid, event_id)
+
+
+def _tell_inviters(db: Session, uid: uuid.UUID, event_id: UUID) -> int:
+    """Tell whoever invited this person that they are coming.
+
+    This is what makes an invitation a conversation rather than a broadcast. Without it the
+    sender learns nothing unless they happen to reopen the event and read the "who's going"
+    line — so the person who did the inviting is the last to know it worked.
+
+    Sent once, on the first save only. Anybody who invited them hears; somebody who invited
+    them twice cannot, because an invite is unique per sender per show.
+
+    Failure here must never cost the user their save. The row is already committed by the time
+    this runs, and a broken notification is a smaller problem than a save that appears to have
+    failed — so everything below is inside a try.
+    """
+    from app.models.event_invite import EventInvite
+
+    try:
+        senders = [r[0] for r in db.query(EventInvite.from_user_id)
+                     .filter(EventInvite.event_id == event_id,
+                             EventInvite.to_user_id == uid).all()]
+        if not senders:
+            return 0
+        me = db.get(Profile, uid)
+        who = (me.display_name if me and me.display_name else "Someone")
+        ev = db.get(Event, event_id)
+        if ev is None:
+            return 0
+        for sender in set(senders):
+            db.add(Notification(
+                user_id=sender,
+                type="invite_accepted",
+                title=f"{who} is coming",
+                body=f"{who} saved {ev.title}" if ev.title else f"{who} saved the show",
+                event_id=ev.id,
+                artist_id=ev.headliner_artist_id,
+                # Good news about a plan, not news about a show falling apart.
+                priority="normal",
+            ))
+        db.commit()
+        return len(set(senders))
+    except Exception as e:
+        db.rollback()
+        print(f"[invites] could not notify inviters: {type(e).__name__} {e}")
+        return 0
 
 
 @router.delete("/saves/{event_id}", status_code=204)

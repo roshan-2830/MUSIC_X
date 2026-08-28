@@ -7,7 +7,7 @@ import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleS
 import { EventDetail, fetchEvent, getGoing, Going, getNearbyPlaces, NearbyPlaces} from "../lib/api";
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
-import GoingRow from "./going-row";
+import GoingRow, { InvitedBanner } from "./going-row";
 import GoingSheet from "./going-sheet";
 import InviteSheet from "./invite-sheet";
 import ExploreNearby from "./explore-nearby";
@@ -265,6 +265,10 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           {/* Directly under the rating, because it answers the same question in a different
               currency: the score says whether the show is good, this says whether anyone you
               know will be there. */}
+          {/* Why you are here, before who else is. Somebody arriving from a notification needs
+              the first question answered first. */}
+          <InvitedBanner going={going} />
+
           <GoingRow going={going} onPress={() => setGoingOpen(true)} />
 
           {invitedToast ? (

@@ -24,6 +24,11 @@ const LOOK: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string
   reinstated:   { icon: "checkmark-circle", color: GOOD, label: "Back on" },
   price_drop:   { icon: "pricetag",     color: GOOD,   label: "Cheaper" },
   new_show:     { icon: "musical-notes", color: ACCENT, label: "New date" },
+  // Somebody asked you to come. Without these two an invitation arrived as a grey bell
+  // labelled "Update" — the generic fallback — which is how the most personal alert in the
+  // app ended up looking like the least important one.
+  invite:          { icon: "person-add",  color: ACCENT, label: "Invited" },
+  invite_accepted: { icon: "people",      color: GOOD,   label: "Coming" },
 };
 const lookOf = (t: string) => LOOK[t] ?? { icon: "notifications" as const, color: MUTED, label: "Update" };
 
