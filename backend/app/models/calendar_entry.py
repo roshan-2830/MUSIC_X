@@ -28,6 +28,13 @@ class CalendarEntry(Base):
     booked = Column(Boolean, nullable=False, server_default=text("false"))
     booked_via_link = Column(Boolean, nullable=False, server_default=text("false"))
     ticket_image_url = Column(String, nullable=True)   # uploaded ticket photo (Supabase Storage URL later)
+    # Where the ticket claim came from, and what it pointed at. `booked` alone says somebody has
+    # a ticket; these say why we believe it. 'pasted' | 'photo' | 'declared' — not equally
+    # strong, and kept apart so a later automatic source can tell itself from a self-report.
+    ticket_provider = Column(String, nullable=True)     # "Ticketmaster", "Dice", ...
+    ticket_ref = Column(String, nullable=True)          # the order/booking reference
+    ticket_source = Column(String, nullable=True)
+    booked_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
