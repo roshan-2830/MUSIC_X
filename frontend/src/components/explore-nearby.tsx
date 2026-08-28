@@ -76,7 +76,14 @@ function frameUrl(q: string, currency: string, locale: string): string {
 /** Where we send people when the widget will not load: a real GetYourGuide search, carrying the
  *  partner id so a booking still counts. */
 function searchUrl(q: string): string {
-  const p = new URLSearchParams({ q, partner_id: PARTNER_ID, cmp: CAMPAIGN });
+  // Empty attribution params are left OUT rather than sent blank. `partner_id=` with nothing
+  // after it is not a partner id, and a URL that carries one looks like a broken integration
+  // to whoever reads it — including GetYourGuide.
+  const p = new URLSearchParams({ q });
+  if (PARTNER_ID) {
+    p.set("partner_id", PARTNER_ID);
+    if (CAMPAIGN) p.set("cmp", CAMPAIGN);
+  }
   return `https://www.getyourguide.com/s/?${p.toString()}`;
 }
 
@@ -152,6 +159,17 @@ export default function ExploreNearby({
   const [failed, setFailed] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // THE EMBED IS NATIVE-ONLY, and this is the second correction. A WebView loads the frame as
+  // a top-level document, which is the case verified to render. In a web iframe it came back
+  // blank every time from an unapproved origin — while still posting height messages, 44 of
+  // them, so the height that drives `ready` is not evidence of anything. Trusting it on web
+  // meant a blank white box that never fell back to the link, because the failure timer was
+  // cancelled by the very message that proved nothing.
+  //
+  // So web shows the link, which works today and earns the same commission. When GetYourGuide
+  // approves this partner id and this domain, the iframe can come back by deleting one line.
+  const canEmbed = Platform.OS !== "web" && !!PARTNER_ID;
+
   const gotHeight = useCallback((h: number) => {
     if (!h || h < 80) return;
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
@@ -161,46 +179,20 @@ export default function ExploreNearby({
   }, []);
 
   useEffect(() => {
-    if (!PARTNER_ID || !q) return;
+    if (!canEmbed || !q) return;
     timer.current = setTimeout(() => setFailed(true), GIVE_UP_MS);
     return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [q]);
-
-  // Listening on web, where the iframe posts to our own window rather than through a bridge.
-  useEffect(() => {
-    if (Platform.OS !== "web" || !PARTNER_ID || !q) return;
-    const onMessage = (e: MessageEvent) => {
-      if (String(e.origin).indexOf("getyourguide") === -1) return;
-      let d: any = e.data;
-      try { d = typeof d === "string" ? JSON.parse(d) : d; } catch { return; }
-      if (d && d.channel === "GYG" && d.height) gotHeight(d.height);
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [q, gotHeight]);
+  }, [q, canEmbed]);
 
   if (!q) return null;
 
-  if (!PARTNER_ID) {
-    // Nothing in production. In development, say why, so a blank space is not mistaken for a
-    // broken component.
-    if (!__DEV__) return null;
-    return (
-      <View style={styles.card}>
-        <Text style={styles.h}>Things to Do Near {venueName ?? "the venue"}</Text>
-        <View style={styles.state}>
-          <Ionicons name="key-outline" size={16} color={MUTED} />
-          <Text style={styles.stateText}>
-            Set EXPO_PUBLIC_GYG_PARTNER_ID in .env to switch this on. Any value renders the
-            widget; only a real approved id earns commission.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
+  // The link is shown WHETHER OR NOT there is a partner id, and that is a correction. Gating
+  // the whole section meant that with no id configured there was no way to reach GetYourGuide
+  // at all — the feature was invisible rather than merely unattributed. A plain outbound link
+  // earns nothing without an id, which is a reason to get the id, not a reason to hide the
+  // only route to tours near the venue.
   const url = frameUrl(q, currency, locale);
-  const ready = height > 0 && !failed;
+  const ready = canEmbed && height > 0 && !failed;
 
   return (
     <View style={styles.card}>
@@ -209,14 +201,14 @@ export default function ExploreNearby({
         Tours, tickets and experiences you can book around the show{city ? ` in ${city}` : ""}.
       </Text>
 
-      {!ready && !failed ? (
+      {canEmbed && !ready && !failed ? (
         <View style={styles.state}>
           <ActivityIndicator color={ACCENT} />
           <Text style={styles.stateText}>Finding things to do…</Text>
         </View>
       ) : null}
 
-      {!failed ? (
+      {canEmbed && !failed ? (
         // A white surface on purpose. The widget renders its own light theme with dark text and
         // cannot be told otherwise, so it is framed as the third-party card it is rather than
         // dropped onto a dark background where it would look like a rendering fault.
@@ -268,18 +260,20 @@ export default function ExploreNearby({
       {/* Always present, not only on failure. On web the embed stays blank until GetYourGuide
           approves the partner id and the domain, and this link works today and earns the same
           commission — so it is the thing that actually carries the web build. */}
-      <Pressable style={[styles.btn, failed && styles.btnLoud]}
+      {/* Loud wherever it is the only way through — which is web, and anywhere the embed
+          failed. Quiet underneath a working widget, where it is a "see more". */}
+      <Pressable style={[styles.btn, !ready && styles.btnLoud]}
                  onPress={() => Linking.openURL(searchUrl(q))}>
-        <Ionicons name="ticket-outline" size={14} color={failed ? "#101204" : ACCENT} />
-        <Text style={[styles.btnText, failed && styles.btnTextLoud]}>
-          {failed
-            ? `See things to do near ${venueName ?? "the venue"}`
-            : "Browse all activities on GetYourGuide"}
+        <Ionicons name="ticket-outline" size={14} color={!ready ? "#101204" : ACCENT} />
+        <Text style={[styles.btnText, !ready && styles.btnTextLoud]}>
+          {ready
+            ? "Browse all activities on GetYourGuide"
+            : `See things to do near ${venueName ?? "the venue"}`}
         </Text>
-        <Ionicons name="open-outline" size={12} color={failed ? "#101204" : ACCENT} />
+        <Ionicons name="open-outline" size={12} color={!ready ? "#101204" : ACCENT} />
       </Pressable>
 
-      {failed && lat != null && lng != null ? (
+      {!ready && lat != null && lng != null ? (
         <Pressable
           style={styles.btn}
           onPress={() =>
@@ -298,8 +292,9 @@ export default function ExploreNearby({
       <View style={styles.promise}>
         <Ionicons name="shield-checkmark" size={13} color="#7ef0b2" />
         <Text style={styles.promiseText}>
-          We earn a commission if you book an activity here — it never changes what's shown or
-          the order it's in. Concert tickets are different: we earn nothing on those.
+          {PARTNER_ID
+            ? "We earn a commission if you book an activity here — it never changes what's shown or the order it's in. Concert tickets are different: we earn nothing on those."
+            : "Activities open on GetYourGuide. We earn nothing from them yet, and concert tickets never earn us anything."}
         </Text>
       </View>
     </View>
