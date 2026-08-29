@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, nulls_last, or_
 from sqlalchemy.orm import Session
 
-from app.api.routes.events import _to_list_item, _to_list_items
+from app.api.routes.events import _to_list_item, _to_list_items, with_related
 from app.core.security import get_current_user_id
 from app.db.session import get_db
 from app.models.artist import Artist
@@ -93,7 +93,7 @@ def list_saves(user_id: str = Depends(get_current_user_id), db: Session = Depend
     """The user's saved shows, soonest first."""
     uid = uuid.UUID(user_id)
     events = (
-        db.query(Event)
+        with_related(db.query(Event))
         .join(CalendarEntry, CalendarEntry.event_id == Event.id)
         .filter(CalendarEntry.user_id == uid, CalendarEntry.is_suggestion.is_(False))
         .order_by(nulls_last(Event.starts_at.asc()))
@@ -287,10 +287,10 @@ def calendar(
     if mode == "mine":
         # Saved only. No follow-derived clauses: this scope answers "what am I going to",
         # and the only honest source for that is what the person bookmarked.
-        events = q.filter(Event.id.in_(saved_event_ids)).all() if saved_event_ids else []
+        events = with_related(q).filter(Event.id.in_(saved_event_ids)).all() if saved_event_ids else []
     else:
         events = (
-            q.join(Venue, Venue.id == Event.venue_id)
+            with_related(q).join(Venue, Venue.id == Event.venue_id)
              .filter(Venue.city_id == prof.home_city_id).all()
             if prof and prof.home_city_id else []
         )

@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import func, nulls_last
 from sqlalchemy.orm import Session
 
-from app.api.routes.events import _to_list_items
+from app.api.routes.events import _to_list_items, with_related
 from app.db.session import SessionLocal, get_db
 from app.models.artist import Artist
 from app.models.event import Event
@@ -258,7 +258,7 @@ def artist_detail(
     genres = []
     if ev_ids:
         events = (
-            db.query(Event)
+            with_related(db.query(Event))
             .filter(Event.id.in_(ev_ids))
             .order_by(nulls_last(Event.starts_at.asc()))
             .all()

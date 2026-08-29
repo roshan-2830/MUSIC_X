@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, func, nulls_last, or_
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import case, func, inspect as sa_inspect, nulls_last, or_
+from sqlalchemy.orm import Session, aliased, joinedload
 
 from app.db.session import get_db
 from app.models.event import Event
@@ -47,25 +47,77 @@ def _to_list_item(db: Session, ev: Event) -> EventListItem:
     )
 
 
+def with_related(q):
+    """Load an Event query's venue, city and headliner IN THE SAME QUERY.
+
+    Apply this to any Event query whose rows are handed to _to_list_items. Without it the
+    serialiser has to fetch those three things itself, which is three extra round trips to the
+    database — and a round trip is the expensive unit here, not the row count. On the deployed
+    API a single trivial query measured 2.2 seconds, so four trips is most of a slow search.
+
+    joinedload emits LEFT OUTER JOINs rather than follow-up SELECTs, so a search that cost four
+    round trips costs one. _to_list_items notices what is already loaded and asks for nothing.
+    """
+    return q.options(
+        joinedload(Event.venue).joinedload(Venue.city),
+        joinedload(Event.headliner),
+    )
+
+
+def _unloaded(ev: Event, attr: str) -> bool:
+    """True when this attribute would hit the database if touched."""
+    return attr in sa_inspect(ev).unloaded
+
+
 def _to_list_items(db: Session, events: list[Event]) -> list[EventListItem]:
-    """Batch version of _to_list_item — loads all venues + cities in 2 queries
-    instead of 2 per event (avoids an N+1 when returning many events)."""
-    venue_ids = {e.venue_id for e in events if e.venue_id}
-    venues = {v.id: v for v in db.query(Venue).filter(Venue.id.in_(venue_ids)).all()} if venue_ids else {}
-    city_ids = {v.city_id for v in venues.values() if v.city_id}
-    cities = {c.id: c for c in db.query(City).filter(City.id.in_(city_ids)).all()} if city_ids else {}
-    # One more batched query, same reason as venues and cities: never per-event.
-    artist_ids = {e.headliner_artist_id for e in events if e.headliner_artist_id}
-    artists = ({a.id: a.name for a in db.query(Artist).filter(Artist.id.in_(artist_ids)).all()}
-               if artist_ids else {})
+    """Serialise events, fetching ONLY what the caller did not already load.
+
+    Callers that used with_related() arrive with everything joined in, so the loops below query
+    nothing at all. Callers that did not still get the old batched behaviour — never one query
+    per event. That is why this checks rather than assumes: reading ev.venue on an event that
+    was not eager-loaded would lazy-load it, turning a fixed three queries into one per event,
+    which is far worse than what it replaced.
+    """
+    # Venue AND city together. Even on the fallback path this is one query rather than two:
+    # a venue's city is a join away, and joining costs nothing next to a second round trip.
+    need_venues = {e.venue_id for e in events
+                   if e.venue_id and _unloaded(e, "venue")}
+    fetched: dict = {}
+    if need_venues:
+        rows = (db.query(Venue, City)
+                  .outerjoin(City, Venue.city_id == City.id)
+                  .filter(Venue.id.in_(need_venues)).all())
+        fetched = {v.id: (v, c) for v, c in rows}
+
+    need_artists = {e.headliner_artist_id for e in events
+                    if e.headliner_artist_id and _unloaded(e, "headliner")}
+    names = ({a.id: a.name for a in
+              db.query(Artist.id, Artist.name).filter(Artist.id.in_(need_artists)).all()}
+             if need_artists else {})
+
+    def venue_city(ev: Event):
+        if not ev.venue_id:
+            return None, None
+        if ev.venue_id in fetched:
+            return fetched[ev.venue_id]
+        v = ev.venue                      # already loaded — free
+        return v, (v.city if v else None)
+
+    def headliner_name(ev: Event):
+        if not ev.headliner_artist_id:
+            return None
+        if ev.headliner_artist_id in names:
+            return names[ev.headliner_artist_id]
+        a = ev.headliner                  # already loaded — free
+        return a.name if a else None
+
     out = []
     for ev in events:
-        venue = venues.get(ev.venue_id) if ev.venue_id else None
-        city = cities.get(venue.city_id) if venue and venue.city_id else None
+        venue, city = venue_city(ev)
         out.append(EventListItem(
             id=ev.id, title=ev.title, starts_at=ev.starts_at, timezone=ev.timezone,
             status=ev.status,
-            headliner=artists.get(ev.headliner_artist_id) if ev.headliner_artist_id else None,
+            headliner=headliner_name(ev),
             headliner_artist_id=ev.headliner_artist_id,
             venue_name=venue.name if venue else None,
             city=city.name if city else None,
@@ -105,7 +157,7 @@ def list_events(
         q = q.order_by(nulls_last(Event.mxs.desc()))
     else:
         q = q.order_by(nulls_last(Event.starts_at.asc()))
-    return _to_list_items(db, q.limit(limit).all())
+    return _to_list_items(db, with_related(q).limit(limit).all())
 
 
 @router.get("/search", response_model=list[EventListItem])
@@ -119,7 +171,7 @@ def search_events(
     score_events_by_ids(ids)        # MXS score just these results (Deezer)
     if not ids:
         return []
-    events = db.query(Event).filter(Event.id.in_(ids)).all()
+    events = with_related(db.query(Event)).filter(Event.id.in_(ids)).all()
     by_id = {e.id: e for e in events}
     ordered = [by_id[i] for i in ids if i in by_id]   # keep relevance order
     return _to_list_items(db, ordered)
@@ -178,7 +230,7 @@ def search_local(
     # results. min(rank) collapses them to one row at its strongest reason for matching.
     best = func.min(rank).label("match_rank")
     rows = (
-        joined(db.query(Event, best))
+        joined(db.query(Event.id, best))
         .filter(
             or_(
                 ts.contains(Event.title, safe),
@@ -213,7 +265,7 @@ def search_local(
         fuzzy_rank = case((ts.is_close(Artist.name, raw), 0), else_=1)
         best_rank, best_sim = func.min(fuzzy_rank).label("fr"), func.max(score).label("sim")
         rows = (
-            joined(db.query(Event, best_rank, best_sim))
+            joined(db.query(Event.id, best_rank, best_sim))
             .filter(close)
             .group_by(Event.id)
             .order_by(best_rank, best_sim.desc(), nulls_last(Event.starts_at.asc()))
@@ -221,7 +273,17 @@ def search_local(
             .all()
         )
 
-    return _to_list_items(db, [r[0] for r in rows])
+    # The ranking above must GROUP BY, and a grouped query cannot also carry the extra columns
+    # a join-load needs. So it returns IDS ONLY, and the rows are fetched once, joined — two
+    # round trips for the whole endpoint instead of four. On the deployed API, where one round
+    # trip measured over two seconds, that is most of the wait.
+    ids = [r[0] for r in rows]
+    if not ids:
+        return []
+    found = {e.id: e for e in with_related(db.query(Event)).filter(Event.id.in_(ids)).all()}
+    # Reordered in Python: IN () returns rows in whatever order the database likes, and the
+    # ranking is the entire point of this endpoint.
+    return _to_list_items(db, [found[i] for i in ids if i in found])
 
 
 @router.get("/{event_id}", response_model=EventDetail)

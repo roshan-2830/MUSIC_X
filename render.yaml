@@ -11,6 +11,21 @@ services:
     name: musicx-api
     runtime: python
     rootDir: backend
+    # SINGAPORE, NOT THE DEFAULT. Leaving this unset meant `oregon`, which put the API on the
+    # other side of the planet from the database (Supabase, aws-1-ap-south-1, Mumbai). That
+    # distance is not paid once per request — it is paid once per QUERY, and a single search
+    # makes four. Measured against the Oregon instance: one trivial `SELECT 1` took 2.2s, and
+    # /events/search-local took 6-18s where the same code against the same database takes 0.5-1s
+    # from a laptop in India.
+    #
+    # Singapore is Render's closest region to both the database and the people using the app;
+    # there is no India region. It cuts each round trip from roughly 230ms to 60ms.
+    #
+    # This line does NOTHING to the service that already exists — Render's blueprint spec says
+    # region "can't be modified after creation" and a differing value is ignored on sync. It
+    # applies when the service is recreated, which is the only way to move a region, and it is
+    # here so that recreation cannot land back in Oregon by accident.
+    region: singapore
     # FREE TIER, deliberately, and it comes with a real cost: Render stops a free instance
     # after 15 minutes without traffic. This process IS the scheduler, so while it is asleep
     # nothing refreshes, no reminder fires, and no notification is delivered — and the first
