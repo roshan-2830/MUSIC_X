@@ -58,8 +58,6 @@ export default function MeScreen() {
       detail: "Every show you’ve been to", go: () => setPassport(true) },
     { icon: "star-outline", label: "Bucket list", detail: "Artists to see before you die",
       go: notYet("Bucket list") },
-    { icon: "link-outline", label: "Concert history",
-      detail: "Import past shows from setlist.fm", go: () => setSetlistfm(true) },
   ];
 
   const settings: Row[] = [
@@ -125,7 +123,8 @@ export default function MeScreen() {
       ) : null}
 
       <Modal visible={passport} animationType="slide" onRequestClose={() => setPassport(false)}>
-        <PassportView onClose={() => setPassport(false)} />
+        <PassportView onClose={() => setPassport(false)}
+                      onImport={() => { setPassport(false); setSetlistfm(true); }} />
       </Modal>
       <Modal visible={setlistfm} animationType="slide" onRequestClose={() => setSetlistfm(false)}>
         <SetlistfmLinkView onClose={() => setSetlistfm(false)} />

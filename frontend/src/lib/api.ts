@@ -1132,7 +1132,10 @@ export type PassportShow = {
   venue_name: string | null; city: string | null; country: string | null;
   seen_on: string | null; source: string; evidence_url: string | null;
 };
-export type PassportStamp = { country: string; shows: number; first_seen_on: string | null };
+export type PassportStamp = {
+  country: string; shows: number; first_seen_on: string | null; since_year: number | null;
+};
+export type GenreShare = { name: string; shows: number };
 export type Passport = {
   display_name: string | null; avatar_url: string | null; home_city: string | null;
   member_since: number | null;
@@ -1144,6 +1147,7 @@ export type Passport = {
     rungs: { at: number; label: string; reached: boolean }[];
     progress: number; next_label: string | null; next_at: number | null;
   };
+  genres: GenreShare[];
   stamps: PassportStamp[];
   recent: PassportShow[];
 };

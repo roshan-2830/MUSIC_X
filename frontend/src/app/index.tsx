@@ -16,6 +16,8 @@ import LastfmConnect from "../components/lastfm-connect";
 import NotificationBell from "../components/notification-bell";
 import NotificationsModal from "../components/notifications-modal";
 import SearchBar from "../components/search-bar";
+import SetlistfmConnect from "../components/setlistfm-connect";
+import SetlistfmLinkView from "../components/setlistfm-link";
 import { City, Festival, fetchEvents, getFestivals, getRecommended, MusicEvent, RecommendedEvent } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { detectCurrentCity } from "../lib/location";
@@ -100,6 +102,7 @@ export default function HomeScreen() {
   // bumping this re-checks the unread badge (after the inbox is closed)
   const [badgeKey, setBadgeKey] = useState(0);
   const [triedLocate, setTriedLocate] = useState(false);
+  const [setlistfmOpen, setSetlistfmOpen] = useState(false);
 
   // Register this phone for notifications, and open the right show when one is tapped.
   // Home is where a tap lands because this is the screen that owns the detail modal — and a
@@ -271,6 +274,7 @@ export default function HomeScreen() {
             <View style={{ paddingHorizontal: 16 }}>
               <SearchBar />
             </View>
+            <SetlistfmConnect onOpen={() => setSetlistfmOpen(true)} />
             <ArtistsRow
               refreshKey={followsKey}
               onOpenArtist={setArtistName}
@@ -385,6 +389,10 @@ export default function HomeScreen() {
 
       <Modal visible={!!selectedId} animationType="slide" onRequestClose={() => setSelectedId(null)}>
         {selectedId ? <EventDetailView id={selectedId} onClose={() => setSelectedId(null)} /> : null}
+      </Modal>
+      <Modal visible={setlistfmOpen} animationType="slide"
+             onRequestClose={() => setSetlistfmOpen(false)}>
+        <SetlistfmLinkView onClose={() => setSetlistfmOpen(false)} />
       </Modal>
       <CityPicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onSelect={selectCity} />
       <Modal

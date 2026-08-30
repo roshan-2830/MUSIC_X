@@ -13,13 +13,22 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user_id
 from app.db.session import get_db
+from sqlalchemy import func
+
 from app.models.city import City
+from app.models.event_genre import EventGenre
+from app.models.genre import Genre
 from app.models.passport_entry import PassportEntry
 from app.models.setlistfm_account import SetlistfmAccount
 from app.models.profile import Profile
 from app.services import passport as pp
 
 router = APIRouter(prefix="/me/passport", tags=["passport"])
+
+
+class GenreShare(BaseModel):
+    name: str
+    shows: int
 
 
 class PassportShow(BaseModel):
@@ -41,6 +50,7 @@ class Stamp(BaseModel):
     country: str
     shows: int
     first_seen_on: str | None
+    since_year: int | None
 
 
 class PassportOut(BaseModel):
@@ -58,6 +68,11 @@ class PassportOut(BaseModel):
     next_tier: str | None
     shows_to_next_tier: int | None
     milestones: dict
+    # The mockup's "Your sound". Only what we can actually know: a genre comes from the event a
+    # stamp is linked to, and an imported gig from 2009 has no event, so this covers some of the
+    # passport rather than all of it. Empty when nothing is known — an invented favourite genre
+    # would be the one made-up thing on a document about not making things up.
+    genres: list[GenreShare]
     stamps: list[Stamp]
     recent: list[PassportShow]
 
@@ -85,6 +100,18 @@ def my_passport(limit: int = 50,
             cur["first_seen_on"] = e.seen_on
     stamps = sorted(by_country.values(), key=lambda c: (-c["shows"], c["country"]))
 
+    # Genres, for entries that point at an event we hold.
+    ev_ids = [e.event_id for e in entries if e.event_id]
+    genres: list = []
+    if ev_ids:
+        rows = (db.query(Genre.name, func.count(EventGenre.event_id))
+                  .join(EventGenre, EventGenre.genre_id == Genre.id)
+                  .filter(EventGenre.event_id.in_(ev_ids))
+                  .group_by(Genre.name)
+                  .order_by(func.count(EventGenre.event_id).desc())
+                  .limit(3).all())
+        genres = [GenreShare(name=n, shows=c) for n, c in rows]
+
     prof = db.get(Profile, uid)
     home = db.get(City, prof.home_city_id) if prof and prof.home_city_id else None
 
@@ -98,8 +125,10 @@ def my_passport(limit: int = 50,
         top_artist=s["top_artist"], top_artist_count=s["top_artist_count"],
         tier=s["tier"], next_tier=s["next_tier"],
         shows_to_next_tier=s["shows_to_next_tier"], milestones=s["milestones"],
+        genres=genres,
         stamps=[Stamp(country=c["country"], shows=c["shows"],
-                      first_seen_on=c["first_seen_on"].isoformat() if c["first_seen_on"] else None)
+                      first_seen_on=c["first_seen_on"].isoformat() if c["first_seen_on"] else None,
+                      since_year=c["first_seen_on"].year if c["first_seen_on"] else None)
                 for c in stamps],
         recent=[PassportShow(
             id=e.id, event_id=e.event_id, artist_name=e.artist_name,
