@@ -380,8 +380,11 @@ export async function unfollowArtist(artistId: string): Promise<void> {
 }
 
 // Events matching the artists you follow, soonest first, each with a reason line.
-export async function getRecommended(): Promise<RecommendedEvent[]> {
-  const res = await fetch(`${API_BASE_URL}/me/recommended`, { headers: await authHeaders() });
+export async function getRecommended(limit?: number): Promise<RecommendedEvent[]> {
+  // The home row shows twelve. Asking for everything cost 1.87 MB an app launch and put the
+  // database over its monthly allowance three times over; the browse screen asks for more.
+  const q = limit ? `?limit=${limit}` : "";
+  const res = await fetch(`${API_BASE_URL}/me/recommended${q}`, { headers: await authHeaders() });
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
 }

@@ -224,7 +224,7 @@ export default function SearchScreen() {
     setLoading(true); setError(null); setSearched(true); setBrowsing(true);
     setArtists([]); setFestResults([]);
     try {
-      if (which === "recommended") setRaw(await getRecommended());
+      if (which === "recommended") setRaw(await getRecommended(200));
       else if (which === "rated") setRaw(await fetchEvents("mxs", 200));
       else if (which === "city" && params.city_id)
         setRaw(await fetchEvents("date", 200, params.city_id));

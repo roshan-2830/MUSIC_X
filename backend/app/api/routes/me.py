@@ -38,6 +38,12 @@ from app.services.scoring import score_events_by_ids
 from app.services.taste import bucketize, genre_weights
 from app.services.taste_import import disconnect_lastfm, import_lastfm
 
+# The home row shows twelve, after balancing to at most two per artist or genre — so it needs
+# more than twelve to choose from, and nothing like three thousand. The browse screen asks for
+# more explicitly.
+RECOMMENDED_DEFAULT = 60
+RECOMMENDED_MAX = 200
+
 router = APIRouter(prefix="/me", tags=["me"])
 
 
@@ -487,7 +493,8 @@ def unfollow_artist(
 
 
 @router.get("/recommended", response_model=list[RecommendedEvent])
-def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
+def recommended(limit: int = Query(RECOMMENDED_DEFAULT, ge=1, le=RECOMMENDED_MAX),
+                user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     """Upcoming events matched to the user's taste — soonest first within each tier.
 
     Tier A: the line-up features an artist the user follows / listens to.
@@ -584,6 +591,12 @@ def recommended(user_id: str = Depends(get_current_user_id), db: Session = Depen
     for ev, bucket, _w in b_ordered:
         meta[ev.id] = ("genre", bucket, f"Matches your {bucket} taste")
 
+    # CUT BEFORE SERIALISING, not after. The tiers are already in the order the screen wants,
+    # so the tail is the part nobody scrolls to — and building it cost 1.87 MB per app launch,
+    # of the 2.17 MB an app launch cost in total. Fifty people opening this five times a day
+    # came to 15.9 GB a month against a 5.5 GB allowance, which is what Supabase wrote about.
+    # The home screen renders twelve of these.
+    events = events[:limit]
     out = []
     for item in _to_list_items(db, events):
         kind, label, reason = meta[item.id]
