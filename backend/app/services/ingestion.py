@@ -636,7 +636,12 @@ def _batch_upsert_search(db: Session, events: list, authoritative: bool = False)
             "raw": e,
         })
     if not parsed:
-        return []
+        # TWO values, because the signature promises a tuple and all four call sites unpack
+        # one. A bare [] raised "not enough values to unpack" the moment Ticketmaster returned
+        # nothing usable — a search for a term with no matches, or a sweep whose page held only
+        # add-ons. That is a 500 on the live-search endpoint and an exception out of the sweep
+        # and refresh jobs, from the one input nobody thinks to test.
+        return [], []
 
     # --- 1. existing sources: one query (tm_id -> event_id) ---
     tm_ids = list({p["tm_id"] for p in parsed})
