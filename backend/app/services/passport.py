@@ -69,6 +69,47 @@ def milestones_for(count: int) -> list:
     }
 
 
+# Ticketmaster titles a festival slot "Festival - Artist" and then marks the FESTIVAL as the
+# headliner, leaving the act somebody actually went to see filed as support. So a passport built
+# straight from headliner_artist_id says "Most-seen artist: All Points East", which is a festival.
+_SEPARATORS = (" - ", " – ", " — ", ": ")
+
+
+def best_artist_name(db: Session, ev: Event) -> str | None:
+    """Who this show was actually for.
+
+    Prefers the headliner, EXCEPT where the headliner is just the left-hand side of a
+    "Festival - Artist" title and the line-up contains the right-hand side. In that case the
+    right-hand side is the act, whatever the source flagged.
+    """
+    headliner = db.get(Artist, ev.headliner_artist_id) if ev.headliner_artist_id else None
+    title = (ev.title or "").strip()
+    if not headliner:
+        return title or None
+
+    for sep in _SEPARATORS:
+        if sep not in title:
+            continue
+        left, right = title.split(sep, 1)
+        if left.strip().casefold() != headliner.name.strip().casefold():
+            continue
+        # The headliner is the festival. Look for the named act on the bill.
+        want = right.strip().casefold()
+        from app.models.event_artist import EventArtist
+        for (name,) in (db.query(Artist.name)
+                          .join(EventArtist, EventArtist.artist_id == Artist.id)
+                          .filter(EventArtist.event_id == ev.id).all()):
+            if name.strip().casefold() == want:
+                return name
+        # NO MATCH ON THE BILL means the right-hand side is not an act at all — it is a tour
+        # name. "AC/DC - POWER UP TOUR 2026" and "The Weeknd: After Hours Til Dawn Tour" are
+        # exactly this shape, and an earlier version of this rule renamed both of them after
+        # their tours. The swap only happens when the name after the separator is somebody we
+        # can see on the bill.
+        break
+    return headliner.name
+
+
 def record_attendance(db: Session, user_id, ev: Event, source: str = "music_x",
                       evidence_url: str | None = None) -> PassportEntry | None:
     """Write the entry for a show somebody has confirmed attending. Idempotent.
@@ -96,7 +137,7 @@ def record_attendance(db: Session, user_id, ev: Event, source: str = "music_x",
         artist_id=ev.headliner_artist_id,
         # Denormalised on purpose: an imported show may name an artist we have never heard of,
         # and a passport must still be readable if the catalogue row is later merged away.
-        artist_name=artist.name if artist else (ev.title or None),
+        artist_name=best_artist_name(db, ev),
         venue_name=venue.name if venue else None,
         city=city.name if city else None,
         country=city.country if city else None,

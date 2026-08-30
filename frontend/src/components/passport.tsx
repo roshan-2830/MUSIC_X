@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import PassportHero from "./passport-hero";
+import PassportHero, { MONO, SERIF } from "./passport-hero";
 import { getPassport, Passport, PassportShow } from "../lib/api";
 import { flagEmoji } from "../lib/format";
 
@@ -346,14 +346,18 @@ const styles = StyleSheet.create({
   verified: { position: "absolute", bottom: -6, right: -6, width: 22, height: 22,
               borderRadius: 11, backgroundColor: ACCENT, alignItems: "center",
               justifyContent: "center", borderWidth: 2, borderColor: "#20204a" },
-  docName: { color: "#fff", fontSize: 18, fontWeight: "800", marginBottom: 8 },
+  // Georgia italic, as the mockup has it — a real passport's name line is a serif, and that one
+  // detail does more than any amount of styling to make this read as a document.
+  docName: { color: "#fff", fontSize: 22, fontWeight: "900", marginBottom: 8,
+             fontFamily: SERIF, fontStyle: "italic", letterSpacing: -0.3 },
   docRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center",
             paddingVertical: 3 },
   docRowL: { color: "rgba(255,255,255,0.55)", fontSize: 11 },
   docRowV: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  mrz: { color: "rgba(255,255,255,0.42)", fontSize: 11, letterSpacing: 1.4,
-         paddingHorizontal: 14, paddingBottom: 12,
-         fontFamily: "Courier", fontVariant: ["tabular-nums"] },
+  mrz: { color: "rgba(255,255,255,0.5)", fontSize: 11, letterSpacing: 2,
+         paddingHorizontal: 16, paddingVertical: 11,
+         backgroundColor: "rgba(0,0,0,0.28)",
+         fontFamily: MONO, fontVariant: ["tabular-nums"] },
 
   ms: { backgroundColor: "#14141b", borderRadius: 14, padding: 14, marginTop: 14,
         borderWidth: 1, borderColor: "#23232c" },
@@ -412,7 +416,8 @@ const styles = StyleSheet.create({
   importS: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 3 },
 
   yearHead: { flexDirection: "row", alignItems: "baseline", gap: 10, marginBottom: 8 },
-  yearNum: { color: ACCENT, fontSize: 20, fontWeight: "900" },
+  yearNum: { color: ACCENT, fontSize: 30, fontWeight: "900", fontFamily: SERIF,
+             letterSpacing: -1 },
   yearMeta: { color: MUTED, fontSize: 12 },
   tl: { flexDirection: "row", gap: 12 },
   tlNode: { alignItems: "center", width: 12 },
