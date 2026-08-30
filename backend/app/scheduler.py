@@ -30,6 +30,10 @@ SWEEP_INTERVAL_HOURS = float(os.getenv("SWEEP_INTERVAL_HOURS", "3"))
 # up to a day to reach anyone. Eight runs a day come to roughly 750 requests including the
 # festival sweep — a sixth of the quota.
 REFRESH_INTERVAL_HOURS = float(os.getenv("REFRESH_INTERVAL_HOURS", "3"))
+# The frequent refresh only covers shows inside this many days. The full catalogue gets its own
+# daily pass below. Splitting them cut the daily work by 85% — see services/refresh.
+REFRESH_HORIZON_DAYS = int(os.getenv("REFRESH_HORIZON_DAYS", "7"))
+DEEP_REFRESH_INTERVAL_HOURS = float(os.getenv("DEEP_REFRESH_INTERVAL_HOURS", "24"))
 # Artist-page enrichment: daily, and bounded per stage. These are free community APIs
 # (Deezer, Wikipedia, Last.fm), so the limit is about being a good citizen rather than
 # about cost — a run that completes beats one that gets throttled halfway.
@@ -135,6 +139,21 @@ def start_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        # The near pass: everything happening inside the horizon, checked often, because a
+        # cancellation matters most for a show somebody is about to travel to.
+        kwargs={"horizon_days": REFRESH_HORIZON_DAYS},
+    )
+    scheduler.add_job(
+        refresh_catalogue,
+        trigger="interval",
+        hours=DEEP_REFRESH_INTERVAL_HOURS,
+        id="refresh_catalogue_deep",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        # And the whole catalogue once a day, so a show next summer is still re-verified —
+        # just not eight times between breakfasts.
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=20),
     )
     scheduler.add_job(
         enrich_all,
@@ -197,7 +216,8 @@ def start_scheduler() -> None:
 
     scheduler.start()
     print(f"[scheduler] started — sweep every {SWEEP_INTERVAL_HOURS}h, "
-          f"refresh every {REFRESH_INTERVAL_HOURS}h, "
+          f"refresh every {REFRESH_INTERVAL_HOURS}h within {REFRESH_HORIZON_DAYS}d "
+          f"(full catalogue every {DEEP_REFRESH_INTERVAL_HOURS}h), "
           f"enrich every {ENRICH_INTERVAL_HOURS}h (limit {ENRICH_LIMIT}/stage) — "
           f"reminders every {REMINDER_INTERVAL_HOURS}h, "
           f"push delivery every {PUSH_INTERVAL_MINUTES}m, "

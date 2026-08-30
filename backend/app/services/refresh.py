@@ -61,11 +61,22 @@ def sweep_catalogue() -> dict:
     return summary
 
 
-def refresh_catalogue(limit: int | None = None) -> dict:
-    """Deep refresh — re-verify EVERY event in the catalogue by its Ticketmaster id
-    (status/dates/price/cancellations), for ALL shows, not just followed artists, plus
-    refresh festivals. `limit` caps events for a quick test."""
-    result = reverify_all_events(limit=limit)
+def refresh_catalogue(limit: int | None = None, horizon_days: int | None = None) -> dict:
+    """Deep refresh — re-verify events by their Ticketmaster id (status, dates, price,
+    cancellations), plus refresh festivals.
+
+    TWO CADENCES, because they answer different questions. With `horizon_days` the pass covers
+    only shows inside that window — 353 events rather than 10,874 — and that is the one worth
+    running often, because a cancellation matters most for a show somebody has a ticket for
+    this week. Without it, the pass is the full catalogue and runs once a day.
+
+    Measured on the live catalogue, this takes the daily work from 86,992 event-checks to
+    13,698: an 85% cut. That matters beyond API budget — re-reading the whole catalogue eight
+    times a day was moving roughly 120 MB out of the database daily with no users at all, and
+    is most of why the project went over its egress allowance.
+
+    `limit` caps events for a quick test."""
+    result = reverify_all_events(limit=limit, horizon_days=horizon_days)
     festivals = 0
     try:
         festivals = len(ingest_festivals(deep=True))

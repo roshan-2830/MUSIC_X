@@ -1,6 +1,6 @@
 import time
 import uuid
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 
 from sqlalchemy import func, nulls_last, text
 from sqlalchemy.orm import Session
@@ -482,7 +482,19 @@ def _mark_missing(missing_ids: list, returned_ids: set) -> dict:
     return out
 
 
-def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -> dict:
+# How soon a show has to be for the frequent pass to bother with it. Measured on the live
+# catalogue: 341 events fall inside a week, against 10,632 upcoming in total. Re-checking all
+# 10,632 eight times a day moved roughly 120 MB a day out of the database FOR ZERO USERS, which
+# is most of why the project went over its egress allowance — the daily bars were ~500 MB on
+# days nobody but the developer opened the app.
+#
+# A show six months away being cancelled can wait until the daily pass. A show on Friday
+# cannot, and that is exactly the one somebody has a ticket for.
+HORIZON_DAYS = 7
+
+
+def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None,
+                        horizon_days: int | None = None) -> dict:
     """Deep refresh: re-fetch EVERY Ticketmaster event we have and update it in place —
     status (cancelled/postponed), dates, price — for ALL shows, not just followed artists.
 
@@ -490,8 +502,10 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
     between checking the soonest 2,000 shows and checking all 6,386 of them, and between
     spending 2,000 requests and spending about 43.
 
-    `limit` caps how many (for a quick test). Network fetches run without holding a DB
-    connection; one batched write at the end.
+    `limit` caps how many (for a quick test). `horizon_days` restricts the pass to shows within
+    that many days — the frequent cadence uses it so the expensive full sweep happens once a
+    day instead of eight times. Network fetches run without holding a DB connection; one
+    batched write at the end.
     """
     db: Session = SessionLocal()
     try:
@@ -511,9 +525,13 @@ def reverify_all_events(delay_seconds: float = 0.15, limit: int | None = None) -
             .filter(EventSource.source == "ticketmaster",
                     EventSource.source_event_id.isnot(None),
                     (Event.starts_at >= datetime.now(timezone.utc)) | (Event.starts_at.is_(None)))
-            .order_by(nulls_last(Event.starts_at.asc()))
-            .all()
         )
+        if horizon_days is not None:
+            # Undated shows stay in every pass: an unknown date could be tomorrow.
+            rows = rows.filter(
+                (Event.starts_at <= datetime.now(timezone.utc) + timedelta(days=horizon_days))
+                | (Event.starts_at.is_(None)))
+        rows = rows.order_by(nulls_last(Event.starts_at.asc())).all()
         tm_ids = [r[0] for r in rows]
     finally:
         db.close()
