@@ -5,6 +5,7 @@
   • enrich_catalogue  — daily: fill artist pages (photo, bio, tags, similar, popularity)
   • reminders         — hourly: time-driven alerts (on-sale, a week out, day-of)
   • push_delivery     — every couple of minutes: send whatever has not reached a phone yet
+  • passport_stamps   — hourly: record finished ticketed shows in the Concert Passport
 
 NOTE: these only fire while the backend process is running. On your Mac that means
 "while the dev server is on". For true always-on scheduling the backend must be
@@ -16,6 +17,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.services.enrichment import enrich_all
 from app.services.refresh import refresh_catalogue, sweep_catalogue
+from app.services.passport import stamp_finished_shows
 from app.services.push import deliver_pending
 from app.services.reminders import run_reminders
 
@@ -50,6 +52,10 @@ REMINDER_INTERVAL_HOURS = float(os.getenv("REMINDER_INTERVAL_HOURS", "1"))
 # value of a notification is that it arrives while it still matters, so the gap between
 # "created" and "on the lock screen" should be the smallest thing in this file.
 PUSH_INTERVAL_MINUTES = float(os.getenv("PUSH_INTERVAL_MINUTES", "2"))
+# Stamping finished shows into the Passport. Hourly is plenty: a concert that ended last night
+# does not need recording within the minute, and the point of the job is only that it happens
+# WITHOUT anybody opening a screen.
+PASSPORT_INTERVAL_HOURS = float(os.getenv("PASSPORT_INTERVAL_HOURS", "1"))
 
 # The startup guard still exists, and still works to the calendar day, but it now guards
 # against something narrower than it used to. It was there because a refresh cost ~3,800
@@ -170,6 +176,17 @@ def start_scheduler() -> None:
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
     )
 
+    scheduler.add_job(
+        stamp_finished_shows,
+        trigger="interval",
+        hours=PASSPORT_INTERVAL_HOURS,
+        id="passport_stamps",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=75),
+    )
+
     # The deep refresh is the expensive one, so it gets a guard rather than a free pass.
     scheduler.add_job(
         _refresh_if_stale,
@@ -183,7 +200,8 @@ def start_scheduler() -> None:
           f"refresh every {REFRESH_INTERVAL_HOURS}h, "
           f"enrich every {ENRICH_INTERVAL_HOURS}h (limit {ENRICH_LIMIT}/stage) — "
           f"reminders every {REMINDER_INTERVAL_HOURS}h, "
-          f"push delivery every {PUSH_INTERVAL_MINUTES}m — "
+          f"push delivery every {PUSH_INTERVAL_MINUTES}m, "
+          f"passport stamps every {PASSPORT_INTERVAL_HOURS}h — "
           f"sweep, enrich, reminders and push also run at startup; refresh runs at startup only if "
           f"the catalogue was not already verified today")
 

@@ -11,7 +11,7 @@ there is a reason to believe the person was there, and `source` records WHICH re
 A show sitting in someone's calendar with a date in the past is not evidence of anything: plans
 fall through. That is why the plan card asks "Were you there?" rather than assuming.
 """
-from datetime import date
+from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -207,3 +207,58 @@ def import_from_setlistfm(db: Session, user_id, username: str) -> dict:
         added += 1
     db.flush()
     return {"ok": True, "added": added, "skipped": skipped, "total": len(rows)}
+
+
+def stamp_finished_shows(limit: int = 500) -> dict:
+    """Put every finished, ticketed show into its owner's Passport.
+
+    THE PASSPORT MUST NOT DEPEND ON SOMEBODY OPENING A SCREEN. The plan card already treats a
+    booked show as attended once its date has passed — the PRD's "booking capture lifts state
+    automatically" — but the stamp was only ever written by the manual tick, so the card and the
+    passport disagreed about the same night. This closes that by doing the writing on a
+    schedule, where no screen visit is needed and nothing can be forgotten.
+
+    Only ENDED shows, not merely started: a concert beginning at 20:45 is not over at 20:46.
+    Only ticketed ones, because a ticket is the evidence — a show somebody merely saved is a
+    plan, and plans fall through.
+
+    Anyone who says "I didn't go" is skipped for ever after, which is what makes an automatic
+    stamp safe: it is a good assumption that can be corrected, rather than a claim nobody can
+    take back.
+    """
+    from datetime import timedelta
+
+    from app.db.session import SessionLocal
+    from app.models.calendar_entry import CalendarEntry
+    from app.models.event import Event
+    from app.services import plan as planner
+
+    db: Session = SessionLocal()
+    now = datetime.now(timezone.utc)
+    out = {"considered": 0, "stamped": 0, "already": 0}
+    try:
+        rows = (db.query(CalendarEntry, Event)
+                  .join(Event, Event.id == CalendarEntry.event_id)
+                  .filter(CalendarEntry.is_suggestion.is_(False),
+                          CalendarEntry.booked.is_(True),
+                          CalendarEntry.state != planner.MISSED,
+                          Event.merged_into.is_(None),
+                          Event.retired_at.is_(None),
+                          Event.starts_at.isnot(None),
+                          Event.starts_at < now - timedelta(hours=planner.SHOW_HOURS))
+                  .limit(limit).all())
+        out["considered"] = len(rows)
+        for entry, ev in rows:
+            made = record_attendance(db, entry.user_id, ev, source="music_x")
+            if made is None:
+                out["already"] += 1
+                continue
+            # Keep the card's cache honest at the same moment, so the two never disagree again.
+            entry.state = "attended"
+            out["stamped"] += 1
+        db.commit()
+    finally:
+        db.close()
+    if out["stamped"]:
+        print(f"[passport] {out}")
+    return out

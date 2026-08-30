@@ -1065,6 +1065,9 @@ export const setPlanReminder = (eventId: string, level: string) =>
 export const setPlanNote = (eventId: string, note: string | null) =>
   planWrite(`/events/${eventId}/plan/note`, "PUT", { note });
 
+export const markMissed = (eventId: string) =>
+  planWrite(`/events/${eventId}/plan/missed`, "POST");
+
 export const declareTicket = (eventId: string) =>
   planWrite(`/events/${eventId}/plan/ticket/declare`, "POST");
 

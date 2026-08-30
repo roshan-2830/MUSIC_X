@@ -16,7 +16,6 @@ import LastfmConnect from "../components/lastfm-connect";
 import NotificationBell from "../components/notification-bell";
 import NotificationsModal from "../components/notifications-modal";
 import SearchBar from "../components/search-bar";
-import WereYouThere from "../components/were-you-there";
 import { City, Festival, fetchEvents, getFestivals, getRecommended, MusicEvent, RecommendedEvent } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { detectCurrentCity } from "../lib/location";
@@ -272,10 +271,6 @@ export default function HomeScreen() {
             <View style={{ paddingHorizontal: 16 }}>
               <SearchBar />
             </View>
-            {/* Above the artists row on purpose: it is a question waiting for an answer, and
-                below the fold it would never be seen. It renders nothing when there is nothing
-                to ask, so it costs no space on a normal day. */}
-            <WereYouThere onAnswered={() => setBadgeKey((k) => k + 1)} />
             <ArtistsRow
               refreshKey={followsKey}
               onOpenArtist={setArtistName}

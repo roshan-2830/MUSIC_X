@@ -5,7 +5,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import {
-  clearTicket, declareTicket, getPlan, markAttended, pasteTicket, Plan, PlanStep,
+  clearTicket, declareTicket, getPlan, markAttended, markMissed, pasteTicket, Plan, PlanStep,
   setPlanNote, setPlanReminder,
 } from "../lib/api";
 
@@ -276,12 +276,28 @@ export default function PlanCard({
             </View>
           )}
 
-          {/* ── "I was there", the PRD's check-in route, only after the show ────── */}
+          {/* ── after the show ──────────────────────────────────────────────────
+              A ticketed show records itself once it has ended, so the usual case needs no
+              button at all. Two remain, and neither is a prompt:
+
+              "I was there" for somebody who went WITHOUT a ticket we ever saw — bought at the
+              door, or given one — which no automatic rule can know about.
+
+              "I wasn't there" because a stamp arriving on its own must be removable. An
+              automatic assumption that cannot be corrected is just a claim nobody can take
+              back, and it is the correction that makes the assumption safe to make. */}
           {plan.past && plan.state !== "attended" ? (
             <Pressable style={styles.primary} onPress={() => apply(() => markAttended(eventId))}
                        disabled={busy}>
               <Ionicons name="checkmark-done" size={15} color={INK} />
               <Text style={styles.primaryText}>I was there</Text>
+            </Pressable>
+          ) : null}
+
+          {plan.past && plan.state === "attended" ? (
+            <Pressable style={styles.quiet} onPress={() => apply(() => markMissed(eventId))}
+                       disabled={busy}>
+              <Text style={styles.quietText}>I didn’t make it — remove from my Passport</Text>
             </Pressable>
           ) : null}
 
@@ -369,6 +385,8 @@ export default function PlanCard({
 }
 
 const styles = StyleSheet.create({
+  quiet: { alignItems: "center", paddingVertical: 10, marginTop: 4 },
+  quietText: { color: "#6c6c78", fontSize: 12, textDecorationLine: "underline" },
   card: {
     backgroundColor: CARD, borderColor: LINE, borderWidth: 1, borderRadius: 16,
     padding: 16, marginTop: 18,
