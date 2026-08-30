@@ -22,6 +22,17 @@ Passport can query it without recomputing. The column is a cache; this function 
 from datetime import datetime, timezone
 
 STATES = ["interested", "planning", "confirmed", "attended"]
+# Stored in the same column as "attended", and meaning the opposite: asked after the show and
+# told no. It is not a step in STATES because it is not a stage of a plan — it is an ANSWER,
+# and its only job is to stop the app assuming, and to stop it asking again.
+MISSED = "missed"
+
+# Values in `state` that are ANSWERS from the person, not derivations from facts. The cache
+# write-back must never overwrite one, because it would be overwriting the input with its own
+# output. The guard used to name "attended" literally and MISSED was added without it, so
+# saying "no" was silently undone on the very next read of the card. A set, so the next value
+# added is covered by construction rather than by remembering.
+STORED_ANSWERS = {"attended", MISSED}
 LABELS = {"interested": "Interested", "planning": "Planning",
           "confirmed": "Confirmed", "attended": "Attended"}
 
@@ -47,9 +58,14 @@ def derive(entry, *, past: bool, has_base: bool, has_invited: bool) -> str:
     # or bought at the door — so a post-show "I was there" is a legitimate second route. It is
     # recorded in `state` because there is no other fact to derive it from, and it is honoured
     # only once the date has passed, so it can never be claimed early.
-    if past and (getattr(entry, "state", None) == "attended"):
+    stored = getattr(entry, "state", None)
+    if past and stored == "attended":
         return "attended"
-    if booked and past:
+    # A TICKET IS NOT ATTENDANCE, only good evidence of it. The PRD's "post-date + booked" rule
+    # stands, because assuming you went to the show you bought a ticket for is right far more
+    # often than it is wrong — but it must be correctable, or somebody who fell ill is told they
+    # attended a concert they missed and has no way to say otherwise.
+    if booked and past and stored != MISSED:
         return "attended"
     if booked:
         return "confirmed"

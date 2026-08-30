@@ -11,10 +11,11 @@ The state is never written by a transition. It is derived from those facts on ev
 feature added later that touches a plan cannot forget to move it — see services/plan.py.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user_id
@@ -31,6 +32,10 @@ from app.schemas.plan import (NoteIn, PasteIn, PasteResult, PlanOut, PlanStep, R
 from app.services import passport
 from app.services import plan as planner
 from app.services import ticket_paste
+
+# How long after a show the app still asks "were you there?". Six weeks: long enough to catch
+# somebody who was away, short enough that it is a reminder rather than a quiz about last year.
+ASK_WINDOW_DAYS = 42
 
 router = APIRouter(prefix="/events", tags=["plan"])
 
@@ -55,10 +60,11 @@ def _build(db: Session, uid: uuid.UUID, ev: Event, entry: CalendarEntry | None) 
     state = planner.derive(entry, past=past, has_base=has_base, has_invited=has_invited)
     booked = bool(entry and entry.booked)
 
-    # The column is a cache for the Calendar and, later, the Passport — kept in step here rather
-    # than by whoever caused the change. Never written for the check-in case, which IS the stored
-    # value and would otherwise be overwritten by its own derivation.
-    if entry is not None and state and entry.state != state and entry.state != "attended":
+    # The column is a cache for the Calendar and the Passport — kept in step here rather than by
+    # whoever caused the change. NEVER written over a stored answer ("I was there" / "I wasn't"),
+    # which is an input to the derivation and would otherwise be erased by its own result.
+    if (entry is not None and state and entry.state != state
+            and entry.state not in planner.STORED_ANSWERS):
         entry.state = state
         db.commit()
 
@@ -262,6 +268,30 @@ def mark_attended(event_id: UUID, user_id: str = Depends(get_current_user_id),
     return _build(db, uid, ev, entry)
 
 
+@router.post("/{event_id}/plan/missed", response_model=PlanOut)
+def mark_missed(event_id: UUID, user_id: str = Depends(get_current_user_id),
+                db: Session = Depends(get_db)):
+    """"No, I didn't go."
+
+    The answer to the question the app asks after a show. It exists so the app can stop
+    assuming — a ticket is evidence of intent, not of attendance, and somebody who fell ill
+    needs a way to say so. It also stops the asking, which is the difference between a helpful
+    prompt and a nag.
+    """
+    uid = uuid.UUID(user_id)
+    ev = _event_or_404(db, event_id)
+    if not planner.is_past(ev.starts_at):
+        raise HTTPException(status_code=409, detail="The show hasn’t happened yet.")
+    entry = _entry(db, uid, event_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Not in your plan.")
+    entry.state = planner.MISSED
+    # If they had ticked yes earlier and are correcting it, the stamp has to go too.
+    passport.forget_attendance(db, uid, event_id)
+    db.commit()
+    return _build(db, uid, ev, entry)
+
+
 @router.delete("/{event_id}/plan/attended", response_model=PlanOut)
 def unmark_attended(event_id: UUID, user_id: str = Depends(get_current_user_id),
                     db: Session = Depends(get_db)):
@@ -285,3 +315,65 @@ def unmark_attended(event_id: UUID, user_id: str = Depends(get_current_user_id),
     passport.forget_attendance(db, uid, event_id)
     db.commit()
     return _build(db, uid, ev, entry)
+
+
+class AttendanceAsk(BaseModel):
+    event_id: UUID
+    title: str
+    venue_name: str | None
+    city: str | None
+    starts_at: str | None
+    image_url: str | None
+    had_ticket: bool
+
+
+@router.get("/plan/unanswered", response_model=list[AttendanceAsk], tags=["plan"])
+def unanswered_attendance(limit: int = 10,
+                          user_id: str = Depends(get_current_user_id),
+                          db: Session = Depends(get_db)):
+    """Shows that have happened and that nobody has asked about yet.
+
+    This is what makes the Passport fill itself. Without it the tick lives on an event page you
+    have to remember to visit, so the honest record stays empty for the least honest reason —
+    nobody went looking.
+
+    A window, not all of history: asking in January about a gig last March is a quiz, not a
+    reminder, and somebody who has ignored the question for a month has answered it.
+    """
+    uid = uuid.UUID(user_id)
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=ASK_WINDOW_DAYS)
+    rows = (db.query(CalendarEntry, Event)
+              .join(Event, Event.id == CalendarEntry.event_id)
+              .filter(CalendarEntry.user_id == uid,
+                      CalendarEntry.is_suggestion.is_(False),
+                      Event.merged_into.is_(None),
+                      Event.starts_at < now,
+                      Event.starts_at >= since,
+                      # Already answered, either way.
+                      CalendarEntry.state.notin_(["attended", planner.MISSED]))
+              .order_by(Event.starts_at.desc())
+              .limit(limit).all())
+
+    venues = {}
+    vids = {ev.venue_id for _, ev in rows if ev.venue_id}
+    if vids:
+        venues = {v.id: v for v in db.query(Venue).filter(Venue.id.in_(vids)).all()}
+    cities = {}
+    cids = {v.city_id for v in venues.values() if v.city_id}
+    if cids:
+        cities = {c.id: c for c in db.query(City).filter(City.id.in_(cids)).all()}
+
+    out = []
+    for entry, ev in rows:
+        v = venues.get(ev.venue_id) if ev.venue_id else None
+        c = cities.get(v.city_id) if v and v.city_id else None
+        out.append(AttendanceAsk(
+            event_id=ev.id, title=ev.title or "Your show",
+            venue_name=v.name if v else None, city=c.name if c else None,
+            starts_at=ev.starts_at.isoformat() if ev.starts_at else None,
+            image_url=ev.image_url,
+            # Changes the wording: "you had tickets" reads very differently from "did you go".
+            had_ticket=bool(getattr(entry, "booked", False)),
+        ))
+    return out

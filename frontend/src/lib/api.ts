@@ -1150,3 +1150,28 @@ export async function getPassport(): Promise<Passport> {
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------- "were you there?"
+
+export type AttendanceAsk = {
+  event_id: string; title: string; venue_name: string | null; city: string | null;
+  starts_at: string | null; image_url: string | null; had_ticket: boolean;
+};
+
+export async function getUnansweredShows(): Promise<AttendanceAsk[]> {
+  const res = await fetch(`${API_BASE_URL}/events/plan/unanswered`, { headers: await authHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function answerAttended(eventId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/plan/attended`,
+    { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+}
+
+export async function answerMissed(eventId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/plan/missed`,
+    { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+}
