@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import PassportHero from "./passport-hero";
 import { getPassport, Passport, PassportShow } from "../lib/api";
 import { flagEmoji } from "../lib/format";
 
@@ -66,19 +67,7 @@ export default function PassportView({ onClose, onImport }:
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 44 }}>
-        <LinearGradient
-          colors={["#7b2ff7", "#ff2d95", "#ff8a00"]}
-          start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }}
-          style={styles.hero}>
-          <Pressable onPress={onClose} hitSlop={12} style={styles.heroBack}>
-            <Ionicons name="chevron-back" size={20} color="#fff" />
-          </Pressable>
-          <View style={styles.crest}>
-            <Ionicons name="earth" size={26} color="#fff" />
-          </View>
-          <Text style={styles.heroT}>Concert Passport</Text>
-          <Text style={styles.heroS}>Every stage. Every city. All yours.</Text>
-        </LinearGradient>
+        <PassportHero stamps={data?.stamps ?? []} onBack={onClose} />
 
         {loading ? (
           <View style={styles.center}><ActivityIndicator color={ACCENT} /></View>
