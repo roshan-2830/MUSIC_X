@@ -26,6 +26,15 @@ export default function AppTabs() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="me"
+        options={{
+          title: 'Me',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="person-outline" color={color} size={size} />
+          ),
+        }}
+      />
       {/* Search is reachable from the Home search bar, but NOT shown as a tab. */}
       <Tabs.Screen name="search" options={{ href: null }} />
     </Tabs>

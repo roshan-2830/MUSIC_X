@@ -1121,3 +1121,32 @@ export async function registerWebPush(sub: PushSubscriptionJSON): Promise<void> 
   });
   if (!res.ok) throw new Error(`register web push failed: ${res.status}`);
 }
+
+// ---------------------------------------------------------------- concert passport
+
+export type PassportShow = {
+  id: string; event_id: string | null; artist_name: string | null;
+  venue_name: string | null; city: string | null; country: string | null;
+  seen_on: string | null; source: string;
+};
+export type PassportStamp = { country: string; shows: number; first_seen_on: string | null };
+export type Passport = {
+  display_name: string | null; avatar_url: string | null; home_city: string | null;
+  member_since: number | null;
+  shows: number; country_count: number; city_count: number;
+  hours_in_the_crowd: number;
+  top_artist: string | null; top_artist_count: number;
+  tier: string; next_tier: string | null; shows_to_next_tier: number | null;
+  milestones: {
+    rungs: { at: number; label: string; reached: boolean }[];
+    progress: number; next_label: string | null; next_at: number | null;
+  };
+  stamps: PassportStamp[];
+  recent: PassportShow[];
+};
+
+export async function getPassport(): Promise<Passport> {
+  const res = await fetch(`${API_BASE_URL}/me/passport`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
