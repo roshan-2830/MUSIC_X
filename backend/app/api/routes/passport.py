@@ -31,6 +31,10 @@ class PassportShow(BaseModel):
     country: str | None
     seen_on: str | None
     source: str
+    # The setlist.fm page this stamp came from. It is the evidence behind an entry nobody
+    # confirmed inside the app, AND the attribution link their terms require — one field
+    # serving both, which is why an imported entry without it is never created.
+    evidence_url: str | None
 
 
 class Stamp(BaseModel):
@@ -101,6 +105,7 @@ def my_passport(limit: int = 50,
             id=e.id, event_id=e.event_id, artist_name=e.artist_name,
             venue_name=e.venue_name, city=e.city, country=e.country,
             seen_on=e.seen_on.isoformat() if e.seen_on else None, source=e.source,
+            evidence_url=e.evidence_url,
         ) for e in entries[:limit]],
     )
 
@@ -179,7 +184,10 @@ def link_setlistfm(body: LinkIn, user_id: str = Depends(get_current_user_id),
         row = SetlistfmAccount(user_id=uid, username=username)
         db.add(row)
     row.username = username
-    row.profile_url = profile.get("url")
+    # Built from the username rather than fetched. /user/{id} returns exactly this URL and
+    # nothing else useful, so asking for it would spend one of 1440 daily calls to be told
+    # something we can construct — and it is also the attribution link their terms require.
+    row.profile_url = f"https://www.setlist.fm/user/{username}"
     row.last_synced_at = datetime.now(timezone.utc)
     row.last_import_count = result["added"]
     db.commit()

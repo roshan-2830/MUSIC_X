@@ -13,7 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -171,25 +171,51 @@ export default function PassportView({ onClose }: { onClose: () => void }) {
                 </View>
 
                 <Text style={styles.section}>Your shows</Text>
-                {data.recent.map((e) => (
-                  <View key={e.id} style={styles.showRow}>
-                    <Text style={styles.showFlag}>{flagEmoji(e.country)}</Text>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.showT} numberOfLines={1}>
-                        {e.artist_name || "Unknown artist"}
+                {data.recent.map((e) => {
+                  const imported = e.source === "setlist_fm";
+                  return (
+                    <Pressable
+                      key={e.id}
+                      style={styles.showRow}
+                      // Only imported rows link out, and they link to the setlist itself —
+                      // which is both the attribution setlist.fm requires and the evidence
+                      // behind a stamp nobody confirmed inside this app.
+                      disabled={!imported || !e.evidence_url}
+                      onPress={() => { if (imported && e.evidence_url) Linking.openURL(e.evidence_url); }}>
+                      <Text style={styles.showFlag}>{flagEmoji(e.country)}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.showT} numberOfLines={1}>
+                          {e.artist_name || "Unknown artist"}
+                        </Text>
+                        <Text style={styles.showS} numberOfLines={1}>
+                          {[e.venue_name, e.city].filter(Boolean).join(" · ") || "—"}
+                        </Text>
+                        {imported ? (
+                          <Text style={styles.via}>via setlist.fm ↗</Text>
+                        ) : null}
+                      </View>
+                      <Text style={styles.showD}>
+                        {e.seen_on
+                          ? new Date(e.seen_on).toLocaleDateString("en-GB",
+                              { day: "numeric", month: "short", year: "numeric" })
+                          : ""}
                       </Text>
-                      <Text style={styles.showS} numberOfLines={1}>
-                        {[e.venue_name, e.city].filter(Boolean).join(" · ") || "—"}
-                      </Text>
-                    </View>
-                    <Text style={styles.showD}>
-                      {e.seen_on
-                        ? new Date(e.seen_on).toLocaleDateString("en-GB",
-                            { day: "numeric", month: "short", year: "numeric" })
-                        : ""}
+                    </Pressable>
+                  );
+                })}
+
+                {/* REQUIRED by setlist.fm's terms wherever their data appears, and shown only
+                    when some of it actually does. */}
+                {data.recent.some((e) => e.source === "setlist_fm") ? (
+                  <Pressable
+                    style={styles.attr}
+                    onPress={() => Linking.openURL("https://www.setlist.fm/")}>
+                    <Text style={styles.attrT}>
+                      Concert history powered by{" "}
+                      <Text style={styles.attrLink}>setlist.fm</Text>
                     </Text>
-                  </View>
-                ))}
+                  </Pressable>
+                ) : null}
               </>
             )}
           </View>
@@ -273,6 +299,10 @@ const styles = StyleSheet.create({
   showT: { color: "#f4f4f6", fontSize: 15, fontWeight: "700" },
   showS: { color: MUTED, fontSize: 12, marginTop: 2 },
   showD: { color: MUTED, fontSize: 12 },
+  via: { color: "#7d7d8a", fontSize: 11, marginTop: 3 },
+  attr: { alignItems: "center", marginTop: 18 },
+  attrT: { color: MUTED, fontSize: 12 },
+  attrLink: { color: ACCENT, fontWeight: "700", textDecorationLine: "underline" },
 
   center: { alignItems: "center", justifyContent: "center", padding: 40, gap: 8 },
   empty: { alignItems: "center", padding: 30, gap: 10 },

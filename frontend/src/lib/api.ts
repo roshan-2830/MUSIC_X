@@ -1127,7 +1127,7 @@ export async function registerWebPush(sub: PushSubscriptionJSON): Promise<void> 
 export type PassportShow = {
   id: string; event_id: string | null; artist_name: string | null;
   venue_name: string | null; city: string | null; country: string | null;
-  seen_on: string | null; source: string;
+  seen_on: string | null; source: string; evidence_url: string | null;
 };
 export type PassportStamp = { country: string; shows: number; first_seen_on: string | null };
 export type Passport = {
@@ -1173,5 +1173,34 @@ export async function answerAttended(eventId: string): Promise<void> {
 export async function answerMissed(eventId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/events/${eventId}/plan/missed`,
     { method: "POST", headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+}
+
+export type SetlistfmLink = {
+  username: string | null; profile_url: string | null;
+  last_synced_at: string | null; last_import_count: number | null; available: boolean;
+};
+
+export async function getSetlistfmLink(): Promise<SetlistfmLink> {
+  const res = await fetch(`${API_BASE_URL}/me/passport/setlistfm`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json();
+}
+
+export async function linkSetlistfm(username: string): Promise<{ added: number; skipped: number; total: number }> {
+  const res = await fetch(`${API_BASE_URL}/me/passport/setlistfm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ username }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `API error ${res.status}`);
+  return body;
+}
+
+export async function unlinkSetlistfm(): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/me/passport/setlistfm`, {
+    method: "DELETE", headers: await authHeaders(),
+  });
   if (!res.ok) throw new Error(`API error ${res.status}`);
 }
