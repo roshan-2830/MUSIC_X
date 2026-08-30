@@ -152,3 +152,58 @@ def summarise(entries: list) -> dict:
         # a passport dates from when you started going, not when you installed an app.
         "member_since": dates[0].year if dates else None,
     }
+
+
+def import_from_setlistfm(db: Session, user_id, username: str) -> dict:
+    """Bring somebody's setlist.fm history into their passport.
+
+    ALL OR NOTHING. If setlist.fm cannot give us the complete history — rate limit reached, a
+    page failed — nothing is written at all. Half a history is the worst outcome available
+    here: the person sees a fraction of their gigs, believes that is the record, and their
+    stamp wall omits countries they have actually been to. Being told "try again tomorrow" is
+    strictly better than being quietly given the wrong answer.
+
+    Idempotent by setlist URL, so re-importing after going to more concerts adds only the new
+    ones and can never duplicate a night.
+    """
+    from app.services import setlistfm
+
+    rows, complete = setlistfm.attended(username)
+    if not complete:
+        # Could not read the whole history. See the docstring: nothing is written.
+        return {"ok": False, "reason": "incomplete", "added": 0, "skipped": 0,
+                "total": len(rows)}
+
+    existing = {e.evidence_url for e in
+                db.query(PassportEntry)
+                  .filter(PassportEntry.user_id == user_id,
+                          PassportEntry.source == "setlist_fm").all()
+                if e.evidence_url}
+
+    added = skipped = 0
+    for r in rows:
+        url = r.get("url")
+        if not url:
+            # Without the setlist URL there is no evidence, and an entry with no evidence is
+            # exactly what this feature refuses to create.
+            skipped += 1
+            continue
+        if url in existing:
+            skipped += 1
+            continue
+        db.add(PassportEntry(
+            user_id=user_id,
+            event_id=None,          # a gig from 2009 is not in our catalogue and never will be
+            artist_id=None,
+            artist_name=r.get("artist_name"),
+            venue_name=r.get("venue_name"),
+            city=r.get("city"),
+            country=r.get("country"),
+            seen_on=r.get("seen_on"),
+            source="setlist_fm",
+            evidence_url=url,
+        ))
+        existing.add(url)
+        added += 1
+    db.flush()
+    return {"ok": True, "added": added, "skipped": skipped, "total": len(rows)}

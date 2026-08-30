@@ -5,8 +5,9 @@ Attended after a show (routes/plan.py), and later a ticket upload. That asymmetr
 point of the feature, so there is deliberately no POST on this router.
 """
 import uuid
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.core.security import get_current_user_id
 from app.db.session import get_db
 from app.models.city import City
 from app.models.passport_entry import PassportEntry
+from app.models.setlistfm_account import SetlistfmAccount
 from app.models.profile import Profile
 from app.services import passport as pp
 
@@ -101,3 +103,103 @@ def my_passport(limit: int = 50,
             seen_on=e.seen_on.isoformat() if e.seen_on else None, source=e.source,
         ) for e in entries[:limit]],
     )
+
+
+# ---------------------------------------------------------------- setlist.fm
+
+
+class LinkIn(BaseModel):
+    username: str
+
+
+class SetlistfmOut(BaseModel):
+    username: str | None
+    profile_url: str | None
+    last_synced_at: str | None
+    last_import_count: int | None
+    available: bool
+
+
+@router.get("/setlistfm", response_model=SetlistfmOut)
+def setlistfm_status(user_id: str = Depends(get_current_user_id),
+                     db: Session = Depends(get_db)):
+    from app.services import setlistfm
+    row = db.get(SetlistfmAccount, uuid.UUID(user_id))
+    return SetlistfmOut(
+        username=row.username if row else None,
+        profile_url=row.profile_url if row else None,
+        last_synced_at=row.last_synced_at.isoformat() if row and row.last_synced_at else None,
+        last_import_count=row.last_import_count if row else None,
+        available=setlistfm.configured(),
+    )
+
+
+@router.post("/setlistfm")
+def link_setlistfm(body: LinkIn, user_id: str = Depends(get_current_user_id),
+                   db: Session = Depends(get_db)):
+    """Link a setlist.fm profile and import its attended concerts.
+
+    The username is checked to EXIST, not to belong to the caller — setlist.fm offers no way to
+    prove that, so imported entries carry their source and the setlist link, and the passport
+    shows that provenance rather than claiming they were confirmed here.
+    """
+    from app.services import setlistfm
+    if not setlistfm.configured():
+        raise HTTPException(status_code=503, detail="setlist.fm is not configured")
+
+    uid = uuid.UUID(user_id)
+    username = (body.username or "").strip().lstrip("@")
+    if not username:
+        raise HTTPException(status_code=422, detail="Enter your setlist.fm username")
+
+    # NOT checked against /user/{id}: that endpoint returns 200 for ANY string, echoing the
+    # name back with a constructed URL. It validates nothing, so calling it would spend a
+    # request to learn nothing and would make a typo look like a successful link.
+    #
+    # The attended list is the real test — it 404s for a name nobody has. But it 404s just the
+    # same for a real person who has logged nothing, and those two cases are indistinguishable
+    # from out here, so the message below says both rather than picking one and being wrong.
+    result = pp.import_from_setlistfm(db, uid, username)
+    if not result["ok"]:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Couldn’t read your full history from setlist.fm just now — nothing was "
+                   "imported. Try again later.")
+
+    if result["total"] == 0:
+        db.rollback()
+        raise HTTPException(
+            status_code=404,
+            detail=f"No attended concerts found for “{username}”. Check the spelling — or mark "
+                   f"some concerts as attended on setlist.fm first.")
+
+    row = db.get(SetlistfmAccount, uid)
+    if row is None:
+        row = SetlistfmAccount(user_id=uid, username=username)
+        db.add(row)
+    row.username = username
+    row.profile_url = profile.get("url")
+    row.last_synced_at = datetime.now(timezone.utc)
+    row.last_import_count = result["added"]
+    db.commit()
+    return {"username": username, **result}
+
+
+@router.delete("/setlistfm", status_code=204)
+def unlink_setlistfm(remove_imported: bool = True,
+                     user_id: str = Depends(get_current_user_id),
+                     db: Session = Depends(get_db)):
+    """Unlink, and by default remove what was imported.
+
+    Leaving imported stamps behind after unlinking would make them unremovable through the app,
+    and the passport is the user's own record — every entry has to be reversible.
+    """
+    uid = uuid.UUID(user_id)
+    if remove_imported:
+        (db.query(PassportEntry)
+           .filter(PassportEntry.user_id == uid, PassportEntry.source == "setlist_fm")
+           .delete(synchronize_session=False))
+    db.query(SetlistfmAccount).filter(SetlistfmAccount.user_id == uid).delete(
+        synchronize_session=False)
+    db.commit()

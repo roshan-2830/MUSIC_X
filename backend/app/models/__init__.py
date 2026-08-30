@@ -31,6 +31,7 @@ from app.models.profile import Profile  # noqa: F401
 from app.models.push_token import PushToken  # noqa: F401
 from app.models.spotify_account import SpotifyAccount  # noqa: F401
 from app.models.lastfm_account import LastfmAccount  # noqa: F401
+from app.models.setlistfm_account import SetlistfmAccount  # noqa: F401
 from app.models.taste_profile import TasteProfile  # noqa: F401
 
 # Social & saves
