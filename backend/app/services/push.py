@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.models.notification import Notification
 from app.models.notification_pref import NotificationPref
 from app.models.push_token import PushToken
+from app.services import webpush
 
 SEND_URL = "https://exp.host/--/api/v2/push/send"
 # Expo's documented ceiling. Not a guess and not a tuning knob.
@@ -177,8 +178,53 @@ def deliver_pending(limit: int = 500) -> dict:
     return out
 
 
+def _is_web(t: PushToken) -> bool:
+    """A browser subscription rather than a phone. Identified by having the encryption keys a
+    browser needs and a phone does not — not by `platform` alone, which is a label anyone could
+    put anything in."""
+    return bool(t.p256dh and t.auth)
+
+
+def _deliver_web(db: Session, jobs: list, now: datetime, out: dict, dead: set) -> None:
+    """Browsers, one at a time.
+
+    No batching here, unlike Expo: the Web Push protocol has no batch endpoint — each
+    subscription is a separate encrypted POST to whichever push service that browser uses.
+    That is the protocol's shape, not an oversight.
+    """
+    for n, t in jobs:
+        if t.id in dead:
+            n.pushed_at = now
+            continue
+        ok, gone = webpush.send(t.token, t.p256dh, t.auth, _message(n, t.token)["data"] | {
+            "title": n.title or "Music X",
+            "body": (n.body or "")[:600],
+        })
+        if ok:
+            n.pushed_at = now
+            out["sent"] += 1
+        elif gone:
+            # The browser is uninstalled, its site data was cleared, or permission was revoked.
+            dead.add(t.id)
+            n.pushed_at = now
+        else:
+            out["failed"] += 1
+    db.commit()
+
+
 def _deliver_chunk(db: Session, chunk: list, now: datetime, out: dict, dead: set) -> None:
-    """One request to Expo, and the bookkeeping for its answers."""
+    """One request to Expo, and the bookkeeping for its answers.
+
+    Browser subscriptions are split out first and sent by their own protocol. They travel through
+    the same pass, the same `pushed_at` stamp and the same dead-subscription cleanup, because
+    everything except the wire format is identical between a phone and a browser.
+    """
+    web = [(n, t) for n, t in chunk if _is_web(t)]
+    if web:
+        _deliver_web(db, web, now, out, dead)
+    chunk = [(n, t) for n, t in chunk if not _is_web(t)]
+    if not chunk:
+        return
     # A token an earlier chunk already found to be gone. Its notification is stamped rather than
     # retried forever: the only route to that phone no longer exists, and the bell still has it.
     for n, t in chunk:

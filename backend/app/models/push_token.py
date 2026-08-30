@@ -19,6 +19,11 @@ class PushToken(Base):
     token = Column(String, nullable=False, unique=True)
     user_id = Column(Uuid, ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     platform = Column(String, nullable=True)
+    # A BROWSER subscription needs two more things than a phone: the keys its push service uses
+    # to encrypt the payload. NULL for phones, set for browsers — which, with `platform`, is how
+    # the sender knows which protocol to speak. `token` holds the endpoint URL for a web row.
+    p256dh = Column(String, nullable=True)
+    auth = Column(String, nullable=True)
     last_seen_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

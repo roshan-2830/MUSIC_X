@@ -1102,3 +1102,22 @@ export async function unregisterPushToken(token: string): Promise<void> {
   );
   if (!res.ok) throw new Error(`unregister push token failed: ${res.status}`);
 }
+
+export async function getPushPublicKey(): Promise<{ key: string; enabled: boolean }> {
+  const res = await fetch(`${API_BASE_URL}/me/push-key`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`push key failed: ${res.status}`);
+  return res.json();
+}
+
+export async function registerWebPush(sub: PushSubscriptionJSON): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/me/push-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({
+      endpoint: sub.endpoint,
+      keys: { p256dh: sub.keys?.p256dh, auth: sub.keys?.auth },
+      platform: "web",
+    }),
+  });
+  if (!res.ok) throw new Error(`register web push failed: ${res.status}`);
+}

@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { enablePush, pushStatus, type PushState } from "@/hooks/use-push";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View,
@@ -61,6 +62,9 @@ export default function NotificationsModal({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Whether this device is set up to be told about alerts while the app is closed.
+  const [pushState, setPushState] = useState<PushState | null>(null);
+  const [asking, setAsking] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -74,6 +78,19 @@ export default function NotificationsModal({
   useEffect(() => {
     load().finally(() => setLoading(false));
   }, [load]);
+
+  // Read once when the screen opens, so the banner reflects the real permission rather than
+  // whatever it was when the app started.
+  useEffect(() => { pushStatus().then(setPushState); }, []);
+
+  async function turnOnPush() {
+    setAsking(true);
+    // Called straight from a tap on purpose — the permission prompt is refused by Safari and
+    // penalised by Chrome when it is not tied to a user gesture.
+    const { state } = await enablePush();
+    setPushState(state);
+    setAsking(false);
+  }
 
   const unread = items.filter((n) => !n.is_read).length;
 
@@ -108,6 +125,41 @@ export default function NotificationsModal({
           <View style={{ width: 26 }} />
         )}
       </View>
+
+      {pushState && pushState !== 'registered' && pushState !== 'unsupported' ? (
+        <Pressable
+          style={styles.pushBanner}
+          onPress={pushState === 'denied' ? undefined : turnOnPush}
+          disabled={asking || pushState === 'denied'}>
+          <Ionicons
+            name={pushState === 'denied' ? 'notifications-off' : 'notifications'}
+            size={18}
+            color={pushState === 'denied' ? MUTED : ACCENT}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pushT}>
+              {pushState === 'denied'
+                ? 'Notifications are blocked'
+                : asking
+                  ? 'Asking your browser…'
+                  : 'Get told when something changes'}
+            </Text>
+            <Text style={styles.pushS}>
+              {pushState === 'denied'
+                ? 'Turn them back on in your browser’s site settings for this page.'
+                : pushState === 'needs-dev-build'
+                  ? 'Not available in this build of the app.'
+                  : pushState === 'error'
+                    ? 'Something went wrong setting this up — tap to try again.'
+                    : 'A cancelled show should reach you before you leave the house.'}
+            </Text>
+          </View>
+          {pushState === 'denied' ? null : (
+            <Ionicons name="chevron-forward" size={18} color={MUTED} />
+          )}
+        </Pressable>
+      ) : null}
+
 
       {loading ? (
         <View style={styles.center}>
@@ -182,6 +234,14 @@ export default function NotificationsModal({
 }
 
 const styles = StyleSheet.create({
+  pushBanner: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    marginHorizontal: 16, marginBottom: 8, padding: 14,
+    borderRadius: 14, backgroundColor: "#15151c",
+    borderWidth: 1, borderColor: "#23232c",
+  },
+  pushT: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
+  pushS: { color: "#9a9aa6", fontSize: 12, marginTop: 2, lineHeight: 16 },
   root: { flex: 1, backgroundColor: "#0b0b0f" },
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",

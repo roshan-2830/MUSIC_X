@@ -149,6 +149,29 @@ export async function enablePush(): Promise<{ state: PushState; token?: string }
   }
 }
 
+/** What this device's notification setup currently is — asks nothing, changes nothing. */
+export async function pushStatus(): Promise<PushState> {
+  if (Platform.OS === 'web') return 'unsupported';
+  if (!Device.isDevice) return 'unsupported';
+  const N = notifications();
+  if (!N) return 'needs-dev-build';
+  try {
+    const p = await N.getPermissionsAsync();
+    return p.granted ? 'registered' : (p.canAskAgain ? 'error' : 'denied');
+  } catch {
+    return 'error';
+  }
+}
+
+
+/** Launch-time refresh. On native the permission flow is a system dialog that is fine to
+ *  trigger on mount, so this is simply enablePush — the split exists for web, where asking on
+ *  page load is punished by the browser. Same name so callers need not care which they got. */
+export async function syncPush(): Promise<PushState> {
+  return (await enablePush()).state;
+}
+
+
 /** Sign-out, or "stop notifying this phone". Forgets the token on the server. */
 export async function disablePush(): Promise<void> {
   if (Platform.OS === 'web' || !Device.isDevice) return;

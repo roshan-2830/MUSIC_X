@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     # anybody holding one of our push tokens could send to it.
     expo_access_token: str | None = None
 
+    # WEB PUSH (browser notifications). The public key identifies us to the browser's push
+    # service and is handed to the page; the private key signs every send and never leaves here.
+    # They are a PAIR — regenerating either one silently invalidates every subscription anyone
+    # has already granted, and those people simply stop being notified with no error anywhere.
+    # vapid_subject must be a mailto: or https: URL; push services reject a send without it.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:jadhav.r@yangtsofour.com"
+
     # Web origins allowed to call this API from a BROWSER, comma separated
     # (e.g. "https://musicx.onrender.com,http://localhost:8081"). Native builds are not
     # subject to CORS at all, so this list is only ever about the web app.

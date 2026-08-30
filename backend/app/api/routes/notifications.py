@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.core.security import get_current_user_id
 from app.db.session import get_db
 from app.models.artist import Artist
@@ -151,8 +152,21 @@ def update_prefs(body: NotificationPrefsUpdate,
 # ---------------------------------------------------------------- device registration
 
 
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
 class PushTokenIn(BaseModel):
-    token: str
+    """Either a phone or a browser.
+
+    A phone sends `token`. A browser sends `endpoint` plus the two keys its push service needs.
+    One endpoint for both, because everything after registration — who owns the device, when it
+    was last seen, deleting it when the far end says it is gone — is the same for both.
+    """
+    token: str | None = None          # Expo push token (phone)
+    endpoint: str | None = None       # Web Push endpoint URL (browser)
+    keys: PushKeys | None = None
     platform: str | None = None
 
 
@@ -170,20 +184,37 @@ def register_push_token(body: PushTokenIn,
     sign in on one phone, only the one currently signed in should be notified on it.
     """
     uid = uuid.UUID(user_id)
-    token = (body.token or "").strip()
-    # Expo's own format. Rejecting anything else here means a malformed value can never sit in
-    # the table failing on every delivery pass.
-    if not (token.startswith("ExponentPushToken[") or token.startswith("ExpoPushToken[")):
-        raise HTTPException(status_code=422, detail="Not an Expo push token")
+    now = datetime.now(timezone.utc)
+
+    if body.endpoint:
+        # BROWSER. The endpoint is the unique thing — it is the URL its push service will
+        # accept messages at — so it goes in `token`, exactly as a phone's token does.
+        token = body.endpoint.strip()
+        if not token.startswith("https://"):
+            raise HTTPException(status_code=422, detail="Push endpoint must be https")
+        if not body.keys:
+            raise HTTPException(status_code=422, detail="Web push needs p256dh and auth keys")
+        p256dh, auth, platform = body.keys.p256dh, body.keys.auth, (body.platform or "web")
+    else:
+        # PHONE. Expo's own format; rejecting anything else here means a malformed value can
+        # never sit in the table failing on every delivery pass.
+        token = (body.token or "").strip()
+        if not (token.startswith("ExponentPushToken[") or token.startswith("ExpoPushToken[")):
+            raise HTTPException(status_code=422, detail="Not an Expo push token")
+        p256dh = auth = None
+        platform = body.platform or None
 
     row = db.query(PushToken).filter(PushToken.token == token).first()
-    now = datetime.now(timezone.utc)
     if row is None:
-        db.add(PushToken(token=token, user_id=uid,
-                         platform=(body.platform or None), last_seen_at=now))
+        db.add(PushToken(token=token, user_id=uid, platform=platform,
+                         p256dh=p256dh, auth=auth, last_seen_at=now))
     else:
         row.user_id = uid
-        row.platform = body.platform or row.platform
+        row.platform = platform or row.platform
+        # Re-subscribing rotates the keys, so they must be overwritten, not kept. Stale keys
+        # mean the payload cannot be decrypted and the notification silently never appears.
+        if p256dh:
+            row.p256dh, row.auth = p256dh, auth
         row.last_seen_at = now
     db.commit()
 
@@ -201,3 +232,15 @@ def unregister_push_token(token: str = Query(...),
        .filter(PushToken.token == token.strip(), PushToken.user_id == uid)
        .delete(synchronize_session=False))
     db.commit()
+
+
+@router.get("/push-key")
+def push_public_key():
+    """The VAPID public key the browser needs in order to subscribe.
+
+    Public by design — it identifies this app to the browser's push service and is meaningless
+    without the private half. Served from here rather than baked into the web bundle so that
+    rotating the pair is a server change, not a rebuild-and-redeploy.
+    """
+    from app.services import webpush
+    return {"key": settings.vapid_public_key, "enabled": webpush.configured()}
