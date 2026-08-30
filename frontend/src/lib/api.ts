@@ -1212,3 +1212,58 @@ export async function unlinkSetlistfm(): Promise<void> {
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
 }
+
+// ---------------------------------------------------------------- trip planner
+
+export type TripStop = {
+  event_id: string; title: string; starts_at: string | null; timezone: string | null;
+  image_url: string | null; venue_name: string | null; city: string; country: string | null;
+  mxs: number | null; travel_hours: number; same_place: boolean;
+};
+export type TripPlan = {
+  origin_city_id: string; origin: string; origin_country: string | null;
+  mode: string; starts_on: string; ends_on: string;
+  budget_hours: number; used_hours: number; cities: number; stops: TripStop[];
+};
+export type SavedTrip = {
+  id: string; origin: string | null; state: string;
+  total_travel_hours: number | null; created_at: string; stops: TripStop[];
+};
+
+export async function planTrip(
+  originCityId: string, start: string, end: string, mode: string,
+): Promise<TripPlan> {
+  const q = new URLSearchParams({ origin_city_id: originCityId, start, end, mode });
+  const res = await fetch(`${API_BASE_URL}/trips/plan?${q}`, { headers: await authHeaders() });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `API error ${res.status}`);
+  return body;
+}
+
+export async function saveTrip(plan: TripPlan): Promise<SavedTrip> {
+  const res = await fetch(`${API_BASE_URL}/trips`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({
+      origin_city_id: plan.origin_city_id, mode: plan.mode,
+      event_ids: plan.stops.map((s) => s.event_id),
+      travel_hours: plan.stops.map((s) => s.travel_hours),
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.detail || `API error ${res.status}`);
+  return body;
+}
+
+export async function getSavedTrips(): Promise<SavedTrip[]> {
+  const res = await fetch(`${API_BASE_URL}/trips`, { headers: await authHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function deleteTrip(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/trips/${id}`, {
+    method: "DELETE", headers: await authHeaders(),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+}
