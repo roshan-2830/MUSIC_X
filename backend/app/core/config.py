@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_subject: str = "mailto:jadhav.r@yangtsofour.com"
 
+    # setlist.fm. Free for NON-COMMERCIAL use only — commercial use needs their written
+    # permission, and this app takes affiliate revenue. Apply at setlist.fm/settings/api.
+    setlistfm_api_key: str = ""
+
     # Web origins allowed to call this API from a BROWSER, comma separated
     # (e.g. "https://musicx.onrender.com,http://localhost:8081"). Native builds are not
     # subject to CORS at all, so this list is only ever about the web app.
