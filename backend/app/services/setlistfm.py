@@ -15,6 +15,7 @@ TWO THINGS THIS FILE IS CAREFUL ABOUT.
    source="setlist_fm" and the setlist URL as evidence, and it is the CALLER's job to have
    established that the account belongs to the person importing it.
 """
+import time
 from datetime import date, datetime
 
 import httpx
@@ -27,6 +28,32 @@ TIMEOUT = 20.0
 # A courtesy ceiling. Somebody with a decade of gigs has a few hundred, not thousands, and an
 # unbounded loop against someone else's free API is how a key gets revoked.
 MAX_PAGES = 40
+# THEY RATE-LIMIT, and the docs never say by how much. A survey of about ten quick calls earned
+# a 429, so requests are spaced and a 429 is waited out rather than hammered. Measured, not
+# guessed — and the alternative is a key that stops working mid-import for reasons nobody
+# recorded.
+MIN_GAP = 0.6          # seconds between calls
+RETRY_AFTER = 2.0      # how long to wait out a 429, doubling
+_last_call = 0.0
+
+
+def _throttled_get(url: str, params: dict | None = None, tries: int = 3):
+    """One request, politely spaced, retrying a 429 with a widening gap."""
+    global _last_call
+    delay = RETRY_AFTER
+    for attempt in range(tries):
+        gap = time.monotonic() - _last_call
+        if gap < MIN_GAP:
+            time.sleep(MIN_GAP - gap)
+        _last_call = time.monotonic()
+        r = httpx.get(url, headers=_headers(), params=params, timeout=TIMEOUT)
+        if r.status_code != 429:
+            return r
+        if attempt < tries - 1:
+            print(f"[setlistfm] rate limited, waiting {delay}s")
+            time.sleep(delay)
+            delay *= 2
+    return r
 
 
 def configured() -> bool:
@@ -70,7 +97,7 @@ def get_user(username: str) -> dict | None:
     if not configured():
         return None
     try:
-        r = httpx.get(f"{BASE}/user/{username}", headers=_headers(), timeout=TIMEOUT)
+        r = _throttled_get(f"{BASE}/user/{username}")
     except Exception as e:
         print(f"[setlistfm] unreachable: {type(e).__name__}")
         return None
@@ -94,8 +121,7 @@ def attended(username: str, max_pages: int = MAX_PAGES) -> list:
     out, page = [], 1
     while page <= max_pages:
         try:
-            r = httpx.get(f"{BASE}/user/{username}/attended",
-                          headers=_headers(), params={"p": page}, timeout=TIMEOUT)
+            r = _throttled_get(f"{BASE}/user/{username}/attended", {"p": page})
         except Exception as e:
             print(f"[setlistfm] page {page} unreachable: {type(e).__name__}")
             break
