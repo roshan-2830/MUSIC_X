@@ -17,6 +17,7 @@ import { getPushPublicKey, registerWebPush } from '@/lib/api';
 export type PushState =
   | 'unsupported'      // an old browser, or an insecure origin
   | 'needs-dev-build'  // never on web; kept so callers can share one type with native
+  | 'not-asked'      // never been asked — one tap away, NOT the same as refused
   | 'denied'
   | 'registered'
   | 'error';
@@ -44,7 +45,7 @@ function supported(): boolean {
 export async function pushStatus(): Promise<PushState> {
   if (!supported() || !window.isSecureContext) return 'unsupported';
   if (Notification.permission === 'denied') return 'denied';
-  if (Notification.permission === 'default') return 'error';   // askable — the banner shows
+  if (Notification.permission === 'default') return 'not-asked';
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     const sub = await reg?.pushManager.getSubscription();
@@ -65,7 +66,9 @@ export async function pushStatus(): Promise<PushState> {
  */
 export async function syncPush(): Promise<PushState> {
   if (!supported() || !window.isSecureContext) return 'unsupported';
-  if (Notification.permission !== 'granted') return 'denied';
+  if (Notification.permission === 'denied') return 'denied';
+  // Never asked. Say so — reporting this as 'denied' made a one-tap situation look permanent.
+  if (Notification.permission === 'default') return 'not-asked';
   return (await enablePush()).state;
 }
 

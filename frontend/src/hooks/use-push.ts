@@ -33,6 +33,7 @@ const PROJECT_ID = '8e964550-c069-4932-92cd-a44a3925a368';
 export type PushState =
   | 'unsupported'      // web, or a simulator — no device to send to
   | 'needs-dev-build'  // the native module is not in this binary, or this is Expo Go
+  | 'not-asked'      // never been asked — one tap away, NOT the same as refused
   | 'denied'
   | 'registered'
   | 'error';
@@ -157,7 +158,7 @@ export async function pushStatus(): Promise<PushState> {
   if (!N) return 'needs-dev-build';
   try {
     const p = await N.getPermissionsAsync();
-    return p.granted ? 'registered' : (p.canAskAgain ? 'error' : 'denied');
+    return p.granted ? 'registered' : (p.canAskAgain ? 'not-asked' : 'denied');
   } catch {
     return 'error';
   }
