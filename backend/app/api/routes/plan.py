@@ -28,6 +28,7 @@ from app.models.hotel_booking import HotelBooking
 from app.models.venue import Venue
 from app.schemas.plan import (NoteIn, PasteIn, PasteResult, PlanOut, PlanStep, ReminderIn,
                               TicketOut)
+from app.services import passport
 from app.services import plan as planner
 from app.services import ticket_paste
 
@@ -253,5 +254,34 @@ def mark_attended(event_id: UUID, user_id: str = Depends(get_current_user_id),
     if entry is None:
         raise HTTPException(status_code=409, detail="Save the show first.")
     entry.state = "attended"
+    # THE PROMISE THE PLAN CARD ALREADY MAKES. It has said "Saved to your Concert Passport"
+    # since the card was built, and until now nothing wrote the entry — the app was telling
+    # people about a record it was not keeping.
+    passport.record_attendance(db, uid, ev, source="music_x")
+    db.commit()
+    return _build(db, uid, ev, entry)
+
+
+@router.delete("/{event_id}/plan/attended", response_model=PlanOut)
+def unmark_attended(event_id: UUID, user_id: str = Depends(get_current_user_id),
+                    db: Session = Depends(get_db)):
+    """"Actually, I didn't go."
+
+    A passport you cannot correct is no more trustworthy than one you can type into: the first
+    lies by omission of mistakes, the second by invention. Ticking the wrong show must be
+    undoable, and undoing it must remove the stamp — not leave it behind where nobody can
+    reach it.
+    """
+    uid = uuid.UUID(user_id)
+    ev = _event_or_404(db, event_id)
+    entry = _entry(db, uid, event_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Not in your plan.")
+    if entry.state == "attended":
+        # Back to the column's own default, not NULL — the column is NOT NULL, and the real
+        # state is derived anyway (services/plan.derive). This column is only ever a cache of
+        # the one transition that cannot be recomputed: "I was there".
+        entry.state = "interested"
+    passport.forget_attendance(db, uid, event_id)
     db.commit()
     return _build(db, uid, ev, entry)

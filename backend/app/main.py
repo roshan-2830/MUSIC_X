@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.routes import (health, db_check, events, me, cities, artists, admin,
-                            festivals, genres, notifications, people, travel, plan)
+                            festivals, genres, notifications, passport, people, travel, plan)
 from app.scheduler import scheduler, start_scheduler
 
 
@@ -50,6 +50,7 @@ app.include_router(notifications.router)
 app.include_router(travel.router)
 app.include_router(people.router)
 app.include_router(plan.router)
+app.include_router(passport.router)
 
 
 @app.get("/")
