@@ -48,3 +48,7 @@ watchfiles==1.2.0
 websockets==17.0.1
 PyJWT[crypto]
 APScheduler==3.11.3
+
+# Web Push (browser notifications). Speaks the protocol directly to Chrome's/Firefox's/
+# Safari's push service — no account, no third party. Pulls py-vapid and http-ece with it.
+pywebpush==2.5.0
