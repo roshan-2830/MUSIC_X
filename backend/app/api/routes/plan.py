@@ -68,6 +68,15 @@ def _build(db: Session, uid: uuid.UUID, ev: Event, entry: CalendarEntry | None) 
         entry.state = state
         db.commit()
 
+    # STAMP IMMEDIATELY when the card already says Attended. The hourly job is the backstop that
+    # makes the Passport independent of anybody opening a screen, but waiting an hour for a
+    # stamp you can see you have earned reads as broken — and on a free instance that sleeps,
+    # the job may not run for far longer than an hour. Both paths are idempotent, so whichever
+    # arrives first simply wins.
+    if entry is not None and state == "attended" and entry.state != planner.MISSED:
+        passport.record_attendance(db, uid, ev, source="music_x")
+        db.commit()
+
     return PlanOut(
         saved=entry is not None,
         state=state,
