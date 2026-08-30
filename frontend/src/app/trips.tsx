@@ -11,11 +11,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
 import {
-  ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import CityPicker from "../components/city-picker";
+import DateRangePicker from "../components/date-range-picker";
 import EventDetailView from "../components/event-detail";
 import TripItinerary from "../components/trip-itinerary";
 import {
@@ -45,6 +46,7 @@ export default function TripsScreen() {
   const [start, setStart] = useState(iso(new Date()));
   const [end, setEnd] = useState(iso(new Date(Date.now() + 30 * 864e5)));
   const [mode, setMode] = useState("fly");
+  const [pickDates, setPickDates] = useState(false);
 
   const [plan, setPlan] = useState<TripPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -87,14 +89,6 @@ export default function TripsScreen() {
     setBusy(false);
   }
 
-  // Dates are typed on web and stepped on native — react-native has no date input, and a whole
-  // calendar component is more than this screen needs.
-  const shift = (which: "start" | "end", days: number) => {
-    const cur = which === "start" ? start : end;
-    const next = iso(new Date(new Date(cur + "T12:00:00").getTime() + days * 864e5));
-    which === "start" ? setStart(next) : setEnd(next);
-  };
-
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -124,22 +118,18 @@ export default function TripsScreen() {
             <Ionicons name="chevron-forward" size={16} color={MUTED} />
           </Pressable>
 
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            {(["start", "end"] as const).map((which) => (
-              <View key={which} style={{ flex: 1 }}>
-                <Text style={styles.label}>{which === "start" ? "From" : "To"}</Text>
-                <View style={styles.dateRow}>
-                  <Pressable onPress={() => shift(which, -1)} hitSlop={8} style={styles.step}>
-                    <Ionicons name="remove" size={15} color={MUTED} />
-                  </Pressable>
-                  <Text style={styles.dateT}>{pretty(which === "start" ? start : end)}</Text>
-                  <Pressable onPress={() => shift(which, 1)} hitSlop={8} style={styles.step}>
-                    <Ionicons name="add" size={15} color={MUTED} />
-                  </Pressable>
-                </View>
-              </View>
-            ))}
-          </View>
+          <Text style={styles.label}>When are you free?</Text>
+          <Pressable style={styles.field} onPress={() => setPickDates(true)}>
+            <Ionicons name="calendar-outline" size={16} color={ACCENT} />
+            <Text style={styles.fieldT}>
+              {pretty(start)} – {pretty(end)}
+            </Text>
+            <Text style={styles.nights}>
+              {Math.round((new Date(end + "T12:00:00").getTime()
+                         - new Date(start + "T12:00:00").getTime()) / 864e5)}n
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={MUTED} />
+          </Pressable>
 
           <Text style={styles.label}>How far will you go?</Text>
           <View style={styles.seg}>
@@ -204,6 +194,14 @@ export default function TripsScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      <DateRangePicker
+        visible={pickDates}
+        start={start}
+        end={end}
+        onClose={() => setPickDates(false)}
+        onChange={(a, b) => { setStart(a); setEnd(b); }}
+      />
 
       <CityPicker
         visible={pickCity}
@@ -283,6 +281,7 @@ const styles = StyleSheet.create({
            paddingHorizontal: 14, borderRadius: 12, backgroundColor: "#14141b",
            borderWidth: 1, borderColor: "#2b2b36" },
   fieldT: { color: "#f4f4f6", fontSize: 15, fontWeight: "600", flex: 1 },
+  nights: { color: MUTED, fontSize: 12, fontWeight: "700" },
   dateRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between",
              paddingVertical: 9, paddingHorizontal: 10, borderRadius: 12,
              backgroundColor: "#14141b", borderWidth: 1, borderColor: "#2b2b36" },
