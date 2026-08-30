@@ -1155,7 +1155,8 @@ export async function getPassport(): Promise<Passport> {
 
 export type AttendanceAsk = {
   event_id: string; title: string; venue_name: string | null; city: string | null;
-  starts_at: string | null; image_url: string | null; had_ticket: boolean;
+  starts_at: string | null; timezone: string | null;
+  image_url: string | null; had_ticket: boolean;
 };
 
 export async function getUnansweredShows(): Promise<AttendanceAsk[]> {

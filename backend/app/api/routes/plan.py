@@ -323,6 +323,10 @@ class AttendanceAsk(BaseModel):
     venue_name: str | None
     city: str | None
     starts_at: str | None
+    # The VENUE's timezone. Without it the screen formats in the viewer's, and a 20:45 Madrid
+    # show reads as "Monday 31 August" to somebody in India — the wrong day, for the one date
+    # the question is about.
+    timezone: str | None
     image_url: str | None
     had_ticket: bool
 
@@ -348,7 +352,8 @@ def unanswered_attendance(limit: int = 10,
               .filter(CalendarEntry.user_id == uid,
                       CalendarEntry.is_suggestion.is_(False),
                       Event.merged_into.is_(None),
-                      Event.starts_at < now,
+                      # ENDED, not merely started. See services/plan.has_ended.
+                      Event.starts_at < now - timedelta(hours=planner.SHOW_HOURS),
                       Event.starts_at >= since,
                       # Already answered, either way.
                       CalendarEntry.state.notin_(["attended", planner.MISSED]))
@@ -372,6 +377,7 @@ def unanswered_attendance(limit: int = 10,
             event_id=ev.id, title=ev.title or "Your show",
             venue_name=v.name if v else None, city=c.name if c else None,
             starts_at=ev.starts_at.isoformat() if ev.starts_at else None,
+            timezone=ev.timezone,
             image_url=ev.image_url,
             # Changes the wording: "you had tickets" reads very differently from "did you go".
             had_ticket=bool(getattr(entry, "booked", False)),

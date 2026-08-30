@@ -45,8 +45,14 @@ export default function WereYouThere({ onAnswered }: { onAnswered?: () => void }
 
   // One at a time. A stack of these is an interrogation, and the rest keep until tomorrow.
   const a = asks[0];
+  // Formatted in the VENUE's timezone, not the reader's. A 20:45 Madrid show is 00:15 the next
+  // day in India, so the viewer's clock would name the wrong day for the one date being asked
+  // about.
   const when = a.starts_at
-    ? new Date(a.starts_at).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+    ? new Date(a.starts_at).toLocaleDateString("en-GB", {
+        weekday: "long", day: "numeric", month: "long",
+        timeZone: a.timezone || "UTC",
+      })
     : "";
 
   return (

@@ -19,7 +19,7 @@ as time passes, which no mutation could have triggered.
 The column is still written on read when it has changed, so the Calendar and, later, the
 Passport can query it without recomputing. The column is a cache; this function is the truth.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 STATES = ["interested", "planning", "confirmed", "attended"]
 # Stored in the same column as "attended", and meaning the opposite: asked after the show and
@@ -35,6 +35,27 @@ MISSED = "missed"
 STORED_ANSWERS = {"attended", MISSED}
 LABELS = {"interested": "Interested", "planning": "Planning",
           "confirmed": "Confirmed", "attended": "Attended"}
+
+
+# How long after the first note a show is assumed to be over. A concert that starts at 20:45 is
+# not finished at 20:46, and asking "did you make it?" while somebody is standing in the crowd is
+# worse than not asking at all. Six hours covers a long headline set plus support, and errs
+# towards asking late rather than early.
+SHOW_HOURS = 6
+
+
+def has_ended(starts_at) -> bool:
+    """Is the show OVER — not merely begun?
+
+    Separate from is_past on purpose. is_past answers "may this be ticked yet", which the PRD
+    ties to the date; this answers "is it reasonable to ask", which needs the show to have
+    actually finished.
+    """
+    if starts_at is None:
+        return False
+    if starts_at.tzinfo is None:
+        starts_at = starts_at.replace(tzinfo=timezone.utc)
+    return starts_at + timedelta(hours=SHOW_HOURS) < datetime.now(timezone.utc)
 
 
 def is_past(starts_at) -> bool:
