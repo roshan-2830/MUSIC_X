@@ -1,10 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, TurboModuleRegistry, View,
-} from "react-native";
+import { useMemo } from "react";
+import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as React from "react";
-import type { WebViewMessageEvent, WebViewNavigation } from "react-native-webview";
 
 import { NearbyPlaces } from "../lib/api";
 import CollapsibleCard from "./collapsible-card";
@@ -23,12 +19,6 @@ const PARTNER_ID = process.env.EXPO_PUBLIC_GYG_PARTNER_ID ?? "";
  *  placement later. GetYourGuide reports on it. */
 const CAMPAIGN = process.env.EXPO_PUBLIC_GYG_CAMPAIGN ?? "event-page";
 
-const ITEMS = 3;
-/** Measured: three items at 360 px wide report 1144 px. Used only until the widget tells us its
- *  real height, which it does within a second or two. */
-const FALLBACK_HEIGHT = 1144;
-/** If the widget has not reported a height by now, treat it as failed and show the link. */
-const GIVE_UP_MS = 9000;
 
 /** The search term the widget is asked for.
  *
@@ -64,19 +54,6 @@ function buildQuery(venueName: string | null, city: string | null): string | nul
   return words.join(" ").slice(0, 90);
 }
 
-function frameUrl(q: string, currency: string, locale: string): string {
-  const p = new URLSearchParams({
-    widget: "activities",
-    number_of_items: String(ITEMS),
-    partner_id: PARTNER_ID,
-    cmp: CAMPAIGN,
-    currency,
-    locale_code: locale,
-    q,
-  });
-  return `https://widget.getyourguide.com/default/activities.frame?${p.toString()}`;
-}
-
 /** Where we send people when the widget will not load: a real GetYourGuide search, carrying the
  *  partner id so a booking still counts. */
 function searchUrl(q: string): string {
@@ -91,88 +68,20 @@ function searchUrl(q: string): string {
   return `https://www.getyourguide.com/s/?${p.toString()}`;
 }
 
-// react-native-webview is a NATIVE module, so it exists only if it was compiled into the
-// binary on the phone. A development build made before the package was installed does not have
-// it, and a plain top-level `import` of it throws while this file is still loading — which took
-// out event-detail, the calendar, and everything that reaches them. Required lazily, an absent
-// module is a value we can read instead of a crash: `canEmbed` goes false and the section falls
-// back to the link, which is what web has always shown and earns the same commission.
-let WebViewCtor: any;
-function webView(): any {
-  if (WebViewCtor !== undefined) return WebViewCtor;
-  // ASKED, NOT CAUGHT. A try/catch around the require keeps the app alive but does not keep the
-  // terminal quiet: Metro hands a failed module evaluation to the error reporter before our catch
-  // ever runs, so the red "RNCWebViewModule could not be found" appears anyway — for something
-  // the code has already handled. The package does exactly one thing at module scope:
-  //   TurboModuleRegistry.getEnforcing('RNCWebViewModule')
-  // and `get` is the same lookup that returns null instead of throwing. So we ask first, and the
-  // doomed require never happens.
-  // Web never embeds — see canEmbed below — so there is nothing to gain from pulling a native
-  // library into the browser bundle to then not use it.
-  if (Platform.OS === "web") {
-    WebViewCtor = null;
-    return WebViewCtor;
-  }
-  if (!TurboModuleRegistry.get("RNCWebViewModule")) {
-    WebViewCtor = null;
-    console.log("[nearby] no WebView in this build — showing the link instead");
-    return WebViewCtor;
-  }
-  try {
-    WebViewCtor = require("react-native-webview").WebView ?? null;
-  } catch (e) {
-    WebViewCtor = null;      // unreachable now, but a cached null beats retrying every render
-    console.log("[nearby] WebView failed to load", e);
-  }
-  return WebViewCtor;
-}
-
-/** Forwards the widget's own height out of the WebView.
- *
- *  The frame posts {"channel":"GYG","height":1144,...} to its parent as it lays out — observed
- *  44 times in ten seconds as images settle. A WebView has no intrinsic height in React Native,
- *  so without this it would need a hardcoded one and would either clip the third card or leave
- *  a gap under it.
- */
-const BRIDGE = `
-(function () {
-  function send(o) {
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(o)); } catch (e) {}
-  }
-  window.addEventListener('message', function (e) {
-    if (String(e.origin).indexOf('getyourguide') === -1) return;
-    var d = e.data;
-    try { d = typeof d === 'string' ? JSON.parse(d) : d; } catch (err) { return; }
-    if (d && d.channel === 'GYG' && d.height) send({ height: d.height });
-  });
-  // The frame is this document's own body when loaded top-level, so its scroll height is a
-  // usable answer too, and it arrives sooner than the first postMessage.
-  function measure() {
-    var h = Math.max(
-      document.body ? document.body.scrollHeight : 0,
-      document.documentElement ? document.documentElement.scrollHeight : 0);
-    if (h > 80) send({ height: h });
-  }
-  setTimeout(measure, 700);
-  setTimeout(measure, 2500);
-  true;
-})();
-`;
 
 /**
- * "Things to Do Near {venue}" — GetYourGuide activities around the show.
+ * "Things to do near {venue}" — GetYourGuide activities around the show.
  *
- * THE ONE THING TO KNOW BEFORE TRUSTING THIS: the frame renders when it is the top-level
- * document and rendered BLANK every time it was put in an iframe from an unapproved origin —
- * tested at both full width and phone width, on light and dark pages, with and without a
- * partner id. It still reported a height of 1144 while showing nothing, so a height alone is
- * not proof of content.
+ * THIS HANDS OFF; IT DOES NOT EMBED. There was an embedded widget here and it is gone. It
+ * rendered BLANK every time it was placed in an iframe from an origin GetYourGuide has not
+ * approved — tested at full width and phone width, light and dark, with and without a partner
+ * id — while still reporting a height of 1144px, so the height that drove its "loaded" check
+ * was never evidence of anything. Keeping it meant carrying a WebView, an injected height
+ * bridge, a failure timer and a native-module probe, all to show nothing.
  *
- * That asymmetry decides the two platforms. On iOS and Android a WebView loads the frame as a
- * top-level document, which is the case that works and is verified working. On web it has to be
- * an iframe, so it will stay blank until GetYourGuide approves this partner id AND this domain
- * — which cannot be tested from here. The fallback link below is what carries the web build in
- * the meantime, and it earns commission just the same.
+ * The link earns exactly the same commission: the affiliate cookie is set on the click, not by
+ * the widget. So the whole of what was lost is browsing inside the app instead of on theirs,
+ * and the whole of what was gained is 157 lines that could not fail.
  *
  * Renders nothing without a partner id. An unattributed widget sends GetYourGuide free traffic
  * and earns nothing, and an affiliate surface should not ship before the affiliate terms are
@@ -202,37 +111,6 @@ export default function ExploreNearby({
   locale?: string;
 }) {
   const q = useMemo(() => buildQuery(venueName, city), [venueName, city]);
-  const [height, setHeight] = useState(0);
-  const [failed, setFailed] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // THE EMBED IS NATIVE-ONLY, and this is the second correction. A WebView loads the frame as
-  // a top-level document, which is the case verified to render. In a web iframe it came back
-  // blank every time from an unapproved origin — while still posting height messages, 44 of
-  // them, so the height that drives `ready` is not evidence of anything. Trusting it on web
-  // meant a blank white box that never fell back to the link, because the failure timer was
-  // cancelled by the very message that proved nothing.
-  //
-  // So web shows the link, which works today and earns the same commission. When GetYourGuide
-  // approves this partner id and this domain, the iframe can come back by deleting one line.
-  // Native, a partner id, AND the module actually present in this binary. The third clause is
-  // the one a rebuild changes.
-  const WebView = webView();
-  const canEmbed = Platform.OS !== "web" && !!PARTNER_ID && !!WebView;
-
-  const gotHeight = useCallback((h: number) => {
-    if (!h || h < 80) return;
-    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-    // Capped: a runaway height from a mis-measured document would push the rest of the page
-    // off the screen.
-    setHeight(Math.min(Math.round(h), 2000));
-  }, []);
-
-  useEffect(() => {
-    if (!canEmbed || !q) return;
-    timer.current = setTimeout(() => setFailed(true), GIVE_UP_MS);
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [q, canEmbed]);
 
   if (!q) return null;
 
@@ -241,8 +119,6 @@ export default function ExploreNearby({
   // at all — the feature was invisible rather than merely unattributed. A plain outbound link
   // earns nothing without an id, which is a reason to get the id, not a reason to hide the
   // only route to tours near the venue.
-  const url = frameUrl(q, currency, locale);
-  const ready = canEmbed && height > 0 && !failed;
 
   const mapPlaces = places?.status === "ok"
     ? [...places.do, ...places.eat]
@@ -265,51 +141,6 @@ export default function ExploreNearby({
         <PlacesMap lat={lat!} lng={lng!} venue={venueName} places={mapPlaces} />
       ) : null}
 
-      {canEmbed && !ready && !failed ? (
-        <View style={styles.state}>
-          <ActivityIndicator color={ACCENT} />
-          <Text style={styles.stateText}>Finding things to do…</Text>
-        </View>
-      ) : null}
-
-      {canEmbed && !failed ? (
-        // A white surface on purpose. The widget renders its own light theme with dark text and
-        // cannot be told otherwise, so it is framed as the third-party card it is rather than
-        // dropped onto a dark background where it would look like a rendering fault.
-        <View style={[styles.frame, { height: ready ? height : 1, opacity: ready ? 1 : 0 }]}>
-          <WebView
-            source={{ uri: url }}
-            style={styles.web}
-            injectedJavaScript={BRIDGE}
-            onMessage={(e: WebViewMessageEvent) => {
-              try {
-                const d = JSON.parse(e.nativeEvent.data);
-                if (d?.height) gotHeight(d.height);
-              } catch { /* a message we did not send */ }
-            }}
-            onError={() => setFailed(true)}
-            onHttpError={() => setFailed(true)}
-            // Booking leaves the app deliberately. The 31-day cookie has to land in the browser
-            // the person actually uses, and a WebView's cookie jar can be cleared without
-            // warning — a booking made in here might earn nothing. It is also the honest thing:
-            // a payment page belongs in a real browser with a visible URL.
-            onShouldStartLoadWithRequest={(req: WebViewNavigation) => {
-              if (req.url === url || req.url.startsWith("about:")) return true;
-              if (/^https?:\/\//.test(req.url)) {
-                Linking.openURL(req.url);
-                return false;
-              }
-              return false;
-            }}
-            javaScriptEnabled
-            domStorageEnabled
-            scrollEnabled={false}
-            nestedScrollEnabled={false}
-            setSupportMultipleWindows={false}
-            originWhitelist={["https://*.getyourguide.com"]}
-          />
-        </View>
-      ) : null}
 
       {/* The button that does the actual handing over. Loud, because on web it is the whole
           mechanism and on a phone it is still the way to everything the three cards omit. */}
