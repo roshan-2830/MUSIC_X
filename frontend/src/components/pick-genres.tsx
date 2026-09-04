@@ -1,12 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { bulkFollow, GenreArtist, GenreOption, getGenreArtists, getGenres } from "../lib/api";
+import {
+  ArtistSearchResult, bulkFollow, GenreArtist, GenreOption, getGenreArtists, getGenres,
+  searchArtists,
+} from "../lib/api";
 import { audienceLine, coverColor } from "../lib/format";
 
 const ACCENT = "#e8ff47";
@@ -16,6 +19,28 @@ const MUTED = "#8a8a95";
 /** Enough picks to give the artist step something to work with, few enough that the
  *  screen is not a chore. Below two, "Rock" alone returns a wall of stadium acts. */
 const MIN_PICKS = 2;
+
+/** One row shape for both sources. The suggestions carry genres and a show count; a
+ *  search result carries neither, and a row that quietly omits them beats two components
+ *  that drift apart. */
+type Row = {
+  name: string;
+  image_url: string | null;
+  genres: string[];
+  upcoming_shows: number | null;
+  deezer_fans: number | null;
+  lastfm_listeners: number | null;
+};
+
+const fromGenre = (a: GenreArtist): Row => ({
+  name: a.name, image_url: a.image_url, genres: a.genres,
+  upcoming_shows: a.upcoming_shows,
+  deezer_fans: a.deezer_fans, lastfm_listeners: a.lastfm_listeners,
+});
+const fromSearch = (a: ArtistSearchResult): Row => ({
+  name: a.name, image_url: a.image_url, genres: [],
+  upcoming_shows: null, deezer_fans: a.fans, lastfm_listeners: null,
+});
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
@@ -28,23 +53,30 @@ function initials(name: string): string {
  * offered first. This is the fallback, and it has to stand on its own: pick a few genres,
  * get real artists who are actually playing, follow the ones you know.
  *
- * Every artist shown has an upcoming show. That is the point of following one — it is a
- * promise to tell you when they announce a date, and a follow that can never fire is a
+ * Every suggested artist has an upcoming show. That is the point of following one — it is
+ * a promise to tell you when they announce a date, and a follow that can never fire is a
  * dead end dressed up as personalisation.
+ *
+ * SEARCH LIVES ON THE SAME SCREEN as the suggestions, rather than being a separate path.
+ * It used to be a fork: pick genres OR search, and the link out of the artist list swapped
+ * the whole screen. Because follows are only written on Continue, anyone who ticked a few
+ * artists and then tapped "search for someone else" lost them without being told. They
+ * were never alternatives anyway — genres populate the grid, search finds one name — so
+ * asking people to choose was an implementation detail leaking into the product.
  */
-export default function PickGenres({
-  onDone,
-  onSearch,
-}: {
-  onDone: () => void;
-  /** Hand off to the search screen — some people arrive knowing exactly who they want. */
-  onSearch: () => void;
-}) {
+export default function PickGenres({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState<"genres" | "artists">("genres");
   const [genres, setGenres] = useState<GenreOption[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
-  const [artists, setArtists] = useState<GenreArtist[]>([]);
+  const [artists, setArtists] = useState<Row[]>([]);
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<Row[]>([]);
+  const [searching, setSearching] = useState(false);
+  // Every artist either list has ever shown, by name. Follows are written on Continue, so
+  // a tick made against a search result must still be resolvable after the box is cleared
+  // and the grid has gone back to suggestions.
+  const [known, setKnown] = useState<Record<string, Row>>({});
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,28 +93,56 @@ export default function PickGenres({
   const pickedNames = Object.keys(picked).filter((k) => picked[k]);
   const chosenNames = Object.keys(chosen).filter((k) => chosen[k]);
 
-  const loadArtists = useCallback(async () => {
-    setLoading(true); setError(null);
+  const loadArtists = useCallback(async (names?: string[]) => {
+    const asked = names ?? pickedNames;
+    setLoading(true);
+    setError(null);
     try {
-      const list = await getGenreArtists(pickedNames, 36);
-      setArtists(list);
-      // Nothing pre-selected. Following on someone's behalf because they tapped a genre
-      // would be putting words in their mouth — the same rule the Last.fm import follows.
-      setChosen({});
+      // No genres is a real request: the API answers with the biggest names that are
+      // actually touring, so skipping never lands on an empty grid.
+      const list = await getGenreArtists(asked, 36);
+      const rows = list.map(fromGenre);
+      setArtists(rows);
+      setKnown((m) => ({ ...m, ...Object.fromEntries(rows.map((r) => [r.name, r])) }));
       setStep("artists");
     } catch {
-      setError("Couldn’t load artists for those genres.");
+      setError("Couldn’t load artists just now.");
     } finally {
       setLoading(false);
     }
   }, [pickedNames]);
 
+  // Debounced search across the whole catalogue, not just the picked genres.
+  useEffect(() => {
+    const term = q.trim();
+    if (!term) { setResults([]); setSearching(false); return; }
+    setSearching(true);
+    const t = setTimeout(() => {
+      searchArtists(term, 20)
+        .then((list) => {
+          const rows = list.map(fromSearch);
+          setResults(rows);
+          setKnown((m) => ({ ...m, ...Object.fromEntries(rows.map((r) => [r.name, r])) }));
+        })
+        .catch(() => setResults([]))
+        .finally(() => setSearching(false));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  // What the grid shows: search results while there is a query, suggestions otherwise.
+  const shown = useMemo(() => (q.trim() ? results : artists), [q, results, artists]);
+
   async function finish() {
     if (!chosenNames.length) { onDone(); return; }
     setBusy(true);
     try {
+      // Resolved through `known` rather than the visible list: a tick made while searching
+      // must still be saved after the search box is cleared.
       await bulkFollow(
-        artists.filter((a) => chosen[a.name])
+        chosenNames
+          .map((n) => known[n])
+          .filter(Boolean)
           .map((a) => ({ name: a.name, image_url: a.image_url, genres: a.genres })),
       );
       onDone();
@@ -135,7 +195,7 @@ export default function PickGenres({
           <Pressable
             style={[styles.cta, pickedNames.length < MIN_PICKS && styles.ctaOff]}
             disabled={pickedNames.length < MIN_PICKS}
-            onPress={loadArtists}
+            onPress={() => loadArtists()}
           >
             <Text style={styles.ctaText}>
               {pickedNames.length < MIN_PICKS
@@ -143,8 +203,10 @@ export default function PickGenres({
                 : `Show me ${pickedNames.length} genres of artists`}
             </Text>
           </Pressable>
-          <Pressable onPress={onSearch} hitSlop={8}>
-            <Text style={styles.skip}>I’d rather search for an artist</Text>
+          {/* Skips to the same screen, just seeded with popular artists instead of
+              genre-derived ones. Search is there either way. */}
+          <Pressable onPress={() => loadArtists([])} hitSlop={8}>
+            <Text style={styles.skip}>Skip — show me popular artists</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -162,27 +224,47 @@ export default function PickGenres({
 
         <Text style={styles.h1}>Follow who you know</Text>
         <Text style={styles.sub}>
-          Everyone here has a show coming up. Following someone means we’ll tell you when
-          they announce a date near you.
+          Following someone means we’ll tell you when they announce a date near you.
+          Can’t see someone? Search for them.
         </Text>
 
-        {loading ? (
+        <View style={styles.searchBox}>
+          <Ionicons name="search" size={16} color={MUTED} />
+          <TextInput
+            style={styles.searchInput}
+            value={q}
+            onChangeText={setQ}
+            placeholder="Search any artist by name"
+            placeholderTextColor={MUTED}
+            autoCapitalize="words"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {q.length > 0 ? (
+            <Pressable onPress={() => setQ("")} hitSlop={10} accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={17} color={MUTED} />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {loading || searching ? (
           <ActivityIndicator color={ACCENT} style={{ marginTop: 34 }} />
         ) : error ? (
           <View style={styles.errBox}>
             <Ionicons name="cloud-offline-outline" size={32} color={MUTED} />
             <Text style={styles.errText}>{error}</Text>
           </View>
-        ) : artists.length === 0 ? (
+        ) : shown.length === 0 ? (
           <View style={styles.errBox}>
             <Ionicons name="search-outline" size={32} color={MUTED} />
             <Text style={styles.errText}>
-              Nobody in those genres has a date announced yet. Try different genres, or
-              search for an artist by name.
+              {q.trim()
+                ? `No artist called “${q.trim()}”. Check the spelling, or pick from your genres.`
+                : "Nobody in those genres has a date announced yet — try different genres, or search above."}
             </Text>
           </View>
         ) : (
-          artists.map((a) => {
+          shown.map((a) => {
             const on = !!chosen[a.name];
             return (
               <Pressable
@@ -199,12 +281,19 @@ export default function PickGenres({
                 )}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name} numberOfLines={1}>{a.name}</Text>
-                  <Text style={styles.meta} numberOfLines={1}>
-                    {a.genres.slice(0, 2).join(" · ")}
-                    {a.upcoming_shows
-                      ? ` · ${a.upcoming_shows} show${a.upcoming_shows > 1 ? "s" : ""}`
-                      : ""}
-                  </Text>
+                  {/* Built from the parts that exist: a search result has no genres and no
+                      show count, and a lone separator dot reads as a rendering bug. */}
+                  {(() => {
+                    const bits = [
+                      ...a.genres.slice(0, 2),
+                      a.upcoming_shows
+                        ? `${a.upcoming_shows} show${a.upcoming_shows > 1 ? "s" : ""}`
+                        : null,
+                    ].filter(Boolean);
+                    return bits.length ? (
+                      <Text style={styles.meta} numberOfLines={1}>{bits.join(" · ")}</Text>
+                    ) : null;
+                  })()}
                   {audienceLine(a) ? (
                     <Text style={styles.audience} numberOfLines={1}>{audienceLine(a)}</Text>
                   ) : null}
@@ -228,9 +317,6 @@ export default function PickGenres({
                 : "Continue without following"}
           </Text>
         </Pressable>
-        <Pressable onPress={onSearch} hitSlop={8}>
-          <Text style={styles.skip}>Search for someone else</Text>
-        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -238,6 +324,12 @@ export default function PickGenres({
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0b0b0f" },
+  searchBox: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+    borderRadius: 12, paddingHorizontal: 12, height: 44, marginBottom: 14,
+  },
+  searchInput: { flex: 1, color: "#f4f4f6", fontSize: 14.5, padding: 0 },
   body: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 26 },
 
   logo: { color: "#f4f4f6", fontSize: 15, fontWeight: "900", letterSpacing: 2, marginBottom: 26 },

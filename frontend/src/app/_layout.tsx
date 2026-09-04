@@ -9,8 +9,9 @@ import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import AppTabs from '@/components/app-tabs';
 import AuthScreen from '@/components/auth-screen';
 import ConnectMusic from '@/components/connect-music';
-import FollowArtists from '@/components/follow-artists';
+import IntroSlides from '@/components/intro-slides';
 import PickGenres from '@/components/pick-genres';
+import Splash from '@/components/splash';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { ProfileProvider } from '@/lib/profile';
 import { SavesProvider } from '@/lib/saves';
@@ -18,6 +19,10 @@ import { SavesProvider } from '@/lib/saves';
 SplashScreen.preventAutoHideAsync();
 
 const ONBOARDED_KEY = 'mx_onboarded';
+// The intro runs BEFORE anyone signs in, so there is no account to hang it off — it is
+// remembered per device, unlike ONBOARDED_KEY which is per user. Someone who has seen the
+// three slides and come back to log in should land on the login screen, not the pitch.
+const INTRO_KEY = 'mx_intro_seen';
 
 function Loader() {
   return (
@@ -33,10 +38,6 @@ function SignedInApp({ userId }: { userId: string }) {
   const [ready, setReady] = useState(false);
   const [onboarding, setOnboarding] = useState(false);
   const [skippedConnect, setSkippedConnect] = useState(false);
-  // Set when someone would rather name an artist than pick genres. Genres are the
-  // default fallback because most people cannot recall an artist on demand, but a
-  // few arrive knowing exactly who they want and must not be made to browse.
-  const [wantsSearch, setWantsSearch] = useState(false);
   const key = `${ONBOARDED_KEY}_${userId}`;
 
   useEffect(() => {
@@ -56,15 +57,18 @@ function SignedInApp({ userId }: { userId: string }) {
     // Connect a listening history FIRST — it is the shortest path to real
     // recommendations. Anyone who skips picks genres instead and gets real artists to
     // follow, since most people do not have a Last.fm account and must not be stuck at
-    // the door. Search stays one tap away for the few who already know who they want.
+    // the door.
+    //
+    // Two screens, not three. There used to be a third branch that replaced the genre
+    // screen with a search screen, which meant choosing between browsing and searching —
+    // and silently dropped any follows already ticked, because they are only written on
+    // Continue. PickGenres now carries the search box itself, so the flow is linear.
     return (
       <SafeAreaProvider initialMetrics={initialWindowMetrics}>
         {!skippedConnect ? (
           <ConnectMusic onDone={finish} onSkip={() => setSkippedConnect(true)} />
-        ) : wantsSearch ? (
-          <FollowArtists onDone={finish} />
         ) : (
-          <PickGenres onDone={finish} onSearch={() => setWantsSearch(true)} />
+          <PickGenres onDone={finish} />
         )}
       </SafeAreaProvider>
     );
@@ -80,13 +84,44 @@ function SignedInApp({ userId }: { userId: string }) {
 }
 
 // Decides what to show based on login state.
+// The splash animation runs 0.55s before the tagline even starts, so a gate that clears
+// in 200ms would show a logo mid-pop and cut. Hold it for one full beat; anything slower
+// than that is real loading and needs no help.
+const SPLASH_MS = 1700;
+
 function Gate() {
   const { session, loading } = useAuth();
+  const [splashDone, setSplashDone] = useState(false);
 
-  if (loading) return <Loader />;
+  useEffect(() => {
+    const t = setTimeout(() => setSplashDone(true), SPLASH_MS);
+    return () => clearTimeout(t);
+  }, []);
+  // null = not read yet. Rendering the intro before the answer is back would flash the
+  // pitch at a returning user for a frame, which is worse than a moment of the loader.
+  const [introSeen, setIntroSeen] = useState<boolean | null>(null);
 
-  // Signed in → onboarding-or-app.  Signed out → the login screen.
-  return session?.user ? <SignedInApp userId={session.user.id} /> : <AuthScreen />;
+  useEffect(() => {
+    AsyncStorage.getItem(INTRO_KEY)
+      .then((v) => setIntroSeen(v === 'true'))
+      .catch(() => setIntroSeen(true));   // unreadable storage: skip the pitch, never block
+  }, []);
+
+  if (loading || introSeen === null || !splashDone) return <Splash />;
+
+  // Signed in → onboarding-or-app.
+  if (session?.user) return <SignedInApp userId={session.user.id} />;
+
+  // Signed out and has never seen the intro → the three slides, then the login screen.
+  if (!introSeen) {
+    const done = () => {
+      setIntroSeen(true);
+      AsyncStorage.setItem(INTRO_KEY, 'true').catch(() => {});  // best effort, never blocks
+    };
+    return <IntroSlides onDone={done} />;
+  }
+
+  return <AuthScreen />;
 }
 
 export default function TabLayout() {

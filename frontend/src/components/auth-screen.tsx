@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -15,14 +16,20 @@ import { useAuth } from "../lib/auth";
 
 const ACCENT = "#e8ff47";
 const MUTED = "#9a9aa6";
+const WARN = "#f0d47e";
 
 export default function AuthScreen() {
   const { signIn, signUp, sendOtp, verifyOtp } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [method, setMethod] = useState<"password" | "otp">("password");
   const [otpSent, setOtpSent] = useState(false);
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  // One toggle for both password boxes: they are checked against each other, so revealing
+  // one and not the other is no help.
+  const [reveal, setReveal] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +38,15 @@ export default function AuthScreen() {
   const isOtp = mode === "login" && method === "otp";
   const showCode = isOtp && otpSent;
   const showPassword = mode === "signup" || (mode === "login" && method === "password");
+  const isSignup = mode === "signup";
 
   function reset() {
     setError(null);
     setNotice(null);
     setOtpSent(false);
     setCode("");
+    setConfirm("");
+    setReveal(false);
   }
   function switchMode(m: "login" | "signup") {
     setMode(m);
@@ -48,14 +58,19 @@ export default function AuthScreen() {
     setError(null);
     if (busy) return;
 
+    if (isSignup && !name.trim()) return setError("Enter your name.");
     if (!showCode && !email.trim()) return setError("Enter your email.");
     if (showPassword && !password) return setError("Enter your password.");
+    // Checked before the request, so a typo costs a moment rather than an account with a
+    // password the person cannot reproduce.
+    if (isSignup && password.length < 6) return setError("Use at least 6 characters.");
+    if (isSignup && confirm !== password) return setError("Those passwords do not match.");
     if (showCode && code.trim().length < 6) return setError("Enter the code from your email.");
 
     setBusy(true);
     let res: { error: string | null } = { error: null };
     if (mode === "signup") {
-      res = await signUp(email.trim(), password);
+      res = await signUp(email.trim(), password, name);
     } else if (method === "password") {
       res = await signIn(email.trim(), password);
     } else if (!otpSent) {
@@ -101,6 +116,22 @@ export default function AuthScreen() {
             </Pressable>
           </View>
 
+          {isSignup && (
+            <>
+              <Text style={styles.label}>Name</Text>
+              <TextInput
+                style={styles.input}
+                value={name}
+                onChangeText={setName}
+                placeholder="Your name"
+                placeholderTextColor={MUTED}
+                autoCapitalize="words"
+                autoCorrect={false}
+                editable={!busy}
+              />
+            </>
+          )}
+
           {!showCode && (
             <>
               <Text style={styles.label}>Email</Text>
@@ -121,16 +152,61 @@ export default function AuthScreen() {
           {showPassword && (
             <>
               <Text style={styles.label}>Password</Text>
-              <TextInput
-                style={styles.input}
-                value={password}
-                onChangeText={setPassword}
-                placeholder={mode === "login" ? "Your password" : "Create a password (min 6)"}
-                placeholderTextColor={MUTED}
-                secureTextEntry
-                autoCapitalize="none"
-                editable={!busy}
-              />
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.inputFlex}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder={mode === "login" ? "Your password" : "Create a password (min 6)"}
+                  placeholderTextColor={MUTED}
+                  secureTextEntry={!reveal}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!busy}
+                />
+                <Pressable
+                  onPress={() => setReveal((v) => !v)}
+                  hitSlop={10}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityLabel={reveal ? "Hide password" : "Show password"}
+                >
+                  <Ionicons name={reveal ? "eye-off-outline" : "eye-outline"} size={20} color={MUTED} />
+                </Pressable>
+              </View>
+            </>
+          )}
+
+          {isSignup && (
+            <>
+              <Text style={styles.label}>Confirm password</Text>
+              <View style={styles.inputRow}>
+                <TextInput
+                  style={styles.inputFlex}
+                  value={confirm}
+                  onChangeText={setConfirm}
+                  placeholder="Type it again"
+                  placeholderTextColor={MUTED}
+                  secureTextEntry={!reveal}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!busy}
+                  onSubmitEditing={submit}
+                />
+                <Pressable
+                  onPress={() => setReveal((v) => !v)}
+                  hitSlop={10}
+                  disabled={busy}
+                  accessibilityRole="button"
+                  accessibilityLabel={reveal ? "Hide password" : "Show password"}
+                >
+                  <Ionicons name={reveal ? "eye-off-outline" : "eye-outline"} size={20} color={MUTED} />
+                </Pressable>
+              </View>
+              {/* Said as it is typed, not after the request fails. */}
+              {confirm.length > 0 && confirm !== password ? (
+                <Text style={styles.mismatch}>Passwords do not match yet.</Text>
+              ) : null}
             </>
           )}
 
@@ -190,6 +266,15 @@ const styles = StyleSheet.create({
   accent: { color: ACCENT },
   h: { color: "#f4f4f6", fontSize: 22, fontWeight: "800", textAlign: "center", marginTop: 20 },
   sub: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 6, marginBottom: 22 },
+  // The eye sits inside the field's box, so the box keeps the same shape as every other
+  // input on the screen rather than growing a control beside it.
+  inputRow: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+    borderRadius: 12, paddingHorizontal: 14, marginBottom: 12, height: 48,
+  },
+  inputFlex: { flex: 1, color: "#f4f4f6", fontSize: 15, padding: 0 },
+  mismatch: { color: WARN, fontSize: 12.5, marginTop: -6, marginBottom: 12 },
   seg: { flexDirection: "row", backgroundColor: "#14141b", borderRadius: 12, padding: 4, borderWidth: 1, borderColor: "#26262f", marginBottom: 18 },
   segBtn: { flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center" },
   segOn: { backgroundColor: ACCENT },
