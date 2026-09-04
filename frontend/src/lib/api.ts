@@ -438,7 +438,9 @@ export type MxsBreakdown = {
   confidence?: string;
   reasons?: string[];
   components?: Record<string, MxsComponent>;
-  missing?: Record<string, string>;
+  /** Components that could NOT be used. The events scorer writes a list of names;
+   *  the festival scorer writes name -> reason. Both shapes occur. */
+  missing?: string[] | Record<string, string>;
 };
 
 export type FestivalDetail = Festival & {
@@ -1269,4 +1271,86 @@ export async function deleteTrip(id: string): Promise<void> {
     method: "DELETE", headers: await authHeaders(),
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
+}
+
+// ---- reviews ----
+// Written only by people who attended, read by people deciding whether to go. Stored
+// against the night, shown against the artist — a review of one date is only readable
+// after that date, when nobody needs it. See backend routes/reviews.py.
+
+export type ReviewItem = {
+  id: string;
+  rating: number;
+  body: string | null;
+  likes_count: number;
+  liked_by_me: boolean;
+  created_at: string;
+  author_name: string | null;
+  author_avatar: string | null;
+  /** Which show this was written about, e.g. "O2 Academy Brixton · Oct 2025". */
+  show_label: string | null;
+  is_this_event: boolean;
+};
+
+/** What the artist actually played last time. Stands in for reviews before any exist —
+ *  there is nowhere to import concert reviews from, so this is the honest opening. */
+export type LiveFacts = {
+  songs: number;
+  encores: number;
+  opener: string | null;
+  closer: string | null;
+  venue_name: string | null;
+  city: string | null;
+  seen_on: string | null;
+  tour: string | null;
+  url: string | null;
+};
+
+export type ReviewsPage = {
+  artist_name: string | null;
+  /** How many people in Music X have been to one of this artist's shows. */
+  seen_by: number;
+  summary: { average: number | null; count: number; histogram: Record<string, number> };
+  reviews: ReviewItem[];
+  live_facts: LiveFacts | null;
+  can_review: boolean;
+  cannot_review_reason: string | null;
+  my_review_id: string | null;
+};
+
+export async function getReviews(eventId: string): Promise<ReviewsPage> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/reviews`, {
+    headers: await authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Reviews ${res.status}`);
+  return res.json();
+}
+
+export async function postReview(
+  eventId: string, rating: number, body: string | null
+): Promise<ReviewItem> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ rating, body }),
+  });
+  if (!res.ok) {
+    // The server owns the gate, so its wording is the wording to show.
+    let detail = `Review ${res.status}`;
+    try { detail = (await res.json())?.detail ?? detail; } catch {}
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export async function deleteReview(reviewId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/reviews/${reviewId}`, {
+    method: "DELETE", headers: await authHeaders(),
+  });
+}
+
+export async function setReviewHelpful(reviewId: string, on: boolean): Promise<void> {
+  await fetch(`${API_BASE_URL}/reviews/${reviewId}/like`, {
+    method: on ? "POST" : "DELETE", headers: await authHeaders(),
+  });
 }

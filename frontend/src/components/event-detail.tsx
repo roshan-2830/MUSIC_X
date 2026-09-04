@@ -9,6 +9,7 @@ import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
 import GoingRow, { InvitedBanner } from "./going-row";
 import PlanCard from "./plan-card";
+import Reviews from "./reviews";
 import GoingSheet from "./going-sheet";
 import InviteSheet from "./invite-sheet";
 import ExploreNearby from "./explore-nearby";
@@ -38,13 +39,29 @@ function fmtDate(iso: string | null): string {
   const d = new Date(iso);
   return `${WD[d.getDay()]}, ${MO[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
 }
-function fmtFans(b: Record<string, any> | null): string {
-  const n = b?.fans;
-  if (!n) return "a notable following";
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M fans`;
-  if (n >= 1e3) return `${Math.round(n / 1e3)}K fans`;
-  return `${n} fans`;
-}
+/** The score, taken apart — one bar per component, heaviest weight first.
+ *
+ *  Labels say what we actually measured. The mockup's panel reads "Artist reviews" and
+ *  "Venue & sound", but our artist figure is a follower count and our venue figure is a
+ *  capacity, so those labels would promise review and audio data we do not hold. Same
+ *  rule as the score itself: describe the evidence, never dress it up. */
+const WHY_ORDER = ["artist", "rarity", "venue", "context", "production"] as const;
+const WHY_LABEL: Record<string, string> = {
+  artist: "Line-up following",
+  rarity: "Rarity & demand",
+  venue: "Venue size",
+  context: "Occasion",
+  production: "Production",
+};
+/** Why a component could not be used. Shown, not hidden: the score is meant to be
+ *  arguable, so it carries its own gaps. */
+const WHY_GAP: Record<string, string> = {
+  artist: "no follower data for this line-up yet",
+  rarity: "no other dates listed to compare against",
+  venue: "this venue's capacity isn't published",
+  context: "nothing marks this out as a special occasion",
+  production: "no honest source for production yet",
+};
 function initials(name: string): string {
   const p = name.trim().split(/\s+/);
   return ((p[0]?.[0] ?? "") + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase();
@@ -108,6 +125,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
   const [error, setError] = useState<string | null>(null);
   const [showWhy, setShowWhy] = useState(false);
   const [showTrust, setShowTrust] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
   const [lineupOpen, setLineupOpen] = useState(false);
   // The artist page opened from the line-up. Same nesting the artist page itself uses
   // for its similar-artists strip, so tapping through feels identical wherever you are.
@@ -219,8 +237,25 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
 
           {/* action row */}
           <View style={styles.segrow}>
-            <Pressable style={styles.segcell} onPress={() => setShowWhy((v) => !v)}>
-              <Text style={styles.segScore}>{ev.mxs != null ? ev.mxs.toFixed(1) : "—"}</Text>
+            {/* The chevron is the whole point of this cell reading as a button. Save and
+                Invite announce themselves with an icon; a bare number next to them looks
+                like a statistic, so nobody discovered that the breakdown was one tap away.
+                It turns down when the panel is open, so the arrow also says which way. */}
+            <Pressable
+              style={styles.segcell}
+              onPress={() => setShowWhy((v) => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showWhy }}
+              accessibilityLabel={ev.mxs != null ? `Rating ${ev.mxs.toFixed(1)}, see why` : "Rating"}
+            >
+              <View style={styles.scoreRow}>
+                <Text style={styles.segScore}>{ev.mxs != null ? ev.mxs.toFixed(1) : "—"}</Text>
+                <Ionicons
+                  name={showWhy ? "chevron-down" : "chevron-forward"}
+                  size={15}
+                  color={ACCENT}
+                />
+              </View>
               <Text style={styles.segLabel}>Rating</Text>
             </Pressable>
             <Pressable style={[styles.segcell, saved && styles.segcellOn]} onPress={() => toggle(ev)}>
@@ -243,14 +278,51 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
             <View style={styles.whyBox}>
               {ev.mxs != null ? (
                 <>
-                  <View style={styles.barRow}>
-                    <Text style={styles.barLabel}>Line-up popularity</Text>
-                    <Text style={styles.barVal}>{ev.mxs.toFixed(1)}</Text>
+                  <View style={styles.whyHead}>
+                    <Ionicons name="star" size={14} color={ACCENT} />
+                    <Text style={styles.whyTitle}>Why {ev.mxs.toFixed(1)}?</Text>
                   </View>
-                  <View style={styles.barTrack}><View style={[styles.barFill, { width: `${ev.mxs * 10}%` }]} /></View>
+
+                  {(() => {
+                    const b = ev.mxs_breakdown ?? {};
+                    const comps: Record<string, any> = b.components ?? {};
+                    // The events scorer writes `missing` as a list of names; the festival
+                    // scorer writes a name -> reason map. Accept either.
+                    const gaps: string[] = Array.isArray(b.missing)
+                      ? b.missing
+                      : Object.keys(b.missing ?? {});
+                    const shown = WHY_ORDER.filter((k) => comps[k]);
+                    if (!shown.length) return null;
+                    return (
+                      <>
+                        {shown.map((k) => {
+                          const c = comps[k];
+                          const score = typeof c.score === "number" ? c.score : 0;
+                          return (
+                            <View key={k} style={styles.whyRow}>
+                              <View style={styles.barRow}>
+                                <Text style={styles.barLabel}>{WHY_LABEL[k] ?? k}</Text>
+                                <Text style={styles.barVal}>{score.toFixed(1)}</Text>
+                              </View>
+                              <View style={styles.barTrack}>
+                                <View style={[styles.barFill, { width: `${Math.max(2, Math.min(100, score * 10))}%` }]} />
+                              </View>
+                              {c.reason ? <Text style={styles.whyReason}>{c.reason}</Text> : null}
+                            </View>
+                          );
+                        })}
+                        {gaps.length ? (
+                          <Text style={styles.whyGap}>
+                            Left out — {gaps.map((g) => WHY_GAP[g] ?? g).join("; ")}. We show the gap
+                            rather than a guess, so the rest of the score stands on real data.
+                          </Text>
+                        ) : null}
+                      </>
+                    );
+                  })()}
+
                   <Text style={styles.whyText}>
-                    Based on the headliner's following — {fmtFans(ev.mxs_breakdown)} on Deezer. Bigger, more in-demand acts
-                    score higher. This scores the <Text style={{ fontWeight: "800" }}>show</Text>, never you — and it can
+                    These score the <Text style={{ fontWeight: "800" }}>show</Text>, never you — and the score can
                     never be bought.
                   </Text>
                 </>
@@ -398,6 +470,20 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
             <Ionicons name="shield-checkmark" size={14} color={GREEN} />
             <Text style={styles.greenText}>We never sell tickets or add a markup — the button below opens the official seller.</Text>
           </View>
+
+          {/* Reviews. Sits under the receipts because it answers the same question from
+              the other side: the facts say what is verified, this says what it was like.
+              Only people who attended can write one — the API enforces it. */}
+          <Pressable style={styles.reviewsCard} onPress={() => setReviewsOpen(true)}>
+            <View style={styles.reviewsIcon}>
+              <Ionicons name="star" size={15} color={ACCENT} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.reviewsTitle}>Reviews</Text>
+              <Text style={styles.reviewsSub}>What fans who were there say</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={17} color={MUTED} />
+          </Pressable>
 
           {/* how we know this — the real receipts, one row per sourced fact */}
           <Pressable style={styles.trustCard} onPress={() => setShowTrust((v) => !v)}>
@@ -559,6 +645,11 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
         eventTitle={ev?.title ?? null}
       />
 
+      <Modal visible={reviewsOpen} animationType="slide"
+             onRequestClose={() => setReviewsOpen(false)}>
+        <Reviews eventId={id} onClose={() => setReviewsOpen(false)} />
+      </Modal>
+
       <InviteSheet
         visible={inviteOpen}
         onClose={() => setInviteOpen(false)}
@@ -604,6 +695,7 @@ const styles = StyleSheet.create({
   segrow: { flexDirection: "row", gap: 10, marginTop: 16 },
   segcell: { flex: 1, backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, paddingVertical: 12, alignItems: "center", gap: 5, minHeight: 62, justifyContent: "center" },
   segcellOn: { borderColor: ACCENT },
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 3 },
   segScore: { color: ACCENT, fontSize: 20, fontWeight: "800" },
   segLabel: { color: "#c8c8d0", fontSize: 12, fontWeight: "700" },
   // The confirmation after sending. A sheet that just closes leaves somebody wondering whether
@@ -623,7 +715,19 @@ const styles = StyleSheet.create({
   barTrack: { height: 7, borderRadius: 4, backgroundColor: "#26262f", overflow: "hidden" },
   barFill: { height: 7, borderRadius: 4, backgroundColor: ACCENT },
   whyText: { color: "#c8c8d0", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  whyHead: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 12 },
+  whyTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
+  whyRow: { marginBottom: 12 },
+  whyReason: { color: MUTED, fontSize: 11.5, lineHeight: 16, marginTop: 5 },
+  whyGap: { color: MUTED, fontSize: 11.5, lineHeight: 16, marginTop: 2, fontStyle: "italic" },
 
+  reviewsCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#14141b",
+                 borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 13,
+                 marginTop: 22 },
+  reviewsIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: "#1e2410",
+                 alignItems: "center", justifyContent: "center" },
+  reviewsTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
+  reviewsSub: { color: MUTED, fontSize: 12, marginTop: 2 },
   section: { color: "#f4f4f6", fontSize: 17, fontWeight: "800", marginTop: 24, marginBottom: 10 },
   lineupCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 12 },
   avStack: { flexDirection: "row" },
