@@ -56,11 +56,11 @@ def list_genres(
 
 @router.get("/artists", response_model=list[GenreArtist])
 def artists_for_genres(
-    genres: str = Query(..., min_length=1, description="Comma-separated genre names"),
+    genres: str = Query("", description="Comma-separated genre names; empty = most popular"),
     limit: int = Query(30, le=100),
     db: Session = Depends(get_db),
 ):
-    """Artists to follow, for the genres a user picked.
+    """Artists to follow — for the genres a user picked, or the most popular if they skipped.
 
     Ordered by whether we hold a photo, then by audience. Photos first is not vanity: this
     is a grid of faces and a screen of grey initials reads as an empty product. Within that,
@@ -68,29 +68,42 @@ def artists_for_genres(
 
     Only artists with an upcoming show, and de-duplicated: someone tagged Rock, Indie AND
     Alternative must appear once, not three times.
+
+    EMPTY `genres` IS A REAL REQUEST, not an error. Skipping the genre step used to leave
+    the follow screen with nothing to show, which is the worst version of a first screen:
+    it asks you to recall an artist's name cold. With no genres this returns the biggest
+    names that are actually touring, so the grid is never empty.
+
+    A name that is not a known genre lands in the same place rather than returning []. It
+    is a deliberate fallthrough: the caller only ever sends names it got from /genres, so
+    this should not happen, and if it does, popular artists are a better answer than a
+    blank screen.
     """
     asked = [g.strip() for g in genres.split(",") if g.strip()][:12]
-    if not asked:
-        return []
     # Only genres that survived the crowd-tag prune, so this endpoint and /genres agree
     # about what a genre is. Without it a caller could ask for "Seen Live X7" — a real
     # string in artists.tags, and not a genre — and get an answer.
     wanted = [r[0] for r in db.execute(text(
-        "SELECT name FROM genres WHERE name = ANY(:asked)"), {"asked": asked}).all()]
-    if not wanted:
-        return []
+        "SELECT name FROM genres WHERE name = ANY(:asked)"), {"asked": asked}).all()] if asked else []
 
-    rows = db.execute(text("""
+    # The tag filter is the only difference between the two cases; everything else about
+    # what makes a good suggestion is the same, so the query is shared rather than forked.
+    tag_filter = "a.tags ?| :wanted AND" if wanted else ""
+    params = {"lim": limit}
+    if wanted:
+        params["wanted"] = wanted
+
+    rows = db.execute(text(f"""
         SELECT a.name, a.image_url, a.deezer_fans, a.lastfm_listeners, a.tags,
                (SELECT count(*) FROM events e
                 WHERE e.headliner_artist_id = a.id AND e.starts_at >= now()) AS shows
         FROM artists a
-        WHERE a.tags ?| :wanted
-          AND EXISTS (SELECT 1 FROM events e
+        WHERE {tag_filter}
+              EXISTS (SELECT 1 FROM events e
                       WHERE e.headliner_artist_id = a.id AND e.starts_at >= now())
         ORDER BY (a.image_url IS NULL), a.deezer_fans DESC NULLS LAST, a.name
         LIMIT :lim
-    """), {"wanted": wanted, "lim": limit}).all()
+    """), params).all()
 
     picked = set(wanted)
     out = []

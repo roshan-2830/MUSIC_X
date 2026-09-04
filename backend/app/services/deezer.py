@@ -15,9 +15,15 @@ def search_artists(q: str, limit: int = 20) -> list[dict]:
     """Search Deezer's global artist catalogue so users can follow ANY real artist —
     even ones with no show yet (which is exactly what powers 'alert me when they tour').
     Deezer returns results popularity-ranked, so the real act beats tribute bands."""
+    # Ask Deezer for far more than we need, because the re-rank below can only sort what
+    # it is given. Deezer's own ordering is fuzzy relevance: "taylor" returns Taylor (815
+    # fans), Taylor & Close (123) and Taylor & Co Worship (1) in its first three, and
+    # Taylor Swift does not appear until further down. Sorting three obscure matches by
+    # popularity still yields three obscure matches — the fix has to be a bigger net.
+    fetch = min(100, max(limit * 6, 30))
     try:
         r = httpx.get("https://api.deezer.com/search/artist",
-                      params={"q": q, "limit": limit}, timeout=20)
+                      params={"q": q, "limit": fetch}, timeout=20)
         r.raise_for_status()
         items = r.json().get("data", [])
     except Exception:
@@ -50,7 +56,9 @@ def search_artists(q: str, limit: int = 20) -> list[dict]:
             continue
         seen.add(k)
         unique.append(a)
-    return unique
+    # Trim only now. The over-fetch above is a wider net for ranking, not a bigger answer:
+    # the caller asked for `limit` and must still get `limit`.
+    return unique[:limit]
 
 
 def artist_image(name: str) -> str | None:

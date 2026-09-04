@@ -17,18 +17,11 @@ _jwks_client = jwt.PyJWKClient(_JWKS_URL)
 _bearer = HTTPBearer(auto_error=True)
 
 
-def get_current_user_id(
-    creds: HTTPAuthorizationCredentials = Depends(_bearer),
-) -> str:
-    """Verify the caller's Supabase access token; return their user id (JWT 'sub').
-
-    Any route that depends on this becomes 'login required' — a missing, expired,
-    or invalid token yields 401.
-    """
-    token = creds.credentials
+def _verify(token: str) -> dict:
+    """Verify a Supabase access token and return its claims, or raise 401."""
     try:
         signing_key = _jwks_client.get_signing_key_from_jwt(token)
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             signing_key.key,
             algorithms=["ES256"],
@@ -42,10 +35,48 @@ def get_current_user_id(
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
 
+
+def get_current_user_id(
+    creds: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> str:
+    """Verify the caller's Supabase access token; return their user id (JWT 'sub').
+
+    Any route that depends on this becomes 'login required' — a missing, expired,
+    or invalid token yields 401.
+    """
+    payload = _verify(creds.credentials)
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing subject")
     return user_id
+
+
+def get_current_user_claims(
+    creds: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> dict:
+    """The whole verified claim set, for the one thing that needs more than the id.
+
+    Sign-up writes the person's name into Supabase `user_metadata`, and Supabase puts that
+    into the access token. Reading it here means a new profile can be created with a real
+    name already on it, rather than the client having to remember to send one in a second
+    call that might never arrive.
+    """
+    return _verify(creds.credentials)
+
+
+def display_name_from_claims(claims: dict) -> str | None:
+    """The name the person typed at sign-up, if it is there.
+
+    Only user_metadata is consulted, never the email. Deriving a name from an address is
+    what produced profiles called "roshanjadhav2830" — which then showed up in the Me tab
+    and in invite search as if it were a name.
+    """
+    meta = claims.get("user_metadata") or {}
+    for key in ("display_name", "full_name", "name"):
+        v = (meta.get(key) or "").strip() if isinstance(meta.get(key), str) else None
+        if v:
+            return v[:60]
+    return None
 
 def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
     """Admin-only. Verifies the caller is a logged-in user AND on the admin allowlist.

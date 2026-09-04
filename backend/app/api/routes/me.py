@@ -10,7 +10,7 @@ from sqlalchemy import and_, func, nulls_last, or_
 from sqlalchemy.orm import Session
 
 from app.api.routes.events import _to_list_item, _to_list_items, with_related
-from app.core.security import get_current_user_id
+from app.core.security import display_name_from_claims, get_current_user_claims, get_current_user_id
 from app.db.session import get_db
 from app.models.artist import Artist
 from app.models.calendar_entry import CalendarEntry
@@ -60,14 +60,26 @@ def _to_out(db: Session, p: Profile) -> ProfileOut:
 
 
 @router.get("", response_model=ProfileOut)
-def get_me(user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    uid = uuid.UUID(user_id)
+def get_me(claims: dict = Depends(get_current_user_claims), db: Session = Depends(get_db)):
+    uid = uuid.UUID(claims["sub"])
     profile = db.get(Profile, uid)
     if not profile:                       # first sign-in → create the profile row
-        profile = Profile(id=uid)
+        # Seed the name from the sign-up form, which Supabase carries in the token's
+        # user_metadata. Without this the row starts nameless, and a nameless profile is
+        # invisible to invite search — which matches on display_name — so a new user
+        # cannot be found by the friend trying to invite them.
+        profile = Profile(id=uid, display_name=display_name_from_claims(claims))
         db.add(profile)
         db.commit()
         db.refresh(profile)
+    elif not profile.display_name:
+        # An older row from before sign-up asked for a name: fill it in the first time we
+        # see a token that has one, rather than leaving them permanently unsearchable.
+        name = display_name_from_claims(claims)
+        if name:
+            profile.display_name = name
+            db.commit()
+            db.refresh(profile)
     return _to_out(db, profile)
 
 
