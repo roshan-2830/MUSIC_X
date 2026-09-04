@@ -291,8 +291,23 @@ def drop_duplicate_festival_events(dry_run: bool = True) -> dict:
         was merged into. A listing whose only festival row was merged away is still covered
         by the survivor; a listing with no festival at all is left alone rather than
         disappearing from the app entirely.
-      • Never an event a user saved or was alerted about. Nothing outranks that, and if one
-        ever appears it is reported and skipped rather than quietly taken.
+      • Never an event carrying anything a user made. Every table below CASCADEs from
+        events except events.merged_into and passport_entries, so an unguarded delete does
+        not fail — it silently takes a saved show, an invite, a review, a trip stop or a
+        passport stamp with it. The first version of this guard checked two of the seven
+        and would have been quiet about the rest.
+
+    AND the merged_into pointer, which is why this used to fail every sweep
+
+    events.merged_into is a self-reference with ON DELETE NO ACTION: another event row can
+    say "I am a duplicate, the real one is over there". Three Gracie Abrams package rows
+    pointed at a doomed listing, so the DELETE hit
+    `events_merged_into_fkey` and rolled the whole pass back — every three hours, for good,
+    while 32 duplicates stayed on the concert side.
+
+    A row merged into a doomed listing IS that listing under another name, so it goes too.
+    If any member of such a family is protected, the whole family stays: deleting the row a
+    survivor points at would only re-break the same constraint.
     """
     db: Session = SessionLocal()
     covered = """
@@ -312,18 +327,45 @@ def drop_duplicate_festival_events(dry_run: bool = True) -> dict:
             print("[festivals] no duplicate concert rows")
             return out
 
+        # Pull in anything merged into a covered listing, transitively.
+        family = [r[0] for r in db.execute(text("""
+            WITH RECURSIVE fold AS (
+                SELECT id FROM events WHERE id = ANY(:ids)
+                UNION
+                SELECT e.id FROM events e JOIN fold ON e.merged_into = fold.id
+            )
+            SELECT id FROM fold"""), {"ids": ids}).all()]
+
+        # Every table that holds something a user made. All but passport_entries cascade,
+        # which is exactly why they have to be checked here instead of trusted to complain.
         protected = [r[0] for r in db.execute(text("""
-            SELECT DISTINCT event_id FROM calendar_entries WHERE event_id = ANY(:ids)
-            UNION
-            SELECT DISTINCT event_id FROM notifications WHERE event_id = ANY(:ids)
-        """), {"ids": ids}).all()]
-        out["kept_because_saved"] = len(protected)
-        doomed = [i for i in ids if i not in set(protected)]
+            SELECT DISTINCT event_id FROM calendar_entries      WHERE event_id = ANY(:ids)
+            UNION SELECT DISTINCT event_id FROM notifications   WHERE event_id = ANY(:ids)
+            UNION SELECT DISTINCT event_id FROM passport_entries WHERE event_id = ANY(:ids)
+            UNION SELECT DISTINCT event_id FROM event_invites   WHERE event_id = ANY(:ids)
+            UNION SELECT DISTINCT event_id FROM reviews         WHERE event_id = ANY(:ids)
+            UNION SELECT DISTINCT event_id FROM hotel_bookings  WHERE event_id = ANY(:ids)
+            UNION SELECT DISTINCT event_id FROM trip_stops      WHERE event_id = ANY(:ids)
+        """), {"ids": family}).all()]
+
+        # A protected row must survive, so everything it points at has to survive with it.
+        keep = set(protected)
+        if protected:
+            keep |= {r[0] for r in db.execute(text("""
+                WITH RECURSIVE up AS (
+                    SELECT id, merged_into FROM events WHERE id = ANY(:p)
+                    UNION
+                    SELECT e.id, e.merged_into FROM events e JOIN up ON up.merged_into = e.id
+                )
+                SELECT id FROM up"""), {"p": protected}).all()}
+        out["kept_because_saved"] = len(keep)
+        doomed = [i for i in family if i not in keep]
 
         titles = db.execute(text("""SELECT title, count(*) FROM events WHERE id = ANY(:ids)
                                     GROUP BY title ORDER BY count(*) DESC, title LIMIT 12"""),
                             {"ids": doomed}).all()
-        print(f"[festivals] {len(doomed)} concert rows are really festival listings")
+        print(f"[festivals] {len(doomed)} concert rows are really festival listings"
+              + (f" (incl. {len(family) - len(ids)} merged into them)" if len(family) > len(ids) else ""))
         for t, n in titles:
             print(f"    {n} x  {t[:66]}")
         if protected:
@@ -333,6 +375,10 @@ def drop_duplicate_festival_events(dry_run: bool = True) -> dict:
             for tbl in ("event_facts", "event_artists", "event_offers", "event_genres",
                         "event_sources", "event_changes"):
                 db.execute(text(f"DELETE FROM {tbl} WHERE event_id = ANY(:ids)"), {"ids": doomed})
+            # Cut the self-references inside the doomed set before removing the rows, so
+            # the order rows happen to be deleted in can never matter.
+            db.execute(text("UPDATE events SET merged_into = NULL WHERE id = ANY(:ids)"),
+                       {"ids": doomed})
             db.execute(text("DELETE FROM events WHERE id = ANY(:ids)"), {"ids": doomed})
             db.commit()
             out["deleted"] = len(doomed)
