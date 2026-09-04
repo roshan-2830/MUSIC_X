@@ -52,6 +52,29 @@ NOT_A_TICKET = (
 )
 
 
+def _capture_mbid(artist, attraction: dict) -> None:
+    """Store the MusicBrainz id Ticketmaster already sent us.
+
+    setlist.fm is keyed on mbids — its artist pages ARE mbids — so holding one turns a
+    fuzzy name search into an exact lookup. This costs nothing: the field is sitting in a
+    payload we have already downloaded and were discarding.
+
+    The checked-date is written even when there is no mbid. Tribute acts and small local
+    names frequently have none, and without the marker every ingest would re-inspect the
+    same artists forever — the same waste that had the scorer making 1,118 doomed Deezer
+    calls a run until today.
+    """
+    from datetime import date as _date
+
+    if artist is None or artist.mbid:
+        return
+    links = (attraction.get("externalLinks") or {}).get("musicbrainz") or []
+    mbid = (links[0].get("id") if links and isinstance(links[0], dict) else None) or None
+    if mbid:
+        artist.mbid = mbid[:36]
+    artist.mbid_checked_on = _date.today()
+
+
 def is_not_attendable(title: str) -> bool:
     """True when the listing itself says it is not a ticket to an event.
 
@@ -300,6 +323,7 @@ def upsert_event(db: Session, e: dict, full: bool = True):
     headliner = None
     if attractions and attractions[0].get("name"):
         headliner = artist_lookup.get_or_create(db, attractions[0]["name"])
+        _capture_mbid(headliner, attractions[0])
 
     pr = (e.get("priceRanges") or [{}])[0]
 
@@ -368,6 +392,7 @@ def upsert_event(db: Session, e: dict, full: bool = True):
         # filter_by on the exact string — the strictest match in the codebase, sitting in
         # the path that writes line-ups. 'Weezer' and 'weezer' would have become two acts.
         artist = artist_lookup.get_or_create(db, att["name"])
+        _capture_mbid(artist, att)
         if artist.id in seen_artists:
             continue
         seen_artists.add(artist.id)

@@ -186,3 +186,70 @@ def attended(username: str, max_pages: int = MAX_PAGES) -> tuple[list, bool]:
         page += 1
     # Ran out of pages before running out of history.
     return out, False
+
+
+# ─────────────────────────────────────────── what an artist actually plays live
+
+def live_facts(artist_name: str, mbid: str | None = None) -> dict | None:
+    """What this artist played at their most recent show.
+
+    This is the honest answer to "what will the night be like?" — and it exists because
+    there are no concert reviews to import from anywhere. setlist.fm holds no reviews,
+    Ticketmaster's API exposes none, Songkick's API is closed, and Google reviews the
+    building rather than the night. Every concert happens once and nobody keeps a library
+    of opinions about them.
+
+    What setlist.fm does hold is a fact: the songs. A 24-song night with two encores is a
+    different proposition from a 9-song festival slot, and saying so needs no opinion at
+    all. It gives the reviews screen something real on day one, before any user has
+    written anything.
+
+    Returns None rather than a partial dict when there is nothing worth showing — a
+    setlist with no songs is a stub somebody created and never filled in, and "0 songs"
+    on a screen reads as a bug.
+    """
+    if not configured() or budget_left() <= 0:
+        return None
+
+    # BY MBID WHEN WE HAVE ONE. setlist.fm is built on MusicBrainz ids — an artist page
+    # there IS an mbid — so this is an exact lookup with no matching involved. Asking by
+    # name is the weakest possible key: a miss shows an empty screen, but a mismatch shows
+    # a covers band's setlist under a stadium act, which is worse because it looks true.
+    # Ticketmaster hands us the mbid for free; see ingestion._capture_mbid.
+    try:
+        if mbid:
+            r = _throttled_get(f"{BASE}/artist/{mbid}/setlists", {"p": 1})
+        else:
+            r = _throttled_get(f"{BASE}/search/setlists", {"artistName": artist_name, "p": 1})
+        if r is None or r.status_code != 200:
+            return None
+        items = r.json().get("setlist") or []
+    except Exception:
+        return None
+
+    for sl in items:
+        sets = (sl.get("sets") or {}).get("set") or []
+        songs = [s.get("name") for grp in sets for s in (grp.get("song") or []) if s.get("name")]
+        if len(songs) < 4:
+            # Stubs and partial entries are common. Below four songs it is somebody's
+            # half-finished record, not a setlist.
+            continue
+        venue = sl.get("venue") or {}
+        city = venue.get("city") or {}
+        return {
+            "songs": len(songs),
+            "encores": sum(1 for grp in sets if grp.get("encore")),
+            "opener": songs[0],
+            "closer": songs[-1],
+            "venue_name": venue.get("name"),
+            "city": city.get("name"),
+            "country": ((city.get("country") or {}).get("code") or "").upper()[:2] or None,
+            "seen_on": _event_date(sl.get("eventDate")).isoformat()
+                        if _event_date(sl.get("eventDate")) else None,
+            "tour": (sl.get("tour") or {}).get("name"),
+            "url": sl.get("url"),          # attribution: setlist.fm asks for a link back
+            # How the artist was identified. A setlist matched by name is a guess that
+            # happened to land; matched by mbid it is the same artist by definition.
+            "matched_by": "mbid" if mbid else "name",
+        }
+    return None

@@ -46,3 +46,17 @@ class Artist(Base):
     deezer_fans = Column(Integer, nullable=True)
     lastfm_listeners = Column(Integer, nullable=True)
     popularity_checked_on = Column(Date, nullable=True)
+
+    # What setlist.fm says this artist plays live, cached. The reviews screen shows it
+    # because there are no concert reviews to import from anywhere — see
+    # setlistfm.live_facts. Checked-date separate from the value so "asked, nothing
+    # there" is not stored as "never asked".
+    live_facts = Column(JSONB, nullable=True)
+    live_facts_checked_on = Column(Date, nullable=True)
+
+    # The MusicBrainz id, from Ticketmaster's externalLinks. setlist.fm is keyed on
+    # these, so asking by id removes the name-matching that has misfired on every
+    # other service. Checked-date separate, because plenty of artists legitimately
+    # have no mbid and must not be re-examined on every ingest.
+    mbid = Column(String(36), nullable=True, index=True)
+    mbid_checked_on = Column(Date, nullable=True)
