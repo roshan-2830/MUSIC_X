@@ -1,118 +1,95 @@
-"""Fetch a venue's max capacity from Wikidata (P1083) — a real, structured signal
-for the MXS Venue component. Disambiguated (the matched entity must *look* like a
-venue) so we never attach the wrong building's capacity. Returns None when there's
-no confident match — coverage is partial (great for arenas/stadiums, thin for
-small clubs), which is fine: the Venue component is simply omitted when unknown.
+"""Venue capacity from Wikidata.
+
+WHY WIKIDATA AND NOT OPENSTREETMAP. Both were tested against our own 25 busiest venues.
+Wikidata returned a capacity for 6 of them — The O2 20,000, OVO Hydro 13,000, O2 universum
+10,000, ABBA Arena 3,000, Melkweg 1,500, Arlene Schnitzer 2,776 — all correct. OSM, matched
+by coordinate, returned capacity 26 for The O2, 5 for Blue Note Jazz Club and 2 for Whisky
+A Go Go: its `capacity` tag near a venue is parking spaces, bike racks or a lift. Scoring on
+that would have made the O2 a 26-seat room.
+
+WHY THE MediaWiki API AND NOT SPARQL. The obvious SPARQL query matches on rdfs:label, which
+asks Wikidata to scan every label it holds; it rejected all 25 attempts. Two cheap REST
+calls — search for the entity, read one property off it — return in well under a second.
+
+Licence: Wikidata is CC0. No key, no attribution requirement, commercial use fine.
 """
+import re
+import unicodedata
+
 import httpx
 
-_API = "https://www.wikidata.org/w/api.php"
-_HEADERS = {"User-Agent": "MusicX/0.1 (music discovery app; dev)"}
-_VENUE_WORDS = (
-    "arena", "stadium", "venue", "hall", "theatre", "theater", "amphitheater",
-    "amphitheatre", "auditorium", "centre", "center", "club", "ballroom", "pavilion",
-    "colosseum", "coliseum", "bowl", "dome", "forum", "garden", "field", "park",
-    "music", "concert", "opera", "arts", "grounds", "racecourse", "convention",
-)
+API = "https://www.wikidata.org/w/api.php"
+CAPACITY = "P1083"
+UA = "MusicX/0.1 (concert discovery; jadhav.r@yangtsofour.com)"
+TIMEOUT = 20
+
+# A room can hold a handful of people or a hundred thousand. Outside that, the number is
+# not a capacity — it is a year, a postcode, or a different property misfiled.
+MIN_CAP = 30
+MAX_CAP = 250_000
+
+# Subscript and full-width digits appear in venue names ("O₂ universum"), and the search
+# API resolves them while a plain string compare does not.
+_SUBS = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
 
 
-def venue_capacity(name: str):
-    """Return the venue's maximum capacity (int) or None."""
-    if not name:
-        return None
-    try:
-        r = httpx.get(_API, params={
-            "action": "wbsearchentities", "search": name, "language": "en",
-            "type": "item", "limit": 6, "format": "json",
-        }, headers=_HEADERS, timeout=20)
-        r.raise_for_status()
-        hits = r.json().get("search", [])
-    except Exception:
-        return None
-
-    pick = next((h for h in hits if any(w in (h.get("description") or "").lower() for w in _VENUE_WORDS)), None)
-    if not pick:
-        return None
-
-    try:
-        c = httpx.get(_API, params={
-            "action": "wbgetclaims", "entity": pick["id"], "property": "P1083", "format": "json",
-        }, headers=_HEADERS, timeout=20)
-        c.raise_for_status()
-        claims = c.json().get("claims", {}).get("P1083", [])
-    except Exception:
-        return None
-
-    for cl in claims:
-        try:
-            cap = int(float(cl["mainsnak"]["datavalue"]["value"]["amount"]))
-            if cap > 0:
-                return cap
-        except (KeyError, TypeError, ValueError):
-            continue
-    return None
+def _tokens(s: str) -> set:
+    s = unicodedata.normalize("NFKC", (s or "").translate(_SUBS)).lower()
+    return {t for t in re.split(r"[^a-z0-9]+", s) if t and t not in {"the", "at", "of", "and"}}
 
 
-# --- the artist's own website (P856) ----------------------------------------
-# An official site is the artist's own words about themselves, so it is worth
-# linking above Wikipedia. Same disambiguation discipline as venue_capacity: the
-# matched entity has to LOOK like a musician, or we return nothing rather than
-# risk linking a footballer's homepage on a singer's page.
-_MUSIC_WORDS = (
-    "singer", "musician", "band", "rapper", "dj", "composer", "songwriter",
-    "group", "duo", "producer", "guitarist", "drummer", "vocalist", "pianist",
-    "rock", "pop", "metal", "hip hop", "record producer", "orchestra", "music",
-    "artist", "performer", "ensemble", "trio", "quartet", "rock band",
-)
+def _plausible(ours: str, theirs: str) -> bool:
+    """Is the entity we found actually the venue we asked about?
 
-
-def artist_official_site(name: str):
-    """(url_or_None, looked_up_ok).
-
-    Two different "no URL" cases have to be told apart, or we cache a lie:
-
-      (None, True)  — we asked Wikidata and it genuinely has no official site for
-                      this artist. Safe to remember, so we stop asking.
-      (None, False) — the lookup itself failed (timeout, rate limit, bad response).
-                      We know nothing. Do NOT record this as "no website", or one
-                      throttled request permanently blanks a real artist's link.
-
-    Wikidata rate-limits happily, and this exact case bit during development: Weezer
-    came back empty on one call and returned http://www.weezer.com on the next.
+    The guard exists because searching "Sphere" returns a French philosophy publication.
+    That one happened to carry no capacity and so failed safely, but a one-word venue name
+    matching a stadium on another continent would not — it would silently import somebody
+    else's number and the score would be built on it.
     """
-    if not name or name.upper() in ("TBA", "VARIOUS"):
-        return None, True
+    a, b = _tokens(ours), _tokens(theirs)
+    if not a or not b:
+        return False
+    if a <= b or b <= a:          # "o2" ⊂ "o2 arena": the same place, named longer
+        return True
+    return len(a & b) / len(a | b) >= 0.6
+
+
+def capacity_for(name: str) -> tuple[int | None, str | None]:
+    """(capacity, the Wikidata label it came from) — or (None, reason) when there is none.
+
+    Returns the matched label so a backfill can be audited: a number with no provenance is
+    exactly the kind of thing that ends up unexplainable three weeks later.
+    """
+    clean = (name or "").strip()
+    if len(clean) < 3:
+        return None, "name too short"
     try:
-        r = httpx.get(_API, params={
-            "action": "wbsearchentities", "search": name, "language": "en",
-            "type": "item", "limit": 6, "format": "json",
-        }, headers=_HEADERS, timeout=20)
+        r = httpx.get(API, params={
+            "action": "wbsearchentities", "search": clean, "language": "en",
+            "format": "json", "type": "item", "limit": 5,
+        }, headers={"User-Agent": UA}, timeout=TIMEOUT)
         r.raise_for_status()
         hits = r.json().get("search", [])
-    except Exception:
-        return None, False
+    except Exception as e:
+        return None, f"search failed: {type(e).__name__}"
 
-    pick = next((h for h in hits
-                 if any(w in (h.get("description") or "").lower() for w in _MUSIC_WORDS)), None)
-    if not pick:
-        return None, True          # no musician by that name on Wikidata
-
-    try:
-        c = httpx.get(_API, params={
-            "action": "wbgetclaims", "entity": pick["id"], "property": "P856", "format": "json",
-        }, headers=_HEADERS, timeout=20)
-        c.raise_for_status()
-        claims = c.json().get("claims", {}).get("P856", [])
-    except Exception:
-        return None, False
-
-    for cl in claims:
-        # Wikidata marks superseded values "deprecated" — that is the community
-        # saying "this used to be the site". Linking it would send fans to a dead
-        # or resold domain, so we take the current one only.
-        if cl.get("rank") == "deprecated":
+    for h in hits:
+        label = h.get("label") or ""
+        if not _plausible(clean, label):
             continue
-        url = (cl.get("mainsnak", {}).get("datavalue", {}) or {}).get("value")
-        if isinstance(url, str) and url.startswith(("http://", "https://")):
-            return url, True
-    return None, True
+        try:
+            c = httpx.get(API, params={
+                "action": "wbgetclaims", "entity": h["id"],
+                "property": CAPACITY, "format": "json",
+            }, headers={"User-Agent": UA}, timeout=TIMEOUT).json()
+        except Exception:
+            continue
+        for claim in c.get("claims", {}).get(CAPACITY, []):
+            try:
+                amount = claim["mainsnak"]["datavalue"]["value"]["amount"]
+                cap = int(float(str(amount).lstrip("+")))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if MIN_CAP <= cap <= MAX_CAP:
+                return cap, label
+    return None, "no capacity on any plausible match"

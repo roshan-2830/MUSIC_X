@@ -58,7 +58,50 @@ FESTIVAL_RARE = RARE_WORDS + ("final edition", "last edition", "farewell edition
                               "first edition", "inaugural")
 
 
-def _real_bill(db: Session, f: Festival) -> list:
+def build_festival_index(db: Session, fests: list) -> dict:
+    """Every bill, every folded name and the genre list, in four queries.
+
+    _real_bill ran four queries per festival, and it is called twice per festival — once
+    from _artist and once from _context — so a full pass was roughly eight round trips
+    times 493 festivals. Against a database in Singapore that took 17 minutes and then
+    lost the connection before it could commit, which is why festival scores went stale.
+
+    Nothing here is big: 8,722 line-up rows, 1,532 genres. It was never a data problem,
+    only a round-trip one. Same fix as build_tour_graph and build_bill_index.
+    """
+    ids = [f.id for f in fests]
+    if not ids:
+        return {"bills": {}, "genre_folds": set(), "folded": {}, "own": {}}
+
+    bills: dict = {}
+    for fid, a in (db.query(FestivalLineup.festival_id, Artist)
+                     .join(Artist, Artist.id == FestivalLineup.artist_id)
+                     .filter(FestivalLineup.festival_id.in_(ids))
+                     # Artist.name breaks ties in sort_order. Without it the bill order
+                     # is whatever the planner returns, and stature_from_bill judges only
+                     # the first six — so the same festival could score differently between
+                     # two runs that read identical data.
+                     .order_by(FestivalLineup.festival_id, FestivalLineup.sort_order,
+                               Artist.name).all()):
+        bills.setdefault(fid, []).append(a)
+
+    # The curated genre list, folded once instead of re-folded per festival.
+    genre_folds = {r[0] for r in db.execute(
+        text("SELECT public.mx_fold(name) FROM genres")).all()}
+
+    names = sorted({a.name for rows in bills.values() for a in rows if a.name})
+    folded = dict(db.execute(text(
+        "SELECT n, public.mx_fold(n) FROM unnest(CAST(:names AS text[])) AS n"),
+        {"names": names}).all()) if names else {}
+
+    own = dict(db.execute(text(
+        "SELECT id, public.mx_fold(name) FROM festivals WHERE id = ANY(:ids)"),
+        {"ids": ids}).all())
+
+    return {"bills": bills, "genre_folds": genre_folds, "folded": folded, "own": own}
+
+
+def _real_bill(db: Session, f: Festival, index: dict | None = None) -> list:
     """The acts actually playing — with the two things that are not acts removed.
 
     Ticketmaster bills things that are not performers, and stored as artists they inherit
@@ -76,30 +119,36 @@ def _real_bill(db: Session, f: Festival) -> list:
     Same family as 'Fast Track - O2 arena' and 'AO Arena - Premium Packages': strings from
     a ticketing system that became artist rows because something had to hold them.
     """
-    rows = (db.query(Artist)
-              .join(FestivalLineup, FestivalLineup.artist_id == Artist.id)
-              .filter(FestivalLineup.festival_id == f.id)
-              .order_by(FestivalLineup.sort_order).all())
-    if not rows:
-        return []
-    names = [a.name for a in rows]
-    genre_names = {r[0] for r in db.execute(text("""
-        SELECT public.mx_fold(a.name) FROM artists a
-        WHERE a.name = ANY(:names)
-          AND EXISTS (SELECT 1 FROM genres g
-                      WHERE public.mx_fold(g.name) = public.mx_fold(a.name))"""),
-        {"names": names}).all()}
-    own = db.execute(text("SELECT public.mx_fold(:n)"), {"n": f.name or ""}).scalar()
-    folded = {a.name: r[0] for a, r in zip(rows, db.execute(text(
-        "SELECT public.mx_fold(n) FROM unnest(CAST(:names AS text[])) AS n"), {"names": names}).all())}
+    if index is not None:
+        rows = index["bills"].get(f.id) or []
+        if not rows:
+            return []
+        folded, genre_folds = index["folded"], index["genre_folds"]
+        own = index["own"].get(f.id)
+    else:
+        # Single-festival path, kept for any caller scoring one row on its own.
+        rows = (db.query(Artist)
+                  .join(FestivalLineup, FestivalLineup.artist_id == Artist.id)
+                  .filter(FestivalLineup.festival_id == f.id)
+                  .order_by(FestivalLineup.sort_order, Artist.name).all())
+        if not rows:
+            return []
+        names = [a.name for a in rows]
+        genre_folds = {r[0] for r in db.execute(
+            text("SELECT public.mx_fold(name) FROM genres")).all()}
+        own = db.execute(text("SELECT public.mx_fold(:n)"), {"n": f.name or ""}).scalar()
+        folded = dict(db.execute(text(
+            "SELECT n, public.mx_fold(n) FROM unnest(CAST(:names AS text[])) AS n"),
+            {"names": names}).all())
+
     return [a for a in rows
-            if folded.get(a.name) not in genre_names and folded.get(a.name) != own]
+            if folded.get(a.name) not in genre_folds and folded.get(a.name) != own]
 
 
-def _artist(db: Session, f: Festival, cache: dict):
+def _artist(db: Session, f: Festival, cache: dict, index: dict | None = None):
     """The bill, judged exactly as a concert's line-up is."""
     # live=False: read stored popularity only. See stature_from_bill.
-    return stature_from_bill(db, _real_bill(db, f), cache, live=False)
+    return stature_from_bill(db, _real_bill(db, f, index), cache, live=False)
 
 
 def _rarity(f: Festival):
@@ -110,7 +159,7 @@ def _rarity(f: Festival):
     return {"pct": 0.9, "confidence": "high", "reason": f"Rare occasion · “{hit}”"}
 
 
-def _context(db: Session, f: Festival):
+def _context(db: Session, f: Festival, index: dict | None = None):
     """How much festival this is: days on site, and how many acts it books.
 
     Continuous, not a flag. The concert scorer can only ask "is this a festival?" and answer
@@ -122,7 +171,7 @@ def _context(db: Session, f: Festival):
     # have line-up rows and no artists_count, and without this fallback every one of them
     # scored on the artist component ALONE — a single line of evidence, rank-calibrated to a
     # decimal place, which reads far more certain than it is.
-    acts = f.artists_count or len(_real_bill(db, f))
+    acts = f.artists_count or len(_real_bill(db, f, index))
     days = f.days or ((f.ends_on - f.starts_on).days + 1 if f.ends_on and f.starts_on else None)
 
     # The BILL is the festival. A duration on its own says nothing about quality, and taking
@@ -149,15 +198,16 @@ def _context(db: Session, f: Festival):
     }
 
 
-def _collect(db: Session, f: Festival, cache: dict) -> dict:
+def _collect(db: Session, f: Festival, cache: dict, index: dict | None = None) -> dict:
     comps = {}
-    if (a := _artist(db, f, cache)):
+    if (a := _artist(db, f, cache, index)):
         comps["artist"] = {"weight": WEIGHTS["artist"], "raw": a["raw"], "source": a["source"],
-                           "confidence": a["confidence"], "reason": a["reason"]}
+                           "confidence": a["confidence"], "reason": a["reason"],
+                           "below_floor": a["below_floor"]}
     if (r := _rarity(f)):
         comps["rarity"] = {"weight": WEIGHTS["rarity"], "pct": r["pct"],
                            "confidence": r["confidence"], "reason": r["reason"]}
-    if (c := _context(db, f)):
+    if (c := _context(db, f, index)):
         comps["context"] = {"weight": WEIGHTS["context"], "raw": c["raw"],
                             "confidence": c["confidence"], "reason": c["reason"]}
     return comps
@@ -174,9 +224,10 @@ def score_all_festivals() -> dict:
                    .filter((Festival.ends_on >= today) | (Festival.starts_on >= today)
                            | (Festival.starts_on.is_(None)))
                    .all())
+        index = build_festival_index(db, fests)
         blended = []
         for f in fests:
-            comps = _collect(db, f, cache)
+            comps = _collect(db, f, cache, index)
             if not comps:
                 f.mxs = None
                 f.mxs_breakdown = {"scored": False,
@@ -188,9 +239,11 @@ def score_all_festivals() -> dict:
         # cohorts and a bill sits in exactly one — those Deezer knows, and those only
         # Last.fm knows — never both, and never ranked twice for the better result.
         ctx = sorted(c["context"]["raw"] for _, c in blended if "context" in c)
+        # Below the stature floor an act is placed, not ranked — same rule as concerts,
+        # because the component comes from the same function and must not drift.
         by_source: dict = {}
         for _, c in blended:
-            if (a := c.get("artist")):
+            if (a := c.get("artist")) and not a.get("below_floor"):
                 by_source.setdefault(a["source"], []).append(a["raw"])
         for k in by_source:
             by_source[k].sort()
@@ -200,8 +253,13 @@ def score_all_festivals() -> dict:
             parts = []
             for name, c in comps.items():
                 if name == "artist":
-                    c["pct"] = _pct(by_source[c["source"]], c["raw"])
-                    c["ranked_against"] = c["source"]
+                    cohort = by_source.get(c["source"])
+                    if c.get("below_floor") or not cohort:
+                        c["pct"] = 0.0
+                        c["ranked_against"] = "floor"
+                    else:
+                        c["pct"] = _pct(cohort, c["raw"])
+                        c["ranked_against"] = c["source"]
                 elif name == "context":
                     c["pct"] = _pct(ctx, c["raw"])
                 parts.append((c["pct"], c["weight"]))
