@@ -47,6 +47,8 @@ export default function TripsScreen() {
   const [end, setEnd] = useState(iso(new Date(Date.now() + 30 * 864e5)));
   const [mode, setMode] = useState("fly");
   const [pickDates, setPickDates] = useState(false);
+  // Which of the two boxes was tapped — the calendar opens setting that end.
+  const [pickEnd, setPickEnd] = useState<"start" | "end">("start");
 
   const [plan, setPlan] = useState<TripPlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -119,17 +121,33 @@ export default function TripsScreen() {
           </Pressable>
 
           <Text style={styles.label}>When are you free?</Text>
-          <Pressable style={styles.field} onPress={() => setPickDates(true)}>
-            <Ionicons name="calendar-outline" size={16} color={ACCENT} />
-            <Text style={styles.fieldT}>
-              {pretty(start)} – {pretty(end)}
-            </Text>
-            <Text style={styles.nights}>
-              {Math.round((new Date(end + "T12:00:00").getTime()
-                         - new Date(start + "T12:00:00").getTime()) / 864e5)}n
-            </Text>
-            <Ionicons name="chevron-forward" size={16} color={MUTED} />
-          </Pressable>
+          {/* Two boxes rather than one combined range. The single field read as
+              "1 Sep – 1 Oct" and gave no clue that the calendar behind it wanted the
+              start first and the end second. */}
+          <View style={styles.whenRow}>
+            {([
+              { key: "start" as const, label: "From", value: start },
+              { key: "end" as const, label: "To", value: end },
+            ]).map((f) => (
+              <Pressable
+                key={f.key}
+                style={styles.whenField}
+                onPress={() => { setPickEnd(f.key); setPickDates(true); }}
+                accessibilityRole="button"
+                accessibilityLabel={`${f.label}: ${pretty(f.value)}`}
+              >
+                <Text style={styles.whenLabel}>{f.label}</Text>
+                <View style={styles.whenValueRow}>
+                  <Ionicons name="calendar-outline" size={15} color={ACCENT} />
+                  <Text style={styles.whenValue}>{pretty(f.value)}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.nightsLine}>
+            {Math.round((new Date(end + "T12:00:00").getTime()
+                       - new Date(start + "T12:00:00").getTime()) / 864e5)} nights
+          </Text>
 
           <Text style={styles.label}>How far will you go?</Text>
           <View style={styles.seg}>
@@ -199,6 +217,7 @@ export default function TripsScreen() {
         visible={pickDates}
         start={start}
         end={end}
+        editing={pickEnd}
         onClose={() => setPickDates(false)}
         onChange={(a, b) => { setStart(a); setEnd(b); }}
       />
@@ -275,13 +294,19 @@ const styles = StyleSheet.create({
                 paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, overflow: "hidden" },
 
   form: { paddingHorizontal: 16, paddingTop: 8, gap: 4 },
+  whenRow: { flexDirection: "row", gap: 10, marginBottom: 6 },
+  whenField: { flex: 1, backgroundColor: "#14141b", borderWidth: 1, borderColor: "#26262f",
+               borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+  whenLabel: { color: MUTED, fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
+  whenValueRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 },
+  whenValue: { color: "#f4f4f6", fontSize: 15, fontWeight: "700" },
+  nightsLine: { color: MUTED, fontSize: 12.5, marginBottom: 14 },
   label: { color: MUTED, fontSize: 11, fontWeight: "800", letterSpacing: 0.8,
            textTransform: "uppercase", marginTop: 14, marginBottom: 6 },
   field: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 13,
            paddingHorizontal: 14, borderRadius: 12, backgroundColor: "#14141b",
            borderWidth: 1, borderColor: "#2b2b36" },
   fieldT: { color: "#f4f4f6", fontSize: 15, fontWeight: "600", flex: 1 },
-  nights: { color: MUTED, fontSize: 12, fontWeight: "700" },
   dateRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between",
              paddingVertical: 9, paddingHorizontal: 10, borderRadius: 12,
              backgroundColor: "#14141b", borderWidth: 1, borderColor: "#2b2b36" },

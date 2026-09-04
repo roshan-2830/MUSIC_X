@@ -19,7 +19,6 @@ import SearchBar from "../components/search-bar";
 import SetlistfmConnect from "../components/setlistfm-connect";
 import SetlistfmLinkView from "../components/setlistfm-link";
 import { City, Festival, fetchEvents, getFestivals, getRecommended, MusicEvent, RecommendedEvent } from "../lib/api";
-import { useAuth } from "../lib/auth";
 import { detectCurrentCity } from "../lib/location";
 import { useProfile } from "../lib/profile";
 import { usePush } from "../hooks/use-push";
@@ -79,7 +78,6 @@ function onePerArtist(list: MusicEvent[]): MusicEvent[] {
 }
 
 export default function HomeScreen() {
-  const { signOut } = useAuth();
   const { profile, setHomeCity } = useProfile();
   const router = useRouter();
   const [events, setEvents] = useState<MusicEvent[]>([]);
@@ -252,15 +250,10 @@ export default function HomeScreen() {
           </Pressable>
         </View>
         <View style={styles.headerActions}>
+          {/* The bell alone. The two icons that used to sit beside it both had a better
+              home: artist search is the "See all" on the artists row below, and logging
+              out belongs in the Me tab, where it already lives. */}
           <NotificationBell refreshKey={badgeKey} onPress={() => setAlertsOpen(true)} />
-          <Pressable
-            style={styles.iconBtn}
-            onPress={() => router.push({ pathname: "/search", params: { type: "artists" } })}>
-            <Ionicons name="musical-notes" size={20} color={ACCENT} />
-          </Pressable>
-          <Pressable style={styles.iconBtn} onPress={signOut}>
-            <Ionicons name="log-out-outline" size={20} color="#f4f4f6" />
-          </Pressable>
         </View>
       </View>
 
@@ -435,7 +428,6 @@ const styles = StyleSheet.create({
   accent: { color: ACCENT },
   cityBtn: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   cityText: { color: "#f4f4f6", fontSize: 13, fontWeight: "600" },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#14141b", alignItems: "center", justifyContent: "center" },
   section: { marginTop: 18 },
   rowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 16 },
   rowHeadTitle: { color: "#f4f4f6", fontSize: 19, fontWeight: "800" },
