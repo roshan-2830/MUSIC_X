@@ -44,3 +44,7 @@ example
 
 
 .env
+
+# Env files and the backups taken during the Supabase move.
+.env
+.env.*

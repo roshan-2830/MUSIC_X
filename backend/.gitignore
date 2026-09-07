@@ -8,3 +8,8 @@ __pycache__/
 # Secrets
 .env
 .env.*
+
+# One-off database dumps from the Supabase project migration (125 MB each). Kept locally
+# as a rollback; must never reach the repo — GitHub rejects files over 100 MB anyway.
+musicx_*.sql
+migration_baseline.txt
