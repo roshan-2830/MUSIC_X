@@ -12,6 +12,8 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import CityPicker from "../components/city-picker";
+import MyBookingsView from "../components/my-bookings";
+import MyShowsView from "../components/my-shows";
 import NotificationsModal from "../components/notifications-modal";
 import PassportView from "../components/passport";
 import SetlistfmLinkView from "../components/setlistfm-link";
@@ -34,6 +36,8 @@ export default function MeScreen() {
   const { signOut } = useAuth();
   const { profile, setHomeCity } = useProfile();
   const [passport, setPassport] = useState(false);
+  const [shows, setShows] = useState(false);
+  const [bookings, setBookings] = useState(false);
   const [setlistfm, setSetlistfm] = useState(false);
   const [alerts, setAlerts] = useState(false);
   const [cityOpen, setCityOpen] = useState(false);
@@ -48,10 +52,13 @@ export default function MeScreen() {
   const city = profile?.home_city_name || "somewhere";
 
   const yourMusic: Row[] = [
+    // NOT the Calendar tab. The Calendar answers "what is on between these two dates";
+    // this answers "what have I committed to, and how far along is each one" — and a show
+    // three months out is invisible on this month's grid while belonging here all the same.
     { icon: "calendar-outline", label: "My shows", detail: "Saved & planned concerts",
-      go: () => router.push("/calendar") },
+      go: () => setShows(true) },
     { icon: "ticket-outline", label: "My bookings", detail: "Tickets, hotels & travel",
-      go: notYet("My bookings") },
+      go: () => setBookings(true) },
     { icon: "location-outline", label: "My trips", detail: "Routes you’ve saved",
       go: notYet("My trips") },
     { icon: "musical-notes-outline", label: "Concert Passport",
@@ -122,6 +129,15 @@ export default function MeScreen() {
         </View>
       ) : null}
 
+      <Modal visible={shows} animationType="slide" onRequestClose={() => setShows(false)}>
+        <MyShowsView onClose={() => setShows(false)} />
+      </Modal>
+      <Modal visible={bookings} animationType="slide" onRequestClose={() => setBookings(false)}>
+        {/* The home city seeds the "From" box on a travel leg — most people leave from
+            home, and typing it every time is a question the app can already answer. */}
+        <MyBookingsView onClose={() => setBookings(false)}
+                        homeCity={profile?.home_city_name ?? null} />
+      </Modal>
       <Modal visible={passport} animationType="slide" onRequestClose={() => setPassport(false)}>
         <PassportView onClose={() => setPassport(false)}
                       onImport={() => { setPassport(false); setSetlistfm(true); }} />

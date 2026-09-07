@@ -1354,3 +1354,171 @@ export async function setReviewHelpful(reviewId: string, on: boolean): Promise<v
     method: on ? "POST" : "DELETE", headers: await authHeaders(),
   });
 }
+
+/* ------------------------------------------------- My shows & My bookings (Me tab) */
+
+/** A saved concert, with the plan state DERIVED on the server — see routes/bookings.py.
+ *  `state` can also be "missed": an answer, not a stage, and rendered as its own tag. */
+export type MyShow = MusicEvent & {
+  state: "interested" | "planning" | "confirmed" | "attended" | "missed";
+  booked: boolean;
+  has_note: boolean;
+  is_suggestion: boolean;
+};
+
+export type MyShows = {
+  shows: MyShow[];
+  festivals: Festival[];
+  counts: Record<string, number>;
+};
+
+/** One currency's worth of spend. A trip can hold several of these and they are never
+ *  added together — see the note at the top of routes/bookings.py. */
+export type Money = { amount: number; currency: string };
+
+export type TicketLine = {
+  booked: boolean;
+  provider: string | null;
+  reference: string | null;
+  source: string | null;
+  at: string | null;
+  cost: number | null;
+  currency: string | null;
+};
+
+export type StayLine = {
+  name: string;
+  check_in: string | null;
+  check_out: string | null;
+  cost: number | null;
+  currency: string | null;
+  booking_ref: string | null;
+  free_cancel_until: string | null;
+  /** Is that deadline inside the warning week? The server decides, so the rule lives in
+   *  one place rather than being re-implemented against the phone's clock. */
+  cancel_soon: boolean;
+  address: string | null;
+  /** 'picked' = pointed at in our hotel search, nothing paid. 'recorded' = a booking they
+   *  made themselves and typed in here. Only one of the two is a reservation. */
+  source: "picked" | "recorded" | "booked";
+};
+
+export type TravelMode = "plane" | "train" | "bus" | "car";
+
+export type TravelLine = {
+  id: string;
+  mode: TravelMode;
+  from_label: string | null;
+  to_label: string | null;
+  travel_on: string | null;
+  cost: number | null;
+  currency: string | null;
+  booking_ref: string | null;
+  free_cancel_until: string | null;
+  cancel_soon: boolean;
+};
+
+export type Trip = {
+  event: MusicEvent;
+  ticket: TicketLine;
+  stay: StayLine | null;
+  travel: TravelLine[];
+  stages_done: number;
+  stages_total: number;
+  spend: Money[];
+  /** Negative once the show has happened; null when it has no date, so the card can say
+   *  "Date TBA" instead of counting down to nothing. */
+  days_until: number | null;
+  /** How many lines on this trip have a window closing this week. Drives the card banner;
+   *  the dates themselves live on the lines, so no deadline is printed twice. */
+  cancel_soon: number;
+};
+
+export type Bookings = {
+  upcoming: Trip[];
+  past: Trip[];
+  spend: Money[];
+  trips: number;
+  cancel_windows: number;
+};
+
+export async function getMyShows(): Promise<MyShows> {
+  const res = await fetch(`${API_BASE_URL}/me/shows`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`My shows ${res.status}`);
+  return res.json();
+}
+
+export async function getBookings(): Promise<Bookings> {
+  const res = await fetch(`${API_BASE_URL}/me/bookings`, { headers: await authHeaders() });
+  if (!res.ok) throw new Error(`Bookings ${res.status}`);
+  return res.json();
+}
+
+/** The server's own wording for a rejection, so the rule is stated in one place. */
+async function detailOf(res: Response, fallback: string): Promise<string> {
+  try { return (await res.json())?.detail ?? fallback; } catch { return fallback; }
+}
+
+export type StayIn = {
+  name: string;
+  check_in?: string | null;
+  check_out?: string | null;
+  cost?: number | null;
+  currency?: string | null;
+  booking_ref?: string | null;
+  free_cancel_until?: string | null;
+};
+
+/** "Here is the hotel I booked myself." PUT — one stay per show, so saving twice leaves one. */
+export async function recordStay(eventId: string, body: StayIn): Promise<StayLine> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/stay/record`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await detailOf(res, `Stay ${res.status}`));
+  return res.json();
+}
+
+export type TravelIn = {
+  mode: TravelMode;
+  from_label: string;
+  to_label: string;
+  travel_on?: string | null;
+  cost?: number | null;
+  currency?: string | null;
+  booking_ref?: string | null;
+  free_cancel_until?: string | null;
+};
+
+/** POST, not PUT: a return trip is two legs and a festival run is often four. */
+export async function addTravelLeg(eventId: string, body: TravelIn): Promise<TravelLine> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/travel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await detailOf(res, `Travel ${res.status}`));
+  return res.json();
+}
+
+export async function removeTravelLeg(eventId: string, legId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/events/${eventId}/travel/${legId}`, {
+    method: "DELETE", headers: await authHeaders(),
+  });
+}
+
+/** What the ticket actually cost. Nulls clear it. Rejected with the server's own message
+ *  when there is no ticket yet — a price on a ticket nobody has is a number with nothing
+ *  behind it, and it would still be summed into the trip total. */
+export async function setTicketCost(
+  eventId: string, cost: number | null, currency: string | null
+): Promise<TicketLine> {
+  const res = await fetch(`${API_BASE_URL}/events/${eventId}/ticket-cost`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ cost, currency }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res, `Ticket cost ${res.status}`));
+  return res.json();
+}
