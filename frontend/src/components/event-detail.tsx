@@ -14,7 +14,7 @@ import GoingSheet from "./going-sheet";
 import InviteSheet from "./invite-sheet";
 import ExploreNearby from "./explore-nearby";
 import PlanTrip from "./plan-trip";
-import { coverColor, flagEmoji, hashHue } from "../lib/format";
+import { coverColor, flagEmoji, hashHue, zonedDay } from "../lib/format";
 import { useProfile } from "../lib/profile";
 import { useSaves } from "../lib/saves";
 
@@ -34,9 +34,16 @@ function countdown(iso: string | null): string {
   if (days <= 45) return `Live in ${days} days`;
   return `Live in ${Math.round(days / 30)} months`;
 }
-function fmtDate(iso: string | null): string {
+/** The date in the VENUE's timezone, not the reader's.
+ *
+ *  It used to read the browser's clock, which put this screen a day out from every list card
+ *  in the app: a 20:00 show in Hollywood is already tomorrow in Amsterdam, so My bookings
+ *  said "Thu 29 Oct" and the page it opened said "Fri, Oct 30". A concert happens on one day,
+ *  and that day is the one at the venue. */
+function fmtDate(iso: string | null, tz?: string | null): string {
   if (!iso) return "Date TBA";
-  const d = new Date(iso);
+  const day = zonedDay(iso, tz);                       // YYYY-MM-DD where it happens
+  const d = new Date(`${day}T12:00:00`);               // midday: no offset can shift it back
   return `${WD[d.getDay()]}, ${MO[d.getMonth()]} ${d.getDate()} ${d.getFullYear()}`;
 }
 /** The score, taken apart — one bar per component, heaviest weight first.
@@ -74,7 +81,7 @@ function aboutText(ev: EventDetail): string {
   const head = ev.lineup.find((a) => a.is_headliner)?.name ?? ev.lineup[0]?.name;
   const g = ev.genres.slice(0, 2).join(" & ") || "live music";
   const where = `${ev.venue_name ?? "the venue"}${ev.city ? ` in ${ev.city}` : ""}`;
-  const when = fmtDate(ev.starts_at);
+  const when = fmtDate(ev.starts_at, ev.timezone);
   return head
     ? `${head} brings ${g} to ${where} on ${when}.`
     : `A night of ${g} at ${where} on ${when}.`;
@@ -226,7 +233,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
 
           <View style={styles.metaRow}>
             <Ionicons name="calendar-outline" size={15} color={MUTED} />
-            <Text style={styles.meta}>{fmtDate(ev.starts_at)}</Text>
+            <Text style={styles.meta}>{fmtDate(ev.starts_at, ev.timezone)}</Text>
           </View>
           <View style={styles.metaRow}>
             <Ionicons name="location-outline" size={15} color={MUTED} />
