@@ -16,7 +16,8 @@ import bisect
 import math
 from datetime import datetime, timezone
 
-from sqlalchemy import bindparam as sa_bindparam, text, update as sa_update
+from sqlalchemy import (bindparam as sa_bindparam, false as sa_false, text,
+                        update as sa_update)
 from sqlalchemy.orm import Session, load_only
 
 from app.db.session import SessionLocal
@@ -302,7 +303,7 @@ def build_tour_graph(db, cutoff) -> dict:
             "ends": ends}
 
 
-def build_bill_index(db, cutoff) -> tuple[dict, dict]:
+def build_bill_index(db, cutoff=None, event_ids=None) -> tuple[dict, dict]:
     """Every event's line-up, and every artist by id, in two queries.
 
     _artist_stature used to run one query per event to fetch its bill, and
@@ -315,18 +316,33 @@ def build_bill_index(db, cutoff) -> tuple[dict, dict]:
     Same treatment as build_tour_graph, and the same treatment the events list already
     had for the same reason. 14,991 bill rows over 5,988 artists load in one pass.
     """
+    q = (db.query(EventArtist.event_id, Artist)
+           .join(Artist, Artist.id == EventArtist.artist_id)
+           .join(Event, Event.id == EventArtist.event_id))
+    # Two scopes, one index. `cutoff` is the nightly pass over the whole cohort; `event_ids`
+    # is a named set, which is what the live-search scorer needs — it used to run one query
+    # per event because it was written for "a handful of ids", and then got handed thousands.
+    # A preload is cheaper than a round trip from about three events upwards, so there is no
+    # size at which the old path was the better one.
+    q = (q.filter(EventArtist.event_id.in_(list(event_ids))) if event_ids is not None
+         else q.filter((Event.starts_at >= cutoff) | (Event.starts_at.is_(None))))
+
     bills: dict = {}
-    rows = (db.query(EventArtist.event_id, Artist)
-              .join(Artist, Artist.id == EventArtist.artist_id)
-              .join(Event, Event.id == EventArtist.event_id)
-              .filter((Event.starts_at >= cutoff) | (Event.starts_at.is_(None)))
-              # Artist.name breaks ties in sort_order — see the note in
-              # festival_scoring.build_festival_index. Only the first six count.
-              .order_by(EventArtist.event_id, EventArtist.sort_order, Artist.name).all())
-    for eid, a in rows:
+    # Artist.name breaks ties in sort_order — see the note in
+    # festival_scoring.build_festival_index. Only the first six count.
+    for eid, a in q.order_by(EventArtist.event_id, EventArtist.sort_order, Artist.name).all():
         bills.setdefault(eid, []).append(a)
-    # Headliners are reached by id when an event has no event_artists rows at all.
-    artists = {a.id: a for a in db.query(Artist).all()}
+
+    # Headliners are reached by id when an event has no event_artists rows at all. For a named
+    # set that is the headliners of those events only — loading all 11,000 artists to score
+    # twenty search results would trade one N+1 for a different kind of waste.
+    aq = db.query(Artist)
+    if event_ids is not None:
+        heads = [r[0] for r in db.query(Event.headliner_artist_id)
+                 .filter(Event.id.in_(list(event_ids)),
+                         Event.headliner_artist_id.isnot(None)).all()]
+        aq = aq.filter(Artist.id.in_(heads)) if heads else aq.filter(sa_false())
+    artists = {a.id: a for a in aq.all()}
     return bills, artists
 
 
@@ -736,8 +752,13 @@ def score_events_by_ids(ids: list) -> int:
     cache: dict[str, int] = {}
     scored = 0
     try:
+        # Preloaded, not queried per event. This path was documented as "a handful of ids, so
+        # a query each is cheaper than a preload" — true for the twenty rows a search returns,
+        # and untrue the moment anything hands it a larger set. Two queries now, whatever the
+        # size, and the sentence stops being a condition somebody has to keep honouring.
+        bills, artists = build_bill_index(db, event_ids=ids)
         for ev in db.query(Event).filter(Event.id.in_(ids)).all():
-            a = _artist_stature(db, ev, cache)
+            a = _artist_stature(db, ev, cache, bills=bills, artists=artists)
             if a:
                 ev.mxs = round(a["provisional"], 1)
                 ev.mxs_breakdown = {

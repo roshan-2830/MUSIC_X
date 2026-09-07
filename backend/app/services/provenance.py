@@ -33,6 +33,7 @@ import re
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import Session
 
 from app.models.event_fact import EventFact
@@ -191,6 +192,11 @@ def extract_facts(raw: dict) -> dict:
     return out
 
 
+# How many fact ids go into one re-stamp statement. Large enough that a 150-event refresh
+# batch is a single round trip, small enough to stay well inside Postgres's parameter limit.
+RESTAMP_CHUNK = 5000
+
+
 def sync_facts(db: Session, pairs: list, today: date | None = None,
                withdraw: bool = True) -> dict:
     """Bring `event_facts` in line with what the source publishes right now.
@@ -241,6 +247,9 @@ def sync_facts(db: Session, pairs: list, today: date | None = None,
         held[(row.event_id, row.fact_key)] = row
 
     tally = {"added": 0, "updated": 0, "removed": 0, "untouched": 0}
+    # Rows where the ONLY thing that moved is the date we last saw them. Collected rather
+    # than assigned — see the bulk re-stamp after the loop.
+    restamp: list = []
     for event_id, raw, source_url in pairs:
         found = extract_facts(raw)
         for key, f in found.items():
@@ -256,12 +265,28 @@ def sync_facts(db: Session, pairs: list, today: date | None = None,
             if row.fact_value != f["value"]:
                 row.fact_value = f["value"]
                 row.snapshot = f["snapshot"]
+                row.source_name, row.source_url = SOURCE_NAME, source_url
+                row.trust_tier, row.last_verified = f["tier"], today
                 tally["updated"] += 1
-            else:
-                tally["untouched"] += 1
-            # even an unchanged fact was re-confirmed today — that is the point
-            row.source_name, row.source_url = SOURCE_NAME, source_url
-            row.trust_tier, row.last_verified = f["tier"], today
+                continue
+
+            tally["untouched"] += 1
+            # An unchanged fact was still re-confirmed today, and recording that is the
+            # point of the column. But saying so through the ORM cost one UPDATE statement
+            # per fact row: 661,017 of them, and at a measured 27.3 ms round trip to
+            # Supabase that is five hours of the app waiting for the post. The database
+            # itself only spent 91 seconds doing the work.
+            #
+            # So the common case — value the same, provenance the same, only the date
+            # moved — is collected and re-stamped in one statement below. The rare case,
+            # where the source has changed its own url or tier, still goes through the ORM,
+            # because that is a real edit to a row rather than a heartbeat on it.
+            if (row.source_name, row.source_url, row.trust_tier) != (
+                    SOURCE_NAME, source_url, f["tier"]):
+                row.source_name, row.source_url = SOURCE_NAME, source_url
+                row.trust_tier, row.last_verified = f["tier"], today
+            elif row.last_verified != today:
+                restamp.append(row.id)
 
     # Anything we held for these events that the source no longer publishes:
     # we cannot stand behind it, so it goes — but only if this payload is the
@@ -270,6 +295,21 @@ def sync_facts(db: Session, pairs: list, today: date | None = None,
         for row in held.values():
             db.delete(row)
             tally["removed"] += 1
+
+    # One statement per chunk instead of one per fact. Core rather than the ORM: there is
+    # nothing to synchronise, the caller commits straight after, and a row deleted by the
+    # sweep mid-pass simply matches nothing instead of aborting the run.
+    #
+    # Chunked because a parameter list is not unbounded, and IS DISTINCT FROM so a row
+    # already stamped today is not rewritten — which also keeps the write off rows the
+    # value of which nothing has changed.
+    for i in range(0, len(restamp), RESTAMP_CHUNK):
+        db.execute(
+            sa_update(EventFact.__table__)
+            .where(EventFact.__table__.c.id.in_(restamp[i:i + RESTAMP_CHUNK]))
+            .where(EventFact.__table__.c.last_verified.is_distinct_from(today))
+            .values(last_verified=today)
+        )
 
     return tally
 
