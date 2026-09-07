@@ -17,13 +17,14 @@ import math
 from datetime import datetime, timezone
 
 from sqlalchemy import bindparam as sa_bindparam, text, update as sa_update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.db.session import SessionLocal
 from app.models.artist import Artist
 from app.models.event import Event
 from app.models.event_artist import EventArtist
 from app.models.venue import Venue
+from app.services import job_state
 from app.services.deezer import artist_fans
 
 WEIGHTS = {"artist": 0.35, "rarity": 0.25, "venue": 0.15, "production": 0.15, "context": 0.10}
@@ -527,21 +528,53 @@ def _collect(db, ev, cache, graph, bills=None, artists=None, caps=None, facts=No
     return comps
 
 
-def score_all_events():
+SCORE_JOB_KEY = "score_all_events"
+
+
+def score_all_events(force: bool = False):
     """Nightly job: re-score all UPCOMING events. Continuous components (artist, venue)
     are percentile-ranked within the cohort; signal components (rarity, context) carry a
-    fixed percentile; blend by weight; ordinal-rank so only the top ~2% reach 9+."""
+    fixed percentile; blend by weight; ordinal-rank so only the top ~2% reach 9+.
+
+    Skips itself when nothing it reads has changed — see services/job_state. The ranking is
+    a pure function of the cohort, so identical inputs give byte-identical scores, and a run
+    that cannot change an output is only postage. `force=True` overrides, and is what the
+    admin trigger uses: somebody asking for a rescore by hand is entitled to get one.
+    """
     db: Session = SessionLocal()
     cache: dict[str, int] = {}
     try:
+        fp = job_state.scoring_fingerprint(db)
+        run, why = (True, "forced") if force else job_state.should_run(db, SCORE_JOB_KEY, fp)
+        if not run:
+            print(f"[score] skipped — {why}")
+            return {"skipped": True, "reason": why}
+        print(f"[score] running — {why}")
         cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        events = db.query(Event).filter((Event.starts_at >= cutoff) | (Event.starts_at.is_(None))).all()
+        # ONLY THE COLUMNS THIS PASS READS. `db.query(Event)` meant every column, and two of
+        # them are most of an event row: `description` (671 B average, Ticketmaster's small
+        # print) and `mxs_breakdown` (542 B, this job's OWN previous output, which it
+        # overwrites without ever reading). Measured over the live cohort: 1,143 B a row
+        # whole, 458 B for what is used — 17.9 MB a pass down to 7.2 MB, a 60% cut with no
+        # change to a single score.
+        #
+        # It matters because the ranking is over the WHOLE cohort, so this query cannot be
+        # made smaller by asking for fewer rows — only by asking for narrower ones. Over a
+        # month of runs it was 11 GB of Supabase egress, most of it bag policies.
+        #
+        # load_only, not a hand-written SELECT: an attribute I have missed still WORKS, it
+        # just fetches on access. The failure mode is a slow query, never a wrong score.
+        events = (db.query(Event)
+                  .options(load_only(Event.id, Event.headliner_artist_id, Event.venue_id,
+                                     Event.starts_at, Event.title, Event.description))
+                  .filter((Event.starts_at >= cutoff) | (Event.starts_at.is_(None)))
+                  .all())
         graph = build_tour_graph(db, cutoff)
         bills, artists = build_bill_index(db, cutoff)
         caps = build_venue_index(db)
         facts = build_facts_index(db, cutoff)
 
-        blended = []   # (ev, comps)
+        blended = []   # (event_id, comps) — ids, never instances: see below
         unscored = []  # rows with nothing trustworthy to go on
         for ev in events:
             comps = _collect(db, ev, cache, graph, bills, artists, caps, facts)
@@ -551,7 +584,17 @@ def score_all_events():
                 # aborting the run. See the note above the write loop.
                 unscored.append(ev.id)
                 continue
-            blended.append((ev, comps))
+            # The ID, not the ORM object. Holding instances across the write loop's commits
+            # is what turned this pass into an N+1: db.commit() expires every instance in the
+            # session, so the very next `ev.id` triggered a refresh — and a refresh reloads
+            # the WHOLE row, ignoring the load_only above. Measured: 13,891 extra full-row
+            # SELECTs, one per scored event, which cancelled the entire saving and then some.
+            #
+            # Nothing after this point needs the object. The ranking works on `comps`, and the
+            # write is a Core update keyed on id. So the object is dropped here and the pass
+            # stops depending on session state altogether — which is also what makes the
+            # commits safe to interleave with the sweep.
+            blended.append((ev.id, comps))
 
         # Percentile-rank each continuous component against its own cohort. The artist
         # component has two possible cohorts, and an artist sits in exactly ONE of them:
@@ -573,8 +616,8 @@ def score_all_events():
         for src in by_source:
             by_source[src].sort()
 
-        rows = []  # (ev, comps, blend_pct)
-        for ev, comps in blended:
+        rows = []  # (event_id, comps, blend_pct)
+        for eid, comps in blended:
             parts = []
             for name, c in comps.items():
                 if name == "artist":
@@ -589,7 +632,7 @@ def score_all_events():
                     c["pct"] = _pct(ranked[name], c["raw"])
                 parts.append((c["pct"], c["weight"]))
             wsum = sum(w for _, w in parts)
-            rows.append((ev, comps, sum(p * w for p, w in parts) / wsum))
+            rows.append((eid, comps, sum(p * w for p, w in parts) / wsum))
 
         # Sort on the blend, then on id to break ties.
         #
@@ -604,7 +647,7 @@ def score_all_events():
         #
         # Same defect as the bill ordering in build_bill_index, in a different place: a rank
         # computed over ties is only reproducible if the ties are broken by something fixed.
-        rows.sort(key=lambda r: (r[2], str(r[0].id)))
+        rows.sort(key=lambda r: (r[2], str(r[0])))
         m = len(rows)
 
         # Write in chunks, by primary key, through Core rather than the ORM.
@@ -642,7 +685,7 @@ def score_all_events():
                 db.commit()
                 payload.clear()
 
-        for i, (ev, comps, _b) in enumerate(rows):
+        for i, (eid, comps, _b) in enumerate(rows):
             opct = i / (m - 1) if m > 1 else 1.0
             highs = sum(1 for c in comps.values() if c["confidence"] == "high")
             score = round(_calibrate(opct), 1)
@@ -660,7 +703,7 @@ def score_all_events():
                 "confidence": "high" if highs >= 2 else "medium" if highs >= 1 else "low",
                 "reasons": [c["reason"] for c in comps.values()],
             }
-            payload.append({"_id": ev.id, "_mxs": score, "_bd": breakdown})
+            payload.append({"_id": eid, "_mxs": score, "_bd": breakdown})
             if len(payload) >= CHUNK:
                 flush()
         flush()
@@ -671,7 +714,15 @@ def score_all_events():
             if len(payload) >= CHUNK:
                 flush()
         flush()
-        return {"total": len(events), "scored": len(blended), "unscored": len(events) - len(blended)}
+
+        # Taken again, not reused: `events.updated_at` carries an onupdate and this pass
+        # just wrote every row, so the fingerprint from before the run no longer describes
+        # the catalogue. Stored after the last flush, so a pass that died halfway records
+        # nothing and the next run repeats it rather than skipping over the gap.
+        result = {"total": len(events), "scored": len(blended),
+                  "unscored": len(events) - len(blended)}
+        job_state.write(db, SCORE_JOB_KEY, job_state.scoring_fingerprint(db), note=str(result))
+        return result
     finally:
         db.close()
 

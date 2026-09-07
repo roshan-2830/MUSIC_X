@@ -61,6 +61,15 @@ PUSH_INTERVAL_MINUTES = float(os.getenv("PUSH_INTERVAL_MINUTES", "2"))
 # WITHOUT anybody opening a screen.
 PASSPORT_INTERVAL_HOURS = float(os.getenv("PASSPORT_INTERVAL_HOURS", "1"))
 
+# Whether the recurring jobs run at all. DEFAULT ON, and the polarity is deliberate: these
+# jobs are the product working, so production must not depend on anybody remembering to set
+# a variable. It exists for a laptop, where every `uvicorn` restart otherwise fires a sweep,
+# a refresh and an enrichment within 90 seconds — passes that re-read the catalogue for a
+# process that will be killed again in ten minutes. Put SCHEDULER_ENABLED=0 in your local
+# .env while working on screens; leave it unset everywhere that serves real users.
+SCHEDULER_ENABLED = os.getenv("SCHEDULER_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+
 # The startup guard still exists, and still works to the calendar day, but it now guards
 # against something narrower than it used to. It was there because a refresh cost ~3,800
 # requests and five restarts would have burned the day's quota; batching made a refresh 44
@@ -117,6 +126,10 @@ scheduler = BackgroundScheduler(timezone="UTC")
 def start_scheduler() -> None:
     """Register all recurring jobs and start the scheduler (idempotent)."""
     if scheduler.running:
+        return
+    if not SCHEDULER_ENABLED:
+        print("[scheduler] DISABLED by SCHEDULER_ENABLED — no recurring jobs will run. "
+              "The API still serves normally; nothing will refresh, enrich or score itself.")
         return
     scheduler.add_job(
         sweep_catalogue,
@@ -249,7 +262,7 @@ def trigger_score_now() -> None:
     def _both():
         from app.services.festival_scoring import score_all_festivals
         from app.services.scoring import score_all_events
-        print(f"[score] events   -> {score_all_events()}")
+        print(f"[score] events   -> {score_all_events(force=True)}")
         print(f"[score] festivals -> {score_all_festivals()}")
 
     scheduler.add_job(_both, id="score_now", replace_existing=True)
