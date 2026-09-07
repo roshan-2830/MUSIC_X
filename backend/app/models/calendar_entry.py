@@ -1,7 +1,8 @@
 import uuid
 
 from sqlalchemy import (
-    CheckConstraint, Column, String, Text, Boolean, DateTime, ForeignKey, Uuid, func, text,
+    CheckConstraint, Column, String, Text, Boolean, DateTime, ForeignKey, Numeric, Uuid,
+    func, text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
@@ -35,6 +36,11 @@ class CalendarEntry(Base):
     ticket_ref = Column(String, nullable=True)          # the order/booking reference
     ticket_source = Column(String, nullable=True)
     booked_at = Column(DateTime(timezone=True), nullable=True)
+    # What they actually paid, in the currency they paid it in. Deliberately NOT
+    # `price_from` off the listing: that is the cheapest tier advertised at ingest, and
+    # summing it into a trip total would produce a figure nobody was ever charged.
+    ticket_cost = Column(Numeric(10, 2), nullable=True)
+    ticket_currency = Column(String(3), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
