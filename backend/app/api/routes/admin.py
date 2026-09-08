@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends
 
 from app.core.security import require_admin
-from app.scheduler import (trigger_enrich_now, trigger_push_now, trigger_refresh_now,
-                           trigger_score_now, trigger_sweep_now)
+from app.scheduler import (trigger_archive_now, trigger_enrich_now, trigger_push_now,
+                           trigger_refresh_now, trigger_score_now, trigger_sweep_now)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -62,3 +62,18 @@ def push_now(user_id: str = Depends(require_admin)):
     nobody has registered a phone; `muted` means push is switched off in their preferences.
     """
     return trigger_push_now()
+
+
+@router.post("/archive")
+def archive_now(grace_days: int | None = None, dry_run: bool = True,
+                user_id: str = Depends(require_admin)):
+    """Remove past shows nobody kept — saved, attended, reviewed, invited, notified,
+    dismissed, or booked a stay or travel around. Anything touched by anybody stays,
+    however old.
+
+    DRY RUN BY DEFAULT. Call it plain to see the counts; pass ?dry_run=false to delete.
+    `grace_days` overrides how long after a show it becomes eligible (default 14).
+
+    Runs in-line and returns what it did, rather than queueing: the numbers are the point.
+    """
+    return trigger_archive_now(grace_days=grace_days, dry_run=dry_run)

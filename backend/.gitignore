@@ -13,3 +13,6 @@ __pycache__/
 # as a rollback; must never reach the repo — GitHub rejects files over 100 MB anyway.
 musicx_*.sql
 migration_baseline.txt
+
+# The record of what the archive job removed, kept locally for reference.
+archive_deleted_*.txt

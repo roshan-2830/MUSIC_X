@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from app.services.archive import purge_past_events
 from app.services.enrichment import enrich_all
 from app.services.refresh import refresh_catalogue, sweep_catalogue
 from app.services.passport import stamp_finished_shows
@@ -60,6 +61,14 @@ PUSH_INTERVAL_MINUTES = float(os.getenv("PUSH_INTERVAL_MINUTES", "2"))
 # does not need recording within the minute, and the point of the job is only that it happens
 # WITHOUT anybody opening a screen.
 PASSPORT_INTERVAL_HOURS = float(os.getenv("PASSPORT_INTERVAL_HOURS", "1"))
+# Dropping past shows nobody kept — see services/archive.py. Daily, because the thing it
+# prevents is measured in months: nothing had ever removed a past event, so the catalogue
+# grew 18 MB a day with no ceiling of its own while the free plan has one at 500 MB.
+#
+# A show only goes if NOBODY ever touched it: saved, attended, reviewed, invited, notified,
+# dismissed, or booked a bed or a flight around. The grace period is the second guard, not
+# the first — someone who touched a show keeps it however old it gets.
+ARCHIVE_INTERVAL_HOURS = float(os.getenv("ARCHIVE_INTERVAL_HOURS", "24"))
 
 # Whether the recurring jobs run at all. DEFAULT ON, and the polarity is deliberate: these
 # jobs are the product working, so production must not depend on anybody remembering to set
@@ -209,6 +218,24 @@ def start_scheduler() -> None:
     )
 
     scheduler.add_job(
+        purge_past_events,
+        trigger="interval",
+        hours=ARCHIVE_INTERVAL_HOURS,
+        id="archive_past_events",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        # dry_run=False explicitly. The service defaults to a dry run precisely so that
+        # calling it with no arguments cannot delete anything, which means the one place
+        # that DOES delete has to say so out loud.
+        kwargs={"dry_run": False},
+        # Not at startup. Every other job here is cheap to repeat; this one is the only
+        # irreversible thing in the file, and a dev server restarted ten times should not
+        # get ten passes at it. The daily interval is soon enough for a size problem.
+        next_run_time=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+
+    scheduler.add_job(
         stamp_finished_shows,
         trigger="interval",
         hours=PASSPORT_INTERVAL_HOURS,
@@ -234,7 +261,8 @@ def start_scheduler() -> None:
           f"enrich every {ENRICH_INTERVAL_HOURS}h (limit {ENRICH_LIMIT}/stage) — "
           f"reminders every {REMINDER_INTERVAL_HOURS}h, "
           f"push delivery every {PUSH_INTERVAL_MINUTES}m, "
-          f"passport stamps every {PASSPORT_INTERVAL_HOURS}h — "
+          f"passport stamps every {PASSPORT_INTERVAL_HOURS}h, "
+          f"archive every {ARCHIVE_INTERVAL_HOURS}h — "
           f"sweep, enrich, reminders and push also run at startup; refresh runs at startup only if "
           f"the catalogue was not already verified today")
 
@@ -266,6 +294,16 @@ def trigger_score_now() -> None:
         print(f"[score] festivals -> {score_all_festivals()}")
 
     scheduler.add_job(_both, id="score_now", replace_existing=True)
+
+
+def trigger_archive_now(grace_days: int | None = None, dry_run: bool = True) -> dict:
+    """Run the past-event purge IN-LINE and return what it did.
+
+    In-line rather than queued, and dry by default: the whole point of this endpoint is to
+    let somebody see the numbers before anything is removed. A trigger that returns
+    "accepted" tells you nothing about what it is about to delete.
+    """
+    return purge_past_events(grace_days=grace_days, dry_run=dry_run)
 
 
 def trigger_enrich_now(limit: int | None = None) -> None:
