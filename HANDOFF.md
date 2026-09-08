@@ -1,518 +1,479 @@
-# Music X — session handoff (2026-08-25, end of day)
+# Music X — context handoff (8 September 2026)
 
-Paste this whole file into a new chat to carry the context over.
-
----
-
-## What we're building
-
-**Music X** — a trust-first live-music app. React Native / Expo (SDK 57, TypeScript,
-expo-router) front end in `frontend/`, FastAPI + SQLAlchemy + Alembic back end in
-`backend/`, Postgres on Supabase, Supabase Auth (ES256 JWT verified against JWKS).
-
-The differentiator is **honesty about data**: every fact carries a source, confidence is
-earned not asserted, and we show "no rating yet" rather than a guess. The phase-2 mockup
-at `~/Downloads/musicx-mockup-phase2 (1).html` is the design source of truth — read it
-before building any screen, it is far richer than it looks.
-
-**Working style:** I'm a beginner. Guide me, and let me type the commands myself. One
-step at a time. Explain what a command does before I run it. **Verify by running the app,
-not by typechecking** — `tsc` passed clean while seven real bugs shipped.
+**Paste this whole file into a new Claude chat as your first message.** It carries everything
+needed to continue without re-explaining the project.
 
 ---
 
-## Where the project stands
+## Read me first, Claude
 
-**Repo:** `/Users/roshan/Documents/MusicX_dev`, branch
-`feat/trust-layer-and-catalogue-breadth`. **No GitHub remote** — the company hasn't
-provided one. Commit locally; don't suggest GitHub setup.
+You are picking up an in-progress product. Before you write code:
 
-Recent commits:
+**How I work.** I'm a beginner. **Guide me and let me type the commands myself**, one step at a
+time, and say what a command does before I run it. **Verify by running the app, not by
+typechecking** — `tsc` has passed clean while seven real bugs shipped. Explain things in simple
+terms and keep answers short unless I ask for detail. If I say I don't understand, give me a
+concrete example from our own data rather than rephrasing.
+
+**Two files govern the code.**
+- `frontend/AGENTS.md` — **read https://docs.expo.dev/versions/v57.0.0/ before writing any Expo
+  code.** SDK 57 patterns differ from older blog posts and things fail silently.
+- The mockup at `~/Downloads/musicx-mockup-phase2 (1).html` (413 KB) is the **design source of
+  truth**. Read the relevant part before building any screen. Most UI questions are already
+  answered in it.
+
+**I push my own commits.** Commit locally when I ask; never run `git push`.
+
+**There is a full reference document** — every feature, job, key and rule, in detail:
+https://claude.ai/code/artifact/dc2c3a54-2cae-4adf-bda8-37a246582fa3
+
+---
+
+## 1. What Music X is
+
+A **trust-first live-music app**: find concerts worth travelling for, decide whether to go, keep
+the trip in one place. React Native / Expo (SDK 57, TypeScript, expo-router) in `frontend/`,
+FastAPI + SQLAlchemy + Alembic in `backend/`, Postgres + Auth on Supabase.
+
+**The one rule that shapes every decision — "absence over guess":**
+
+> Every fact carries a source. Confidence is earned, not asserted. Where we do not know
+> something we say so; we never fill a gap with a plausible-looking value.
+
+That is a technical constraint, not a slogan. It is why:
+- A rating omits components with no data and re-weights the rest, rather than substituting an average
+- An artist with no confident photo match shows initials, never a lookalike's face
+- A fact that vanishes from its source is **deleted**, not kept
+- Confidence **decays on its own** — stop the re-verify job and everything slides high → medium → low
+- The trip ledger never converts currencies: it prints "£309 + €240"
+
+**When unsure which option to build, pick the one that claims less.**
+
+---
+
+## 2. Where the code is
+
+```
+/Users/roshan/Documents/MusicX_dev     branch main
+remote: github.com/roshan-2830/MUSIC_X.git
+```
 
 | | |
 |---|---|
-| `0743a70` | festival search works the way concert search always has |
-| `66fc27a` | festival search reaches every festival, and the ones hiding as concerts |
-| `8dfcc87` | find the festivals the sweep was throwing away |
-| `d80ab5a` | festival pages, one listing one home, and the day-by-day bill |
-| `c4f4fcd` | one toggle, one kind of search result |
-| `cb5e6a4` | search as you type, ranked by relevance |
-| `4f55b8e` | event page: genres on the artwork, a tappable line-up |
-| `053c470` | shelves show twelve artists, not one tour repeated |
-| `1a49b71` | the calendar shows only what you saved |
-| `5b252bd` | this handoff |
-| `bd14d43` | artist enrichment, one artist-identity path, Deezer fan-count fix, audience counts in UI |
-| `8ebae86` | Last.fm taste source, saving festivals, the rebuilt Calendar page |
-| `4117890` | similar artists, Last.fm as a taste source, real genres |
-
-**Working tree is clean.** Everything below is committed.
-
-**Backend:** 9 routers, 35 endpoint paths. Alembic head `f6a7b8c9d0e1`, fully migrated.
-APScheduler runs **three** in-process jobs — discovery sweep (3h), deep re-verify (24h),
-artist enrichment (24h) — and only while the dev server is up.
-
-**Data in Postgres:**
-
-| | |
-|---|---|
-| events | 5,066 (3,779 upcoming, 3,105 scored) |
-| artists | 5,209 |
-| festivals | **509 visible** (775 rows, the rest merged away) |
-| cities / venues | 937 / 2,003 |
-| event_facts | 48,782 (the provenance moat) |
-| event_changes | 45 |
-| artist_similar | 21,145 |
-| event_genres / genres | 7,075 / 521 |
-| follows | 140 |
-| lastfm_accounts | 5 |
-| calendar_entries | 4 |
-| event_artists (line-ups) | 3,741 |
-| festival_lineup | 6,259 (4,146 carry a day) |
-
-**Frontend:** 3 screens (Home, Calendar, Search) + modals. Tab bar has 2 tabs; the mockup
-has 5. Missing tabs are Passport, Trips, Bucket List.
-
----
-
-## What got built this session
-
-### Artist enrichment — the artist screens now have data
-
-`services/enrichment.py` existed, imported cleanly, and was **called from nowhere**. Now
-it has `backfill_images`, `backfill_bios`, `backfill_similar`, `backfill_tags` and
-`backfill_similar_photos`, plus `enrich_all`, a daily `enrich_catalogue` scheduler job
-(`ENRICH_INTERVAL_HOURS`, `ENRICH_LIMIT`) and `POST /admin/enrich?limit=N` (limit is
-**per stage**, not per run).
-
-Coverage of the **1,476 artists with an upcoming show**, after one full run:
-
-| field | before | now |
-|---|---|---|
-| similar | 0.4% | **95%** |
-| photo | 1.4% | **69%** |
-| genre tags | 10.0% | **64%** |
-| bio | 2.2% | 10% ← the one that stayed low, see below |
-
-Downstream of the tags: **52% of upcoming events now carry a genre**, up from 10%. That
-feeds MXS's `context` component and Tier B genre recommendations, both starved until now.
-
-Design rules that must not be quietly loosened:
-
-- **Photos need an exact normalised name match.** 426 of 1,451 artists correctly got no
-  photo. A blank is honest; a tribute act wearing the real act's face is a lie the page
-  asserts and the reader cannot detect.
-- **Bios are Wikipedia only**, always stored with `wiki_url` — the URL of the page the
-  text was actually read from, never a guessed `/wiki/<Name>`.
-- **A failed lookup is never stamped.** `*_checked_on` is set only when the call
-  COMPLETED, so a throttled request retries instead of freezing as "nothing here".
-- **Network calls happen with no DB connection open**, writes land in short bursts.
-  Holding one session for a long run gets it dropped by Supabase's pooler.
-
-### `_todo` orders by who will be OPENED, not by date count
-
-Busiest-first looked right and was wrong. The busiest names in this catalogue are venue
-residencies and tribute acts — `Tablao Flamenco 1911` (247 dates), `MJ LIVE` (109),
-`Rumours of Fleetwood Mac` (51) — which are **exactly** the acts every source refuses to
-match. A bounded run spent its whole budget on artists that can never be filled while
-Bruno Mars and Metallica queued behind them. Now: followed artists first, then Deezer
-fans, then dates.
-
-### One way to find-or-create an artist
-
-Artists were created in **five places** with **three different matching rules** —
-case-sensitive in ingestion, case-insensitive in the routes, normalised-only-within-the-
-batch in the Last.fm import. That is where every duplicate came from. All five now call
-`services/artist_lookup.get_or_create`, matching on the normalised name — the same key
-`dedupe.py` groups by, so the two cannot disagree about what counts as one artist.
-
-`services/dedupe.py` merges what already exists, dry-run by default. **The rule:** a row
-merges only if its name is the survivor's RE-CASED or with punctuation REMOVED — never
-with characters ADDED. That is why **`OMAR+` stays separate from `OMAR`**: `Omar` plays
-Suset Festival in Spain, `OMAR+` plays Reading and Leeds. Asking Deezer cannot settle it,
-because our own normaliser strips the `+` before Deezer ever sees it. Merged 6 groups,
-13 rows → 7.
-
-### The Deezer identity bug — a fan count at 2% of the truth
-
-`artist_fans`/`artist_image` returned the **first** name match from a result set Deezer
-does not order predictably — and Deezer files one artist under several spellings.
-Searching A.R. Rahman returns **six entries for one man**, 283,680 fans down to 107. We
-had stored **6,379** for him, and **MXS reads that column to judge stature**, so he was
-scored at 2% of his audience. Both functions now take the most-followed exact match; 221
-punctuated-name artists were re-checked and 4 were materially wrong. Search also collapses
-Deezer's own duplicates by normalised name.
-
-### Audience counts in the UI
-
-`ArtistDetail` exposes `deezer_fans` and `lastfm_listeners`; the Following list, both
-search lists, onboarding and the artist page show them via `format.audienceLine`.
-**Never summed or averaged** — Deezer counts followers, Last.fm counts distinct
-listeners, so each number names its own service.
-
----
-
-### The calendar shows what you saved, and nothing else
-
-`mode=mine` returned saved shows PLUS anything by a followed artist or in a followed
-city — 3 saved concerts against 153 follow-derived ones, so the page read as a list of
-156 commitments the user had made three of.
-
-The previous session met this and chose to keep the content and fix the framing ("Your
-shows" → "For you", eyebrow stating the split), reasoning that an empty tab is worse than
-a mislabelled one. **Reversed on the owner's call**, and the old reasoning does not
-survive the question a calendar actually answers: an empty calendar is not a dead tab, it
-is a true one. Nothing is lost either — Home's Recommended row is built from the same
-follow graph, which is where you DISCOVER a show as opposed to the page that says you are
-going to it.
-
-Scope label is now "Saved" with a bookmark icon; the eyebrow is the mockup's own
-`3 saved · none booked yet`; the empty state names the one action that fills the page,
-because "follow an artist or save a show" became false the moment this scope stopped
-reading follows. `mode=city` is untouched — it never claimed the shows were yours.
-
-### Genres pruned, and the run order that silently undoes it
-
-The tagging backfill took `genres` from 121 rows to 788, because Last.fm crowd tags
-include artist names, countries, TV shows, record labels and private notes
-(`Seen Live X7`, `Guys I Would Fuck`, `Funk_Add_To_Lidarr_Batch_1`). Pruned to **521**
-while event coverage held at 53.2%, so no real coverage was traded away.
-
-`prune_single_artist_genres` is now **dry-run by default** and returns the full drop and
-keep lists, because its trade-off is real: a dry run showed it would have deleted 45
-genuine genres — `Baroque`, `Bebop`, `Riot Grrrl`, `Honky Tonk`, `Jungle`, `Ranchera`,
-`Stoner Doom`. `GENRE_WORDS` was written when 150 artists were tagged; at 1,003 it was
-too thin. Added ~35 missing HEADS (`bop`, `wop`, `tonk`, `grind`, `crust`, `grrrl`,
-`doom`, `phonk`, `baroque`, `quartet`…) — heads, not names, so one entry covers every
-genre built on it. Deliberately did NOT add `mod`: it is a substring of "modern" and
-would rescue `Modtoday` and friends. False deletions went 45 → ~6.
-
-**`JUNK_MARKERS` + `publishable()` are new**, and they exist because a genre word can
-RESCUE junk: `Funk_Add_To_Lidarr_Batch_1` survived on "funk". `publishable()` is applied
-where tags become genre rows, in both the live path and the rebuild, while `artist.tags`
-keeps the raw Last.fm answer — provenance and publication are different promises.
-
-**RUN ORDER, and it is silent when wrong:** `reapply_cached_tags` CREATES any genre it
-does not hold, from the cached tags. Running it after the prune puts everything back —
-measured here as 753 → 788, a net increase that looked like success. **Rebuild first,
-prune LAST**, because the prune counts artists per genre and needs the links to exist.
-The docstring now says so.
-
-### Event page: genres on the artwork, a line-up you can tap through
-
-Genres moved from under the About paragraph onto the hero image, over a `LinearGradient`
-scrim — without it the chips vanished on pale photos. Tapping any artist in the line-up
-opens their page, nested the way the artist page nests its own similar-artists strip; a
-single-artist bill skips the sheet and goes straight through. Avatars show real photos,
-falling back to initials rather than borrowing another act's face.
-
-**The line-up was empty on 99% of events and the data was already being fetched.** It
-reads `event_artists`, and only `upsert_event` ever wrote those rows — the broad sweep,
-which produced almost the whole catalogue, wrote none. But the parser read
-`_embedded.attractions` and kept only `atts[0]` as headliner, discarding the bill. And
-`reverify_all_events` re-fetches every event by TM id nightly through that same parser, so
-those bills were downloaded and thrown away every night. `_batch_upsert_search` now writes
-them: **zero extra API calls, and it keeps filling itself nightly.** Bill coverage went
-1.1% → **47%** (1,758 of 3,769), with 607 events carrying a real support act.
-
-`EventDetail` also falls back to the headliner when no bill is stored — not a guess, since
-Ticketmaster named them and they are unarguably on the bill.
-
-### Listings that say they are not a ticket
-
-Reported as a Get-tickets button 404ing. The URL was Ticketmaster's OWN — their API still
-returns it, still says `status: onsale`, sale window open — and all five URL variants 404
-on their own site. There is no API signal to detect this; they serve stale data, and we
-cannot verify links server-side because Ticketmaster 401s every non-browser request.
-
-The real defect was upstream: `Diljit Dosanjh | Vinyl Room Upgrade (TICKET NOT INCLUDED)`
-is not a show. Both ingestion paths now skip listings that DECLARE no ticket is included
-(`ingestion.is_not_attendable`), and 18 rows were removed.
-
-**Only self-declaring phrases are matched, and the restraint is the point:** of 17 upcoming
-listings containing "hotel", EIGHT were real concerts at hotel-named venues — Derek Ryan at
-Castlecourt Hotel, Foster & Allen at Celtic Ross Hotel. "hotel" as a keyword would have
-deleted real shows. VIP Packages and Ticket+Hotel bundles are deliberately KEPT: those do
-include a ticket, so they are attendable, merely redundant packagings of one show.
-
-### Search: as you type, ranked by relevance, one toggle one kind
-
-The box only ran on submit — `onChangeText` stored the text, `onSubmitEditing` did the
-work. The backend was never the problem; `search-local` always matched on a substring.
-
-**Two debounces, and the split matters:** 250ms for our DB and the in-memory festival list
-(free, this is what feels live), 900ms for the live Ticketmaster supplement. Ticketmaster
-allows 5,000 calls a DAY and the sweep plus nightly re-verify spend most of it, so that one
-must never fire per keystroke. Both trailing, so continuous typing costs exactly one live
-call. Each pass carries a sequence number and discards its result if a later keystroke
-bumped it.
-
-**Ranked by WHERE the term matched**, then date within each band: title-starts-with, then
-title-contains, then artists on the bill, then city last. Date alone put Corona Capital
-SIXTH for "corona", behind a gospel tour in Corona, California. Also escaped the LIKE
-wildcards — a search for "50%" was matching the entire catalogue.
-
-**Each toggle now shows only its own kind.** Concerts rendered Artists + Concerts +
-Festivals; Festivals did the same. This also removed a Deezer request per keystroke, and
-fixed `nothing`, which required all three kinds to be empty and so hid "No results".
-
-## Bugs I caused and fixed (both found by running it)
-
-1. **Similar-artist photos went blank.** `backfill_similar` writes the 20 names and stamps
-   `similar_checked_on`, which made `artist_detail` believe the strip was done — `cached`
-   was true and the stamp was today, so neither branch fired and the only code that fills
-   those photos never ran. Foo Fighters: 20 names, 0 photos, no path to a photo for 30
-   days. `artists.py` now also queues the photo pass when rows are fresh but photoless.
-2. **`lineup_matches` was computed inside the `mine` branch** of `/me/calendar`, so it
-   was always empty in city mode and a followed support act rendered as a card with no
-   reason shown — the same bug found by running the app last session, still live in the
-   other scope. Now computed for both modes.
-3. **Two backends on port 8000.** An orphaned `uvicorn` from the previous day (parent PID
-   1, no `--reload`) held `127.0.0.1:8000` while `fastapi dev` held `*:8000`. macOS lets
-   both bind and the **specific address wins**, so `localhost` served yesterday's code and
-   hid all of today's work. If today's endpoints seem missing, check
-   `lsof -nP -iTCP:8000 -sTCP:LISTEN` before debugging anything else.
-
----
-
-## Festivals — the whole of day two
-
-Festivals were a dead end: no `GET /festivals/{id}`, no detail component, and
-`FestivalCard`'s `onPress` passed by NONE of its four call sites. Now they have a page,
-a day-by-day bill, and a search that matches the concert side.
-
-**418 rows → 509 real festivals, 92 with a day-by-day line-up.**
-
-### The bottleneck was one line, not the keywords
-
-```python
-if not tm_id or not name or "festival" not in name.lower(): continue
-```
-
-Every listing whose TITLE lacked the literal word was fetched and discarded. Creamfields
-sells `Creamfields 2026 - Parking - Weekend Camping`; Download sells `Download 2027 -
-Charge Candy` and not one of its listings says festival. Widening the keyword list without
-fixing this moved the count by 14 — the honest measure of how little it achieved alone.
-
-A listing now qualifies on evidence: a festival word in its own name, OR we asked for that
-festival BY NAME and it says the name back, OR **10+ acts on the bill**.
-
-### Bill size is the signal a name cannot give
-
-Measured over every upcoming event: at 10+ acts the list is Corona Capital (71), Louder
-Than Life (50), Aftershock (36), Bourbon & Beyond, Oceans Calling — festivals every one.
-Corona Capital was sitting under Concerts as **15 event rows**.
-
-This is the inverse of the mistake the old code documented. "multi-day OR 3+ acts" threw
-out both Coachella weekends, because a SMALL bill proves nothing. A large one does.
-
-### Named keywords were MEASURED, never guessed
-
-Kept, with what each rescues that the generic net cannot: Download 30, Latitude 28,
-Time Warp 19, EDC 14, DGTL 1. **Rejected on the same measurement**, because what they
-rescued was not the festival: Movement 58 → "Improvement Movement", Ultra 17 → "Ultra
-Sunn", Leeds 10 → a city, Exit 7 → "Last Exit", Boomtown 2 → "Boomtown Rats", ADE 7 →
-club nights. Awakenings, Sonar, Lowlands, Wireless, Sonic Temple rescued **nothing**.
-
-### Merging, and the traps in it
-
-`services/festival_merge.py` groups by base name AND city, breaking a cluster on a gap
-over 3 days — `Discovery Festival 2027` is THREE festivals (Plymouth/Dundee/Darlington)
-and ACL's two weekends are separately ticketed. Festivals also cluster on the **BILL**
-(same city, dates within 3 days, 60%+ identical line-up), because `Abono General 3 días
-Corona Capital 2026` and `Individual Banamex Plus Corona Capital 2026` share no prefix.
-Survivor named from the common prefix, falling back to the common **suffix** — Ticketmaster
-puts the festival name LAST in a ticket title.
-
-**Days come from each listing's own date**, never from reading a weekday out of a title.
-A multi-day listing labels nothing: its bill is the whole festival and we do not know who
-plays when. Unlabelled means "on the bill, day not announced" — a different claim.
-
-### One listing, one home
-
-117 Ticketmaster ids existed in `events` AND `festivals`; ARC Music Festival was four
-concert rows under Concerts and the festival simultaneously. Fixed at three layers: the
-duplicates removed, the concert sweep skips anything the festival side owns, and the
-reconcile runs after BOTH sweeps.
-
-ARC was still wrong after that — `7 September, no end date, 1 act` — because listings
-sharing a name exactly reuse one row and each assigned its dates in turn, so only the LAST
-survived. Dates now EXPAND; reuse requires dates within 14 days so next year's edition
-cannot stretch the span across twelve months.
-
-### Search, matching the concert side exactly
-
-`/festivals/search` (ours, ranked: whole word → prefix → substring → artist on the bill →
-city) at 250ms, and `/festivals/search-live` (one Ticketmaster request, stores what it
-finds) at 900ms. Festival search had been filtering the first 100 of 507 on the device —
-four in five unreachable, which is why "ade" returned "BULL BRIGADE" while Corona Capital
-could not be found at all.
-
-## What no source can fix
-
-**Ticketmaster is the ONLY source.** All 928 festival source rows say `ticketmaster`.
-Inside its feed: ticketmaster.com 687, ticketweb 135, universe 70, moshtix 18, **frontgate 0**.
-
-Measured 2026-08-25, Ticketmaster returns **zero** listings for: Bonnaroo, Glastonbury,
-Tomorrowland, Primavera Sound, Wacken, Hellfest, Sziget, Governors Ball, Hangout, Railbird.
-There is no listing named "Amsterdam Dance Event" — the 21 "ADE" results are club nights
-during ADE week, mostly matched on the venue attraction "Ademelkweg", and they are
-genuinely concerts.
-
-Sources tested and ruled out, all on 2026-08-25:
-
-| source | finding |
-|---|---|
-| **Eventbrite** | public search API removed Dec 2019, off Feb 2020 |
-| **Songkick** | paid licence; "not approving API requests for student, educational or hobbyist purposes" |
-| **Bandsintown** | artists only, one artist per key |
-| **Front Gate** | organiser-only API — you would have to be their ticketing client |
-| **Wikidata** | 7,454 festivals but only **2** with a date after Aug 2026; 7,203 have no date. A worldwide DIRECTORY, not a feed |
-| **MusicBrainz** | 164 upcoming with dates, free, no key — but an archive: Bonnaroo 2007, ADE 2018, nothing upcoming for big names |
-| **PredictHQ** | **untested** — 14-day trial, no card. The only serious candidate left |
-
-**There is no free API listing all music festivals worldwide.** The realistic path is a
-curated table of the ~50 names a CEO will search (Wikidata gives the checklist), and a
-PredictHQ trial where the FIRST thing to do is search ADE, Bonnaroo, Glastonbury and
-Tomorrowland before writing any integration.
-
-## Open bug: Android NPE on a key press (upstream React Native)
-
-An EAS dev build on Android died with:
-
-```
-java.lang.NullPointerException
-  at com.facebook.react.ReactActivityDelegate.onKeyDown(ReactActivityDelegate.java:215)
-  at com.facebook.react.ReactActivity.onKeyDown(ReactActivity.java:101)
-  ... AsyncInputStage -> ImeInputStage.onFinishedInputEvent -> dispatchKeyEvent
-```
-
-**This is a React Native bug, not ours.** Nothing in `frontend/src` is in the stack.
-RN declares the delegate nullable and then refuses to allow it:
-
-```java
-// ReactActivity.java:85
-public @Nullable ReactDelegate getReactDelegate() { ... }
-// ReactActivityDelegate.java:215
-return Objects.requireNonNull(mReactDelegate).onKeyDown(keyCode, event);
-```
-
-`mReactDelegate` is assigned ONLY in `onCreate` (lines 148/152) and never cleared, so it
-is null only when a key event reaches the Activity before `onCreate` finished. The trace
-goes through `AsyncInputStage`, meaning the soft keyboard QUEUED a keystroke and Android
-delivered it later — to an Activity that was still starting or had just been recreated
-(dev reload, config change, or resume after being killed). The NPE is uncaught inside
-`dispatchKeyEvent`, so the process dies. `onKeyUp` and `onKeyLongPress` have the same
-flaw; all 17 delegate call sites use `requireNonNull` with no guard.
-
-**Cannot be fixed from JavaScript.** The fix is a config plugin patching `MainActivity`:
-
-```kotlin
-override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-  if (reactDelegate == null) return false   // React is not ready; do not let it throw
-  return super.onKeyDown(keyCode, event)
-}
-```
-
-Do NOT call `super` when the delegate is null — `ReactActivity.onKeyDown` is what throws.
-Returning false means "not handled", which is correct: React genuinely cannot handle it
-yet. Guard `onKeyUp` and `onKeyLongPress` the same way.
-
-Native changes need a **new EAS dev build** before they can be tested, which is the only
-real cost here. Not yet built, because the frequency is unknown — worth doing next time a
-dev build is needed anyway. `adb` is NOT installed on this machine; installing
-platform-tools would let `adb logcat` confirm whether the process actually dies.
-
-## Gotchas — read before debugging
-
-- **Run the app. `tsc` proves nothing here.** Seven bugs shipped through a clean typecheck.
-- **Detail screens must NOT import each other.** `artist-detail` takes `onSelectEvent` and
-  `onSelectFestival` as CALLBACKS for exactly this reason. Importing `festival-detail` from
-  `artist-detail` made a require cycle — "can result in uninitialized values" — because
-  `festival-detail` already imports `artist-detail` for its line-up. One-way only:
-  `festival-detail → artist-detail` and `event-detail → artist-detail`.
-- **Ingest first, reconcile last.** Bitten three times in two days: the genre prune undone
-  by `reapply_cached_tags`, the festival merge undone by `fest.name = p["name"]`, and 4
-  deleted rows restored by a long-running import holding pre-fix code in memory.
-- **A long-running import holds the code it started with.** 4 deleted add-on listings came
-  back because `reverify_all_events` was mid-run with the pre-filter code in memory and
-  re-inserted them in its final write. A data cleanup during an import gets undone.
-- **Ticketmaster 401s every non-browser request**, so link liveness cannot be checked from
-  the server. Their API also serves events whose own pages have been pulled. Chrome
-  automation is the only way to confirm a 404.
-- **Opening an artist page CREATES a row.** `/artists/detail?name=X` is find-or-create, so
-  tapping a Deezer search result used to mint a duplicate. Fixed, but remember the page is
-  a write path, not a read.
-- **Office network runs a FortiGate TLS-intercepting firewall.** `*.bandsintown.com` and
-  artist sites serve a `CN=FortiGate CA` cert → intermittent `CERTIFICATE_VERIFY_FAILED`.
-  **Deezer, Last.fm, Wikipedia and Wikidata are all clean** (verified 2026-08-24), so
-  enrichment runs fine from the office. Test from a hotspot before declaring an API broken.
-- **Ticketmaster attraction lookup: exact name match only.** Searching "Coldplay" returns
-  10 attractions and the 5 with upcoming dates are all tribute bands.
-- **Artist-site scraping is measured dead** (Cloudflare JS challenges). Don't retry.
-- **Bandsintown needs a free `app_id`** — code waits in `services/bandsintown.py`; the
-  DB-write path is still to do once a key exists.
-- **Spotify returns a stripped artist object** even on Premium. Deezer is the popularity
-  source. Spotify is dead for taste.
-- **`app.json` `web.output` must stay `"single"`.** With `"static"`, Expo server-renders in
-  Node where Supabase's auth client touches `window` and crashes.
-- Use `python3.12`; the venv is `backend/.venv`.
-
----
-
-## What to do next
-
-**1. Bios land at ~10% while everything else cleared 60%.**
-`wikipedia.fetch_artist_bio` only accepts a page whose short description reads musical and
-is not a disambiguation stub. That strictness is what stops the wrong namesake's biography
-appearing, so it was NOT loosened — but it is probably also rejecting artists who do have a
-real page. Sample 20 of the rejects by hand before touching the filter. Nothing is stored
-wrongly and nothing is stamped, so a later run retries them for free.
-
-**2. Ticketmaster billing strings are stored as artists** — e.g. `A.R. Rahman feat. Alka
-Yagnik; Udit Narayan; Sukhwinder Singh; Shankar Mahadevan; Shaan & Sehar`. Not
-duplicates, so `dedupe.py` correctly leaves them, but they look like junk in search. A
-cleanup would split on `feat.` / `;` / ` and ` and attach the real artists to the event.
-
-**3. Accented duplicates are a known gap.** `artist_lookup.key` strips punctuation but
-NOT accents, because the key must match what Postgres computes and `unaccent` is not
-installed. So `Beyoncé` and `Beyonce` would still become two rows. Every duplicate
-actually measured was case or punctuation.
-
-**4. The three missing tabs** — Passport, Trips, Bucket List — backed by ten tables no
-code touches: `passport_entries`, `saved_trips`, `trip_stops`, `travel_legs`,
-`hotel_bookings`, `bucket_list`, `reviews`, `review_likes`, `referrals`,
-`dismissed_suggestions`.
-
-**Parked/dead:** Feed/Reels tab (no honest video source), Spotify, artist-site scraping,
-real push notifications, India data.
-
----
-
-## How to run
-
+| `backend/app/api/routes/` | 17 routers, 96 endpoints |
+| `backend/app/models/` | 40 models → 42 tables |
+| `backend/app/services/` | 39 modules — **the real logic. Read the docstrings, they explain WHY** |
+| `backend/alembic/versions/` | 41 migrations, head `3036e206da09` |
+| `frontend/src/app/` | 6 screens (index, calendar, trips, me, search, _layout) |
+| `frontend/src/components/` | 49 components; full pages are `Modal`s, not routes |
+| `frontend/src/lib/api.ts` | 1,524 lines — every backend call + types. Start here |
+
+Backend 17.5k lines Python, frontend 20k lines TypeScript.
+
+**Run it:**
 ```bash
-# backend
-cd backend && fastapi dev app/main.py --host 0.0.0.0     # http://127.0.0.1:8000/docs
+cd backend  && .venv/bin/uvicorn app.main:app --reload --port 8000   # python3.12, venv at backend/.venv
+cd frontend && npx expo start                                        # press w for web
+```
+`localhost:8000/docs` is the fastest way to see the API.
 
-# frontend
-cd frontend && npx expo start        # press w for web, or --dev-client for the EAS build
+---
 
-# fill artist pages by hand (limit is PER STAGE)
-curl -X POST "http://127.0.0.1:8000/admin/enrich?limit=5"   # needs a bearer token
-# or, no auth needed:
-cd backend && .venv/bin/python -c "from app.services import enrichment; enrichment.enrich_all(limit=1500)"
+## 3. Current state — read this, it changed today
 
-# find/merge duplicate artists — DRY RUN by default, prints a full plan
-cd backend && .venv/bin/python -c "from app.services import dedupe; dedupe.dedupe_artists()"
+### The Supabase migration (8 Sep)
 
-# drop junk crowd-tag genres, then rebuild event links with no API calls
-cd backend && .venv/bin/python -c "
-from app.db.session import SessionLocal
-from app.services import tagging
-db=SessionLocal()
-print(tagging.prune_single_artist_genres(db)); print(tagging.reapply_cached_tags(db))
-db.commit()"
+The project **moved from a personal Supabase account to a company-owned org**.
+
+| | |
+|---|---|
+| Project | `musicx-prod`, org `YangtsoFour` |
+| Ref | `fmgewgmilsnyjvdddngd` |
+| Region | **Singapore** `ap-southeast-1` (was Mumbai) — same region as Render |
+| Postgres | 17.6 |
+| Plan | **FREE — this is the open problem, see §8** |
+| Data API | **OFF**. Keep it off. |
+
+Verified end to end: 42 tables restored row-for-row, search indexes intact, backend serving,
+Render deployed, Vercel bundle rebuilt, live signup → profile row → name in the Me tab.
+
+**The old project still exists as a rollback.** Nothing points at it. Safe to delete after ~15 Sep.
+
+### Live data
+
+```
+events            21,423   (18,749 upcoming, 16,870 scored)
+event_facts      201,211
+artists           12,358      venues  4,006      cities  1,540
+festivals            992
+profiles              16      auth users  3
+calendar_entries      44      passport_entries  11
+db size          264 MB of the free tier's 500 MB
 ```
 
-Device testing needs an EAS development build (Expo Go bounces on SDK 57) and a network
-without client isolation — use a hotspot.
+### Deployment
+
+| | |
+|---|---|
+| API | Render, **Singapore**, free plan → `https://musicx-api.onrender.com` |
+| Web | Vercel → `https://music-x-five.vercel.app` |
+| Migrations | run on deploy: `alembic upgrade head && uvicorn … --workers 1` |
+
+**`--workers 1` is load-bearing** — the scheduler runs inside the API process, so a second
+worker means two of every job.
+
+**Render's free plan sleeps after 15 min idle.** While asleep nothing refreshes and no
+notification is delivered. Needs Starter ($7/mo) before anyone depends on the jobs.
+
+---
+
+## 4. What was built in the last session
+
+**My shows** (`components/my-shows.tsx`, `GET /me/shows`) — everything saved, filed by plan
+state, six tabs with counts. Nothing on the screen moves a show between tabs, because state is
+derived from facts (see §6).
+
+**My bookings — the trip ledger** (`components/my-bookings.tsx` 983 lines, `GET /me/bookings`) —
+one card per show holding ticket + stay + travel, a 3-stage progress count, spend per currency,
+and a banner when a free-cancellation window closes within a week. New: manual "record my stay"
+route, travel-leg CRUD (the `travel_legs` table had no API at all), and a `ticket_cost` column.
+
+**`components/day-picker.tsx`** — single-date scrollable calendar, sibling of the range picker.
+
+**Timezone fix** — the event page formatted dates on the *reader's* clock, so it disagreed with
+every list card by one day. All dates now render in the **venue's** timezone.
+
+**Three performance fixes** — see §7, this is the important part.
+
+**The archive job** (`services/archive.py`) — past shows nobody kept are now deleted daily.
+
+### Recent commits (newest first)
+
+```
+8481943 feat: let go of past shows nobody kept
+85814c3 chore: keep the migration dumps and env backups out of the repo
+cddb8c0 perf: stop asking the database a million separate questions
+739301d perf: the scoring pass was 37 MB and eleven minutes; it is 7 MB and twenty seconds
+78a12a3 fix: a show's date is the day it happens where it happens
+cb65397 feat: the My shows and My bookings screens
+f1e5532 feat: My shows and My bookings, the two Me-tab rows that went nowhere
+e76e555 fix: pick trip dates on a calendar, and clear two icons off the home header
+7a70e23 feat: the reviews screen
+17b4b78 feat: sign up with a name, and one onboarding screen instead of a fork
+2b2ef6e feat: a splash and three intro slides
+58ba942 feat: reviews, written by people who were actually there
+b34cf8b feat: MXS scores on five signals instead of two
+```
+
+**1 commit unpushed.** I run `git push origin main` myself.
+
+---
+
+## 5. MXS — the scoring system (the most important logic)
+
+`services/scoring.py`, 775 lines.
+
+```
+MXS = 0.35·Artist + 0.25·Rarity + 0.15·Venue + 0.15·Production + 0.10·Context
+```
+
+| Component | Source | Coverage |
+|---|---|---|
+| Artist | Deezer followers; Last.fm listeners as **fallback, never a tiebreak** | 86.0% |
+| Rarity | the tour graph — every upcoming date of every tour, from our own DB | 76.4% |
+| Venue | Wikidata capacity (`P1083`) | 12.8% |
+| Production | promoter + seatmap, already in `event_facts` | 70.1% |
+| Context | festival, anniversary, tour finale, opening/closing night | 19.8% |
+
+**Four non-obvious properties:**
+1. Components with no data are **dropped and the weights re-normalised** — never faked.
+2. The number is a **rank, not a measurement**. Percentile-ranked within the cohort, blended,
+   ranked again. Only the top ~2% reach 9.0+. **This is why adding shows changes every existing
+   score**, and why the job cannot score one event alone.
+3. **Ties must break on a fixed key** (the event id). Ranking over unbroken ties made the same
+   show drift across a three-point band — 3,094 scores changed on frozen input.
+4. **Rarity cannot stand alone.** Left to, it put "Gavit Class of '97 Reunion Concert" at 10.0,
+   above Bob Dylan, on the word "reunion".
+
+Below **5,000 listeners** an act sits at the floor rather than being ranked — ranking unknowns
+against each other made "marginally less unknown" read as stature (a 502-listener band scored 8.1).
+
+Day-of-week is deliberately excluded: a Saturday show is a fact about your calendar.
+
+Every score writes its workings to `events.mxs_breakdown` — components, weights, confidence,
+reason chips, and which components were **missing**. The app shows all of it.
+
+---
+
+## 6. Plan states — derived, not transitioned
+
+`services/plan.py`. **Interested → Planning → Confirmed → Attended.**
+
+```
+attended    the show happened AND there is a ticket
+confirmed   there is a ticket
+planning    a stay, an invite sent, or a note written
+interested  they saved it
+```
+
+Recomputed on every read. Nothing "moves" a show. A stored state must be moved by whoever
+causes the change, so every future feature has to remember — and the one that forgets leaves
+somebody on Interested with a hotel booked.
+
+Two exceptions: **attended** can be a stored answer ("I was there" without a ticket), and
+**missed** is an answer, not a stage. The cache write-back must never overwrite either.
+
+---
+
+## 7. Performance — the outage, and what fixed it
+
+**Supabase cut the old project off on 5 Sep**: the free tier allows 5 GB/month of egress
+(data *leaving* the database) and we used **13.9 GB**. Not users — there were 5. Our own
+background jobs. Fixed, then the project moved.
+
+Measured breakdown: `events` 11 GB, `event_facts` 2.2 GB, everything else 1.6 GB.
+
+### Three fixes, all in `services/scoring.py`
+
+**1. Ask for the columns you use.** `db.query(Event)` meant all 29 columns. Two are 81% of a
+row: `description` (671 B of Ticketmaster small print — the top-scoring show carries 581 bytes
+about handbag size at Wembley) and `mxs_breakdown` (542 B, the job's own previous output, which
+it overwrites without reading). Now `load_only(...)` on six columns: 1,255 B → 458 B.
+
+Proved by re-running with `raiseload=True`, which makes touching a deferred column raise. It
+completed, so no score can have moved.
+
+**2. Skip when nothing changed.** `services/job_state.py`. The pass ran ~700 times a month,
+nearly all producing identical scores. A **fingerprint** — counts and newest timestamps across
+everything it reads, hashed — is compared to the one stored after the last run. Three required
+properties: **fails open** (any error → run), **has a 24h ceiling**, **costs nothing to ask**
+(all aggregates). The fingerprint is taken *again after* the run, because scoring writes to
+`events` and moves its own fingerprint.
+
+**3. Never hold ORM objects across a commit.** `db.commit()` expires every instance, so the next
+`ev.id` triggered a **full-row refetch** — 13,891 extra queries per pass, ignoring `load_only`
+entirely and handing the saving straight back. The list now holds ids.
+
+```
+scoring pass:  ~37 MB → 7 MB      ~11 min → 21 s
+passes/month:  ~700 → ~20
+refetches:     13,891 → 0
+events egress: ~11 GB → ~140 MB/month
+determinism:   two runs, 19,420 scores compared, 0 changed
+```
+
+### A fourth fix: stop asking a million separate questions
+
+A round trip to Supabase measures **27.3 ms**. There were 661,017 one-at-a-time
+`UPDATE event_facts SET last_verified` statements — five hours of waiting, while the database
+spent 91 seconds doing the work. Now one batched statement per chunk, with an
+`IS DISTINCT FROM` guard so the 3-hourly refresh emits nothing after the first pass of the day.
+Also: `build_bill_index` now takes an explicit id set, so `score_events_by_ids` stopped
+querying per event (~11,790 per refresh → 0).
+
+**Caveat for whoever continues this:** `pg_stat_statements` counts are **lifetime** and have
+never been reset, so some apparent N+1s are from code replaced months ago. Measure a **delta
+around a real run** instead. And **the festival merge, the event dedupe and the alerts engine
+still read the whole catalogue with every column** — the same mistake, in three places we did
+not fix. They are now the largest egress consumers.
+
+---
+
+## 8. Background jobs
+
+`app/scheduler.py` — APScheduler, **inside the API process**, so they only run while the server
+is up.
+
+| Job | Every | What |
+|---|---|---|
+| `sweep_catalogue` | 3 h | broad **discovery** of new shows + festivals |
+| `refresh_catalogue` | 3 h | **re-verify** everything inside a 7-day horizon |
+| `refresh_catalogue_deep` | 24 h | the same over the whole catalogue |
+| `enrich_catalogue` | 24 h | artist photo, bio, tags, similar, popularity |
+| `reminders` | 1 h | on-sale, week-out, day-of |
+| `passport_stamps` | 1 h | record finished ticketed shows |
+| `push_delivery` | 2 min | send what hasn't reached a device |
+| `archive_past_events` | 24 h | **new** — drop past shows nobody kept |
+
+**`SCHEDULER_ENABLED=0` is in my local `backend/.env`** — otherwise every dev-server restart
+fires a sweep, a refresh and an enrichment within 90 seconds. Default is ON so production can't
+be broken by a variable nobody set.
+
+Two cadences because they answer different questions: a cancellation matters most for a show
+somebody has a ticket for *this week*. Splitting them cut daily work 85%. Ticketmaster
+re-verify is batched **150 ids per request** — 44 requests, not 6,583.
+
+Manual triggers: `POST /admin/{sweep,refresh,score,enrich,push,archive}`, gated by
+`ADMIN_USER_IDS`. **Empty denies everyone, including me.** `/admin/enrich`'s limit is *per
+stage*. `/admin/archive` is **dry-run by default**.
+
+### The archive job (`services/archive.py`) — read before touching it
+
+Nothing had ever deleted a past event; the catalogue grew ~18 MB/day toward a 500 MB ceiling.
+
+**What makes it safe is not the grace period.** Almost every FK into `events` is
+`ON DELETE CASCADE` — `calendar_entries`, `hotel_bookings`, `reviews`, `travel_legs`,
+`trip_stops`, `event_invites`, `notifications`. So `DELETE FROM events WHERE starts_at < now()`
+would **silently** take a person's saved shows, hotel booking, reviews and trip plans. Only
+`passport_entries` is `NO ACTION` and would object, which is luck.
+
+So a show survives if **any** row in **any** user-owned table points at it — not "if attended",
+if anybody ever did anything with it, including being notified or dismissing it. Grace
+(`ARCHIVE_GRACE_DAYS`, default 14) is the *second* guard.
+
+**And the table lists are checked against the live schema every run.** `_verify_coverage` reads
+the actual foreign keys and **refuses to run** on anything unclassified. This is the fix for the
+festival-cleanup bug, whose hand-written guard named 2 of the 7 tables it needed and came one
+saved show away from deleting user data. Proved by hiding `reviews` from the list and calling
+with `dry_run=False`: it deleted nothing and stopped.
+
+First run at 14 days removed **1,279** past events (eligible 1,244 — the guard is *transitive*:
+a survivor protected only by a duplicate pointing at it becomes eligible once that duplicate
+goes, so chunks cascade). All eleven user-owned tables verified unchanged before and after.
+
+**Postgres does not return deleted space to disk.** The win shows up as growth *pausing* while
+the next ~1,300 shows refill the holes, not as the size number dropping.
+
+---
+
+## 9. External APIs and keys
+
+Names only; values live in `backend/.env` and the Render dashboard, never committed.
+
+| Service | What we get | Env var(s) | Limit |
+|---|---|---|---|
+| **Ticketmaster** | the catalogue: events, venues, prices, seatmaps, promoters, bills, MusicBrainz ids | `TICKETMASTER_API_KEY` | 5,000/day |
+| **Deezer** | follower counts (primary MXS signal), photos, global artist search | *no key* | free |
+| **Last.fm** | listener counts (fallback), crowd genre tags, similar artists, user history | `LASTFM_API_KEY` | free |
+| **setlist.fm** | what an artist plays live; a user's attended gigs for the Passport | `SETLISTFM_API_KEY` | throttled |
+| **Wikipedia** | cited bios, stored with the URL actually read | *no key* | free |
+| **Wikidata** | venue capacity `P1083` | *no key* | CC0 |
+| **Bandsintown** | an artist's own tour incl. festivals TM misses | `BANDSINTOWN_APP_ID` | free |
+| **OpenStreetMap** | places near a venue, 4 Overpass mirrors | *no key* | be polite |
+| **Tripsure** | hotels + flights, two products | `TRIPSURE_*` ×3, `TRIPSURE_FLIGHT_*` ×3 | partner |
+| **Expo Push** | phone notifications | `EXPO_ACCESS_TOKEN` | free |
+| **Web Push** | browser notifications | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | free |
+| **Spotify** | scaffolded only, needs app review | `SPOTIFY_CLIENT_ID/SECRET` | 5 testers |
+| **Supabase** | Postgres + Auth | `DATABASE_URL`, `SUPABASE_URL` | see §10 |
+
+Frontend, **public by design** (Metro bakes them into the bundle — never put a secret here):
+`EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_KEY`, `EXPO_PUBLIC_SPOTIFY_CLIENT_ID`,
+`EXPO_PUBLIC_GYG_PARTNER_ID`, `EXPO_PUBLIC_GYG_CAMPAIGN`. `EXPO_PUBLIC_API_URL` must be set and
+**https** in any deployed build.
+
+**Three lessons about external sources:**
+- **Test the source before designing on it.** Four services were going to seed reviews. All four
+  checked; none has concert reviews. (Last.fm `getShouts` → "Invalid Method"; Ticketmaster has 59
+  attraction fields and zero opinion words — the one matching `/star/` was `startDateTime`.)
+- **A failed lookup is never stamped.** `*_checked_on` only on a **completed** call, so a
+  throttled request retries instead of freezing as "nothing here".
+- **Match on identifiers, not names.** Asking setlist.fm for "Coldplay" by name returned a
+  tribute band's set from an Italian beer festival. Use the MusicBrainz id; record whether the
+  match was by id or name.
+- **If HTTPS fails on an office network**, check the certificate issuer before blaming the API —
+  ours said `CN=FortiGate CA`. On a hotspot it worked immediately.
+
+---
+
+## 10. Open problems, in priority order
+
+### 1. The org is on the FREE plan — this is the deadline
+
+**264 MB of a 500 MB ceiling, growing ~18 MB/day** (~1,300–2,200 new events daily). When it
+fills, **writes start failing**: no new shows, no new signups. Query optimisation cannot fix it;
+it is about what we keep. Free tier also has **no backups**, which we cannot launch on.
+
+**Pro is $25/mo on the organisation.** I am asking my manager. The archive job slows the climb;
+Pro removes the ceiling.
+
+### 2. `anon` has write grants on all 42 tables, and zero RLS
+
+The new project granted `anon` and `authenticated` **SELECT + INSERT + UPDATE + DELETE** on all
+42 tables (the old one gave only SELECT) because "Automatically expose new tables" was ticked at
+creation. **Harmless while the Data API is OFF**, and a live write hole the moment anyone turns
+it on, since the anon key ships inside the app bundle by design.
+
+Two statements close it. Nothing uses those roles — the backend connects as `postgres`, Auth
+uses its own internal role:
+```sql
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
+```
+The second matters — without it the next migration re-grants everything.
+
+### 3. Three more full-catalogue readers never fixed
+
+`festival_merge.py`, `event_merge.py` and `alerts.py` all read the whole catalogue with **every
+column** — the same mistake removed from scoring. They are now the biggest egress consumers.
+Same `load_only` fix, roughly an hour.
+
+### 4. Launch blockers
+
+- Apple Developer enrolment ($99/yr, has a queue — start early)
+- Render Starter ($7/mo) — free plan sleeps and stops every job
+- **In-app account deletion** — an App Store *requirement*
+- Privacy policy + terms on a real domain
+- App name and bundle id — **permanent** once submitted
+- Replace the Expo default icon and splash image
+- Sentry, and database backups
+
+### 5. Known gaps
+
+- **No automated tests at all.** Verification has been by measurement and by running the app.
+  This is the biggest structural gap in the project.
+- Venue capacity covers 12.8% of shows — Wikidata knows arenas, not clubs. Re-run
+  `scripts/backfill_venue_capacity.py`.
+- MusicBrainz ids on 252 artists. Re-run `scripts/backfill_artist_mbid.py`.
+- Artist bios ~10% — Wikipedia disambiguation is strict on purpose.
+- Tripsure is search-only; no booking flow (would need us to take payment).
+- `components/follow-artists.tsx` is orphaned since the onboarding merge.
+- `event_facts` stores `source_url` on every row — the same URL ~9× per event, ~19 MB. Belongs
+  on the event.
+- Not built, tables empty: bucket list, referrals, Music X Wrapped, appearance/theme, roadmap
+  page, privacy page, help.
+
+---
+
+## 11. Rules that must not be quietly loosened
+
+Every one was learned by getting it wrong first.
+
+| Rule | Why |
+|---|---|
+| Never invent a value | Omit the component, show the gap, say "no rating yet" |
+| Never derive a name from an email | `jadhav.r` is not a name |
+| Photos need an exact normalised match | 426 of 1,451 artists correctly got none; a tribute act wearing the real face is a lie the reader can't detect |
+| Bios are Wikipedia only, with the real URL | Never a guessed `/wiki/<Name>` |
+| Stamp the check only on success | Or a throttled request freezes forever as "nothing here" |
+| Break every tie on a fixed key | Cost us 3,094 drifting scores |
+| Retire on the **second** miss | One bad API response shouldn't delete a real show |
+| Check every user table before deleting an event | The festival cleanup was one saved show away from destroying data |
+| Withdraw facts only from an authoritative payload | A search page is a projection; absence there proves nothing |
+| Never convert currencies | Two right numbers beat one confident wrong one |
+| Dates render in the **venue's** timezone | A concert happens on one day |
+| Bulk-load, never query per row | 27.3 ms a round trip; a million is seven hours |
+| Select only the columns you use | On `events`, 81% of a row is text the jobs never read |
+| Never hold ORM objects across a commit | `commit()` expires them; the next attribute access refetches the whole row |
+| `--workers 1` | The scheduler lives in the API process |
+| Push before you deploy | Render builds from GitHub; a migration in an unpushed commit means the deploy refuses to start |
+| Verify by running the app | `tsc` passed clean while seven real bugs shipped |
+
+---
+
+## 12. If you're stuck
+
+**Read the service docstrings.** Nearly every module in `backend/app/services/` opens with
+several paragraphs on why it is built that way, what was tried first, and what broke. They are
+the real documentation. The five to read first:
+
+```
+scoring.py      provenance.py     plan.py     trust.py     job_state.py
+```
+
+---
+
+## What I want to do next
+
+*(edit this line before pasting — tell the new chat what you actually want)*
+
+> Nothing specific yet. Ask me what I want to work on.
