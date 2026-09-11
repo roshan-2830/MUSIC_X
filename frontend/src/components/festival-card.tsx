@@ -2,12 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { Festival } from "../lib/api";
 import { coverColor } from "../lib/format";
 import { useSaves } from "../lib/saves";
 
-const MUTED = "#9a9aa6";
-const ACCENT = "#e8ff47";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function fmtRange(s: string | null, e: string | null): string {
@@ -32,6 +33,8 @@ export default function FestivalCard({
   onPress?: () => void;
   full?: boolean;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { isFestivalSaved, toggleFestival } = useSaves();
   const saved = isFestivalSaved(festival.id);
   const meta = [fmtRange(festival.starts_on, festival.ends_on), festival.city]
@@ -56,7 +59,7 @@ export default function FestivalCard({
           <Ionicons
             name={saved ? "bookmark" : "bookmark-outline"}
             size={18}
-            color={saved ? ACCENT : "#fff"}
+            color={saved ? th.accent : "#fff"}
           />
         </Pressable>
       </View>
@@ -82,7 +85,7 @@ export default function FestivalCard({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   card: { width: 260, marginRight: 14 },
   cardFull: { width: "100%", marginRight: 0, marginBottom: 14 },
   imageWrapFull: { width: "100%", height: 150 },
@@ -92,26 +95,26 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     overflow: "hidden",
     marginBottom: 9,
-    backgroundColor: "#14141b",
+    backgroundColor: th.panel,
   },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   save: {
     position: "absolute",
     top: 10,
     right: 10,
-    backgroundColor: "rgba(0,0,0,0.38)",
+    backgroundColor: alpha(th.shadow, 0.38),
     borderRadius: 999,
     padding: 7,
   },
-  name: { color: "#f4f4f6", fontSize: 16, fontWeight: "800", lineHeight: 20 },
-  meta: { color: MUTED, fontSize: 13, marginTop: 3 },
+  name: { color: th.text, fontSize: 16, fontWeight: "800", lineHeight: 20 },
+  meta: { color: th.muted, fontSize: 13, marginTop: 3 },
   foot: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 8 },
-  mxsPill: { backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 11 },
-  mxsText: { color: "#101204", fontWeight: "800", fontSize: 13 },
+  mxsPill: { backgroundColor: th.accentFill, borderRadius: 999, paddingVertical: 4, paddingHorizontal: 11 },
+  mxsText: { color: th.accentInk, fontWeight: "800", fontSize: 13 },
   noscorePill: {
-    borderWidth: 1, borderColor: "#26262f", borderStyle: "dashed", borderRadius: 999,
-    paddingVertical: 4, paddingHorizontal: 10, backgroundColor: "#1b1b24",
+    borderWidth: 1, borderColor: th.line, borderStyle: "dashed", borderRadius: 999,
+    paddingVertical: 4, paddingHorizontal: 10, backgroundColor: th.panel2,
   },
-  noscoreText: { color: MUTED, fontSize: 12 },
-  acts: { color: MUTED, fontSize: 12, fontWeight: "600" },
+  noscoreText: { color: th.muted, fontSize: 12 },
+  acts: { color: th.muted, fontSize: 12, fontWeight: "600" },
 });

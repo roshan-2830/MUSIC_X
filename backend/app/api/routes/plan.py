@@ -3,7 +3,7 @@
 PRD F3. Three of the four move on their own:
 
     Interested  saving the show
-    Planning    picking a hotel, inviting somebody, or writing a note
+    Planning    picking a hotel or inviting somebody
     Confirmed   a ticket — pasted confirmation, or declared
     Attended    the show has happened AND there is a ticket (or they ticked "I was there")
 
@@ -27,7 +27,7 @@ from app.models.event import Event
 from app.models.event_invite import EventInvite
 from app.models.hotel_booking import HotelBooking
 from app.models.venue import Venue
-from app.schemas.plan import (NoteIn, PasteIn, PasteResult, PlanOut, PlanStep, ReminderIn,
+from app.schemas.plan import (PasteIn, PasteResult, PlanOut, PlanStep, ReminderIn,
                               TicketOut)
 from app.services import passport
 from app.services import plan as planner
@@ -40,7 +40,6 @@ ASK_WINDOW_DAYS = 42
 router = APIRouter(prefix="/events", tags=["plan"])
 
 REMINDER_LEVELS = ("minimal", "normal", "high")
-NOTE_MAX = 500
 
 
 def _entry(db: Session, uid: uuid.UUID, event_id: UUID) -> CalendarEntry | None:
@@ -56,7 +55,6 @@ def _build(db: Session, uid: uuid.UUID, ev: Event, entry: CalendarEntry | None) 
         HotelBooking.user_id == uid, HotelBooking.event_id == ev.id).count() > 0
     has_invited = db.query(EventInvite).filter(
         EventInvite.from_user_id == uid, EventInvite.event_id == ev.id).count() > 0
-    note = (entry.note if entry else None) or None
     state = planner.derive(entry, past=past, has_base=has_base, has_invited=has_invited)
     booked = bool(entry and entry.booked)
 
@@ -86,9 +84,7 @@ def _build(db: Session, uid: uuid.UUID, ev: Event, entry: CalendarEntry | None) 
         past=past,
         has_base=has_base,
         has_invited=has_invited,
-        has_note=bool((note or "").strip()),
         reminder_level=(entry.reminder_level if entry and entry.reminder_level else "normal"),
-        note=note,
         ticket=(TicketOut(
             provider=entry.ticket_provider,
             reference=entry.ticket_ref,
@@ -131,21 +127,6 @@ def set_reminder(event_id: UUID, body: ReminderIn,
     db.commit()
     return _build(db, uid, ev, entry)
 
-
-@router.put("/{event_id}/plan/note", response_model=PlanOut)
-def set_note(event_id: UUID, body: NoteIn,
-             user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
-    """Their own note. Writing one is also a planning signal, so this can move the state — which
-    is exactly why the state is derived rather than transitioned: nothing here has to know that."""
-    uid = uuid.UUID(user_id)
-    ev = _event_or_404(db, event_id)
-    entry = _entry(db, uid, event_id)
-    if entry is None:
-        raise HTTPException(status_code=409, detail="Save the show first.")
-    text = (body.note or "").strip()
-    entry.note = text[:NOTE_MAX] or None
-    db.commit()
-    return _build(db, uid, ev, entry)
 
 
 @router.post("/{event_id}/plan/ticket/paste", response_model=PasteResult)

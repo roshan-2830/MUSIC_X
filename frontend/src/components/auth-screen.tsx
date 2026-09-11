@@ -12,13 +12,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { useAuth } from "../lib/auth";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const WARN = "#f0d47e";
 
 export default function AuthScreen() {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { signIn, signUp, sendOtp, verifyOtp } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [method, setMethod] = useState<"password" | "otp">("password");
@@ -124,7 +126,7 @@ export default function AuthScreen() {
                 value={name}
                 onChangeText={setName}
                 placeholder="Your name"
-                placeholderTextColor={MUTED}
+                placeholderTextColor={th.muted}
                 autoCapitalize="words"
                 autoCorrect={false}
                 editable={!busy}
@@ -140,7 +142,7 @@ export default function AuthScreen() {
                 value={email}
                 onChangeText={setEmail}
                 placeholder="you@email.com"
-                placeholderTextColor={MUTED}
+                placeholderTextColor={th.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
@@ -158,7 +160,7 @@ export default function AuthScreen() {
                   value={password}
                   onChangeText={setPassword}
                   placeholder={mode === "login" ? "Your password" : "Create a password (min 6)"}
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={th.muted}
                   secureTextEntry={!reveal}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -171,7 +173,7 @@ export default function AuthScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={reveal ? "Hide password" : "Show password"}
                 >
-                  <Ionicons name={reveal ? "eye-off-outline" : "eye-outline"} size={20} color={MUTED} />
+                  <Ionicons name={reveal ? "eye-off-outline" : "eye-outline"} size={20} color={th.muted} />
                 </Pressable>
               </View>
             </>
@@ -186,7 +188,7 @@ export default function AuthScreen() {
                   value={confirm}
                   onChangeText={setConfirm}
                   placeholder="Type it again"
-                  placeholderTextColor={MUTED}
+                  placeholderTextColor={th.muted}
                   secureTextEntry={!reveal}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -200,7 +202,7 @@ export default function AuthScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={reveal ? "Hide password" : "Show password"}
                 >
-                  <Ionicons name={reveal ? "eye-off-outline" : "eye-outline"} size={20} color={MUTED} />
+                  <Ionicons name={reveal ? "eye-off-outline" : "eye-outline"} size={20} color={th.muted} />
                 </Pressable>
               </View>
               {/* Said as it is typed, not after the request fails. */}
@@ -218,7 +220,7 @@ export default function AuthScreen() {
                 value={code}
                 onChangeText={(t) => setCode(t.replace(/[^0-9]/g, "").slice(0, 10))}
                 placeholder="••••••••"
-                placeholderTextColor={MUTED}
+                placeholderTextColor={th.muted}
                 keyboardType="number-pad"
                 maxLength={10}
                 autoFocus
@@ -231,7 +233,7 @@ export default function AuthScreen() {
           {notice && !error ? <Text style={styles.notice}>{notice}</Text> : null}
 
           <Pressable style={[styles.btn, busy && styles.btnBusy]} onPress={submit} disabled={busy}>
-            {busy ? <ActivityIndicator color="#0b0b0f" /> : <Text style={styles.btnText}>{buttonLabel}</Text>}
+            {busy ? <ActivityIndicator color={th.accentInk} /> : <Text style={styles.btnText}>{buttonLabel}</Text>}
           </Pressable>
 
           {/* method switches (login only) */}
@@ -258,37 +260,37 @@ export default function AuthScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: th.bg },
   flex: { flex: 1 },
   inner: { flex: 1, justifyContent: "center", paddingHorizontal: 24 },
-  logo: { color: "#f4f4f6", fontSize: 30, fontWeight: "800", letterSpacing: 1, textAlign: "center" },
-  accent: { color: ACCENT },
-  h: { color: "#f4f4f6", fontSize: 22, fontWeight: "800", textAlign: "center", marginTop: 20 },
-  sub: { color: MUTED, fontSize: 14, textAlign: "center", marginTop: 6, marginBottom: 22 },
+  logo: { color: th.text, fontSize: 30, fontWeight: "800", letterSpacing: 1, textAlign: "center" },
+  accent: { color: th.accent },
+  h: { color: th.text, fontSize: 22, fontWeight: "800", textAlign: "center", marginTop: 20 },
+  sub: { color: th.muted, fontSize: 14, textAlign: "center", marginTop: 6, marginBottom: 22 },
   // The eye sits inside the field's box, so the box keeps the same shape as every other
   // input on the screen rather than growing a control beside it.
   inputRow: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1,
     borderRadius: 12, paddingHorizontal: 14, marginBottom: 12, height: 48,
   },
-  inputFlex: { flex: 1, color: "#f4f4f6", fontSize: 15, padding: 0 },
-  mismatch: { color: WARN, fontSize: 12.5, marginTop: -6, marginBottom: 12 },
-  seg: { flexDirection: "row", backgroundColor: "#14141b", borderRadius: 12, padding: 4, borderWidth: 1, borderColor: "#26262f", marginBottom: 18 },
+  inputFlex: { flex: 1, color: th.text, fontSize: 15, padding: 0 },
+  mismatch: { color: th.warn, fontSize: 12.5, marginTop: -6, marginBottom: 12 },
+  seg: { flexDirection: "row", backgroundColor: th.panel, borderRadius: 12, padding: 4, borderWidth: 1, borderColor: th.line, marginBottom: 18 },
   segBtn: { flex: 1, paddingVertical: 10, borderRadius: 9, alignItems: "center" },
-  segOn: { backgroundColor: ACCENT },
-  segText: { color: "#d6d6de", fontWeight: "700" },
-  segTextOn: { color: "#0b0b0f", fontWeight: "800" },
-  label: { color: MUTED, fontSize: 13, fontWeight: "600", marginBottom: 6, marginTop: 10 },
-  input: { backgroundColor: "#14141b", borderWidth: 1, borderColor: "#26262f", borderRadius: 12, paddingHorizontal: 14, height: 48, color: "#f4f4f6", fontSize: 15 },
+  segOn: { backgroundColor: th.accentFill },
+  segText: { color: th.text2, fontWeight: "700" },
+  segTextOn: { color: th.accentInk, fontWeight: "800" },
+  label: { color: th.muted, fontSize: 13, fontWeight: "600", marginBottom: 6, marginTop: 10 },
+  input: { backgroundColor: th.panel, borderWidth: 1, borderColor: th.line, borderRadius: 12, paddingHorizontal: 14, height: 48, color: th.text, fontSize: 15 },
   codeInput: { fontSize: 22, fontWeight: "800", letterSpacing: 5, textAlign: "center" },
-  error: { color: "#ff6b6b", fontSize: 13, marginTop: 14, textAlign: "center" },
-  notice: { color: "#7ef0b2", fontSize: 13, marginTop: 14, textAlign: "center" },
-  btn: { backgroundColor: ACCENT, borderRadius: 14, height: 50, alignItems: "center", justifyContent: "center", marginTop: 22 },
+  error: { color: th.danger, fontSize: 13, marginTop: 14, textAlign: "center" },
+  notice: { color: th.success, fontSize: 13, marginTop: 14, textAlign: "center" },
+  btn: { backgroundColor: th.accentFill, borderRadius: 14, height: 50, alignItems: "center", justifyContent: "center", marginTop: 22 },
   btnBusy: { opacity: 0.7 },
-  btnText: { color: "#0b0b0f", fontSize: 16, fontWeight: "800" },
-  link: { color: ACCENT, fontWeight: "700", fontSize: 14, textAlign: "center", marginTop: 18 },
+  btnText: { color: th.accentInk, fontSize: 16, fontWeight: "800" },
+  link: { color: th.accent, fontWeight: "700", fontSize: 14, textAlign: "center", marginTop: 18 },
   otpLinks: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 10, marginTop: 18 },
-  dot: { color: MUTED },
+  dot: { color: th.muted },
 });

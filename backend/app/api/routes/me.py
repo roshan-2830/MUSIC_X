@@ -1,3 +1,5 @@
+import json
+import time
 import uuid
 from datetime import datetime, timezone
 from uuid import UUID
@@ -6,9 +8,10 @@ from datetime import date as date_cls, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, func, nulls_last, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, nulls_last, or_, text
+from sqlalchemy.orm import Session, load_only
 
+from app.services import search_filters as sf
 from app.api.routes.events import _to_list_item, _to_list_items, with_related
 from app.core.security import display_name_from_claims, get_current_user_claims, get_current_user_id
 from app.db.session import get_db
@@ -504,8 +507,37 @@ def unfollow_artist(
     db.commit()
 
 
+# genre name -> bucket, for every genre we hold. Cached for the life of the process: the
+# mapping is a pure function of the name, and the names only change when ingestion adds a
+# genre. Re-read at most every ten minutes so a newly ingested genre is not invisible until
+# the next deploy.
+_GENRE_CACHE: dict = {"at": 0.0, "map": {}}
+
+
+def _genre_buckets(db: Session) -> dict:
+    now = time.time()
+    if _GENRE_CACHE["map"] and now - _GENRE_CACHE["at"] < 600:
+        return _GENRE_CACHE["map"]
+    out = {}
+    for (name,) in db.query(Genre.name).distinct().all():
+        b = bucketize(name)
+        if b:
+            out[name] = b
+    _GENRE_CACHE.update(at=now, map=out)
+    return out
+
+
 @router.get("/recommended", response_model=list[RecommendedEvent])
 def recommended(limit: int = Query(RECOMMENDED_DEFAULT, ge=1, le=RECOMMENDED_MAX),
+                when: str | None = Query(None, pattern="^(today|tomorrow|weekend|d7|month|m3|custom)$"),
+                date_from: date_cls | None = Query(None, alias="from"),
+                date_to: date_cls | None = Query(None, alias="to"),
+                country: str | None = Query(None, min_length=2, max_length=2),
+                city_id: uuid.UUID | None = Query(None),
+                onsale: str | None = Query(None, pattern="^(now|coming)$"),
+                rating: float | None = Query(None, ge=0, le=10),
+                hide_off: bool = Query(False),
+                tz: str = Query("UTC"),
                 user_id: str = Depends(get_current_user_id), db: Session = Depends(get_db)):
     """Upcoming events matched to the user's taste — soonest first within each tier.
 
@@ -534,81 +566,171 @@ def recommended(limit: int = Query(RECOMMENDED_DEFAULT, ge=1, le=RECOMMENDED_MAX
     far_future = datetime.max.replace(tzinfo=timezone.utc)
 
     # ---- Tier A: artist matches — via the full line-up AND the headliner ----
-    # (search-ingested events set only headliner_artist_id, not event_artists rows,
-    # so we must check both or those shows never surface.)
-    lineup_rows = (
-        db.query(Event, Artist.name)
-        .join(EventArtist, EventArtist.event_id == Event.id)
-        .join(Artist, EventArtist.artist_id == Artist.id)
-        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
-        .all()
-    )
-    headliner_rows = (
-        db.query(Event, Artist.name)
-        .join(Artist, Event.headliner_artist_id == Artist.id)
-        .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
-        .all()
-    )
-    # Artists from a connected Last.fm account. Kept separate from follows because the
-    # promise is different: a follow means "alert me", listening means "this is my taste".
-    # So these rank recommendations but never trigger a notification, and the reason says
-    # which one it was — "Because you follow X" vs "You listen to X".
+    #
+    # MATCHED IN SQL, and this is the whole reason this endpoint was rewritten. It used to
+    # load every upcoming event into Python three times — once joined to its line-up, once
+    # to its headliner, once to its genres — and filter there. Measured 2026-09-11 from
+    # pg_stat_statements: 11,550,220 rows returned across ~515 calls, at 1,255 bytes a row,
+    # or 14.5 GB of egress against a 5 GB monthly allowance. `SELECT events.*` was the
+    # multiplier: `description` (674 B of seller small print) and `mxs_breakdown` (586 B of
+    # the scorer's own output) are 100% of a row and this endpoint reads neither.
+    #
+    # So Postgres now finds the matching ids and returns ONLY those, ~12 rows instead of
+    # 25,000. The normalised names come from Python's _norm rather than being recomputed in
+    # SQL: checked against all 13,545 artist names, a SQL equivalent disagreed on 81 of them
+    # because _norm DELETES Turkish 'ı' and 'Ø' outright ("Yıldız Tilbe" -> "yldztilbe").
+    # Postgres is more correct there — but changing who matches is not this fix's job, so the
+    # existing behaviour is preserved exactly and that bug is left for its own change.
     listened_norms: dict[str, str] = {}
     if tp and (tp.core_artist_ids or tp.adjacent_artist_ids):
         ids = list(tp.core_artist_ids or []) + list(tp.adjacent_artist_ids or [])
         for a in db.query(Artist).filter(Artist.id.in_(ids)).all():
             listened_norms.setdefault(_norm(a.name), a.name)
 
-    tier_a: dict = {}        # event_id -> (Event, artist display name, kind)
-    for ev, artist_name in lineup_rows + headliner_rows:
-        n = _norm(artist_name)
-        if ev.id in tier_a:
-            continue
-        if n in followed_norms:
-            tier_a[ev.id] = (ev, followed_norms[n], "artist")
-        elif n in listened_norms:
-            tier_a[ev.id] = (ev, listened_norms[n], "listened")
+    want_norms = list({*followed_norms, *listened_norms})
+
+    tier_a: dict = {}        # event_id -> (event_id, artist display name, kind)
+    if want_norms:
+        # One query for both routes to an artist. DISTINCT ON keeps the first match per
+        # event, with the ORDER BY deciding which: a FOLLOW outranks a listen, exactly as
+        # the Python version did by checking followed_norms first.
+        rows = db.execute(text("""
+            SELECT DISTINCT ON (m.event_id) m.event_id, m.name, m.norm
+              FROM (
+                    SELECT ea.event_id, a.name,
+                           regexp_replace(lower(extensions.unaccent(a.name)), '[^a-z0-9]+', '', 'g') norm
+                      FROM event_artists ea
+                      JOIN artists a ON a.id = ea.artist_id
+                    UNION ALL
+                    SELECT e.id, a.name,
+                           regexp_replace(lower(extensions.unaccent(a.name)), '[^a-z0-9]+', '', 'g') norm
+                      FROM events e
+                      JOIN artists a ON a.id = e.headliner_artist_id
+                   ) m
+              JOIN events e ON e.id = m.event_id
+             WHERE e.merged_into IS NULL AND e.retired_at IS NULL
+               AND (e.starts_at >= :cutoff OR e.starts_at IS NULL)
+               AND m.norm = ANY(:norms)
+             ORDER BY m.event_id, e.starts_at NULLS LAST
+        """), {"norms": want_norms, "cutoff": cutoff}).all()
+        for event_id, name, norm in rows:
+            # The DISPLAY name comes from what the user follows, not from the event's own
+            # spelling — "Because you follow A.R. Rahman" reads better than the billing
+            # string the seller happened to use.
+            if norm in followed_norms:
+                tier_a[event_id] = (event_id, followed_norms[norm], "artist")
+            elif norm in listened_norms:
+                tier_a[event_id] = (event_id, listened_norms[norm], "listened")
 
     # ---- Tier B: genre discovery, excluding anything already matched by artist ----
-    tier_b: dict = {}        # event_id -> (Event, bucket, weight)
+    tier_b: dict = {}        # event_id -> (event_id, bucket, weight)
     if genre_w:
-        genre_rows = (
-            db.query(Event, Genre.name)
-            .join(EventGenre, EventGenre.event_id == Event.id)
-            .join(Genre, EventGenre.genre_id == Genre.id)
-            .filter(Event.merged_into.is_(None), Event.retired_at.is_(None), upcoming)
-            .all()
-        )
-        for ev, gname in genre_rows:
-            if ev.id in tier_a or ev.id in tier_b:
-                continue
-            b = bucketize(gname)
-            if b and b in genre_w:
-                tier_b[ev.id] = (ev, b, genre_w[b])
+        # bucketize() is Python and maps many genre names onto one bucket, so the genre
+        # NAMES that belong to the user's buckets are resolved first — one small query over
+        # the genres table, a few hundred rows — and only events carrying those are fetched.
+        # The genre NAME -> bucket map, computed once per process rather than per request.
+        # 2,097 names came back on every single call — the same 2,097 for every user, since
+        # bucketize() is a pure function of the name and the genres table changes only when
+        # ingestion adds one. It was the largest remaining read on this endpoint.
+        wanted = {g: b for g, b in _genre_buckets(db).items() if b in genre_w}
+        if wanted:
+            # LIMITED IN SQL. This matched 4,561 events for one user and the screen shows
+            # twelve; the rest were fetched, sorted in Python and thrown away. The ordering
+            # is (taste weight desc, date, id), and all three are expressible here — the
+            # weight arrives as a CASE built from the user's own buckets.
+            #
+            # Asked for more than `limit` on purpose: tier A fills the list first, and the
+            # shared filters below can still remove rows, so a hard cut at 12 here could
+            # leave the screen short. A few hundred is a rounding error next to 4,561.
+            weights = {gname: float(genre_w[b]) for gname, b in wanted.items()}
+            rows = db.execute(text("""
+                SELECT m.event_id, m.name FROM (
+                    SELECT DISTINCT ON (eg.event_id)
+                           eg.event_id, g.name, e.starts_at,
+                           CAST(CAST(:weights AS jsonb) ->> g.name AS float) AS w
+                      FROM event_genres eg
+                      JOIN genres g ON g.id = eg.genre_id
+                      JOIN events e ON e.id = eg.event_id
+                     WHERE e.merged_into IS NULL AND e.retired_at IS NULL
+                       AND (e.starts_at >= :cutoff OR e.starts_at IS NULL)
+                       AND g.name = ANY(:names)
+                     ORDER BY eg.event_id, e.starts_at NULLS LAST
+                   ) m
+                 ORDER BY m.w DESC, m.starts_at NULLS LAST, m.event_id
+                 LIMIT :cap
+            """), {"names": list(wanted), "cutoff": cutoff,
+                   "weights": json.dumps(weights), "cap": max(limit * 4, 200)}).all()
+            for event_id, gname in rows:
+                if event_id in tier_a or event_id in tier_b:
+                    continue
+                b = wanted[gname]
+                tier_b[event_id] = (event_id, b, genre_w[b])
 
-    # Tier A by date; Tier B by taste weight (desc), then date.
+    # The dates the ordering needs, for the matched events ONLY — never the catalogue. Six
+    # columns rather than twenty-nine, and `description` and `mxs_breakdown` are not among
+    # them.
+    matched = list({*tier_a, *tier_b})
+    starts: dict = {}
+    if matched:
+        starts = {r[0]: r[1] for r in db.execute(text(
+            "SELECT id, starts_at FROM events WHERE id = ANY(:ids)"), {"ids": matched}).all()}
+
     # Followed artists lead, then the ones they merely listen to — a follow is a stronger
     # statement than a play count. Each group by date within itself.
+    # TIES BREAK ON THE EVENT ID, and that is not a detail. Two Weezer shows share the
+    # timestamp 2027-05-26 18:00 in this catalogue, and the old code sorted only by date —
+    # so their order was whatever the database happened to return, which changed between
+    # runs on identical input. The same unbroken-tie bug cost this project 3,094 drifting
+    # MXS scores once already; the rule from that fix applies here too.
     a_ordered = sorted(tier_a.values(),
-                       key=lambda p: (0 if p[2] == "artist" else 1, p[0].starts_at or far_future))
-    b_ordered = sorted(tier_b.values(), key=lambda p: (-p[2], p[0].starts_at or far_future))
+                       key=lambda p: (0 if p[2] == "artist" else 1,
+                                      starts.get(p[0]) or far_future, str(p[0])))
+    b_ordered = sorted(tier_b.values(),
+                       key=lambda p: (-p[2], starts.get(p[0]) or far_future, str(p[0])))
 
-    events = [ev for ev, _, _ in a_ordered] + [ev for ev, _, _ in b_ordered]
+    ordered_ids = [eid for eid, _, _ in a_ordered] + [eid for eid, _, _ in b_ordered]
     meta: dict = {}          # event_id -> (kind, label, full reason)
-    for ev, name, kind in a_ordered:
-        meta[ev.id] = (
+    for eid, name, kind in a_ordered:
+        meta[eid] = (
             ("artist", name, f"Because you follow {name}") if kind == "artist"
             else ("listened", name, f"You listen to {name} on Last.fm")
         )
-    for ev, bucket, _w in b_ordered:
-        meta[ev.id] = ("genre", bucket, f"Matches your {bucket} taste")
+    for eid, bucket, _w in b_ordered:
+        meta[eid] = ("genre", bucket, f"Matches your {bucket} taste")
+
+    # The shared filters, applied as a sieve rather than pushed into the queries above.
+    # This endpoint already materialises the whole catalogue in Python — its own problem,
+    # and the reason "best fit" is not offered as a search sort — so one extra round trip
+    # for the allowed id set is the cheap way in. The clauses come from search_filters and
+    # are never rewritten here: the funnel must mean the same thing on this feed as it does
+    # in search. "Only acts I follow" is absent on purpose: every row here is already
+    # explained by an artist you follow or listen to.
+    allowed = sf.allowed_event_ids(db, sf.Filters(
+        when=when, date_from=date_from, date_to=date_to, country=country, city_id=city_id,
+        onsale=onsale, rating=rating, hide_off=hide_off, tz=tz))
+    if allowed is not None:
+        ordered_ids = [i for i in ordered_ids if i in allowed]
 
     # CUT BEFORE SERIALISING, not after. The tiers are already in the order the screen wants,
     # so the tail is the part nobody scrolls to — and building it cost 1.87 MB per app launch,
     # of the 2.17 MB an app launch cost in total. Fifty people opening this five times a day
     # came to 15.9 GB a month against a 5.5 GB allowance, which is what Supabase wrote about.
     # The home screen renders twelve of these.
-    events = events[:limit]
+    # CUT BEFORE FETCHING, not merely before serialising. Only these ids are loaded as rows,
+    # and only the columns EventListItem prints — so the tail nobody scrolls to costs nothing
+    # at all rather than costing a full row each.
+    ordered_ids = ordered_ids[:limit]
+    if not ordered_ids:
+        return []
+    found = {e.id: e for e in
+             with_related(db.query(Event))
+             .options(load_only(
+                 Event.id, Event.title, Event.starts_at, Event.timezone, Event.status,
+                 Event.headliner_artist_id, Event.venue_id, Event.image_url, Event.mxs,
+                 Event.last_verified, Event.price_from_amount, Event.price_from_currency,
+             ))
+             .filter(Event.id.in_(ordered_ids)).all()}
+    events = [found[i] for i in ordered_ids if i in found]
     out = []
     for item in _to_list_items(db, events):
         kind, label, reason = meta[item.id]

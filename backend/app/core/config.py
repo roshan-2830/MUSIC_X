@@ -44,6 +44,11 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = ""
+    # Migrations run through the SESSION pooler while the app uses the TRANSACTION one:
+    # alembic needs session-level behaviour that a transaction pooler does not guarantee.
+    # Falls back to database_url so nothing breaks where only one is configured (Render,
+    # until its env vars are updated).
+    migration_database_url: str = ""
 
     # Supabase API
     supabase_url: str = ""

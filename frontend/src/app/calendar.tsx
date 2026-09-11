@@ -1,9 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Animated, Modal, Platform, Pressable, ScrollView,
+  StyleSheet, Text, View,
 } from "react-native";
+import type { NativeScrollEvent, NativeSyntheticEvent } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 
 import { CalendarEventCard, CalendarFestivalCard } from "../components/calendar-card";
 import FestivalDetailView from "../components/festival-detail";
@@ -13,14 +18,6 @@ import { zonedDay, zonedTime } from "../lib/format";
 import { useProfile } from "../lib/profile";
 import { useSaves } from "../lib/saves";
 
-const ACCENT = "#e8ff47";
-const ACCENT_INK = "#101204";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const PANEL = "#14141b";
-const PANEL2 = "#1b1b24";
-const DANGER = "#ff6b6b";
-const FEST = "#ffb200";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
@@ -62,16 +59,20 @@ type Item =
 
 /** One dot per thing on a day. The meaning is kept deliberately narrow: you have a
  *  ticket, it's yours, it's a festival, it's off — or it's just live music. */
-function dotColour(it: Item): string {
-  if (it.kind === "fest") return FEST;
+// Takes the theme as an argument: a module-level helper cannot call a hook, and this one
+// has to answer in whichever theme is live.
+function dotColour(it: Item, th: Theme): string {
+  if (it.kind === "fest") return th.festival;
   const e = it.event;
-  if (e.status !== "scheduled") return DANGER;
-  if (e.booked) return ACCENT;
-  if (e.saved) return "rgba(232,255,71,0.6)";
+  if (e.status !== "scheduled") return th.danger;
+  if (e.booked) return th.accent;
+  if (e.saved) return th.accentTint60;
   return `hsl(${hashHue(e.genres[0] ?? "live")}, 72%, 62%)`;
 }
 
 export default function CalendarScreen() {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { profile } = useProfile();
   const { saves, savedFestivals, refresh: refreshSaves } = useSaves();
   const homeCity = profile?.home_city_name ?? null;
@@ -252,30 +253,89 @@ export default function CalendarScreen() {
       ? `${total} saved · ${ticketCount ? `${ticketCount} with tickets` : "none booked yet"}`
       : `${total - festCount ? `${total - festCount} in ${homeCity ?? "your city"}` : "no local shows"}` +
         `${festCount ? ` · ${festCount} festival${festCount > 1 ? "s" : ""}` : ""}`;
+  
+  
+  // ---- the calendar gets out of the way while you read the list ----
+  // It floats above the agenda rather than being a sticky child, because a sticky child
+  // cannot move: stickyHeaderIndices pinned all ~420px of month grid to the top and left
+  // the list two cards of room. The height is measured, never guessed — the month grid is
+  // six rows tall and the 14-day strip is one, so any constant is wrong half the time.
+  const [headH, setHeadH] = useState(0);
+  const headY = useRef(new Animated.Value(0)).current;
+  const lastY = useRef(0);
+  const isHidden = useRef(false);
+
+  const slideHead = useCallback((hide: boolean) => {
+    if (isHidden.current === hide) return;     // already there — don't restart the animation
+    isHidden.current = hide;
+    Animated.timing(headY, {
+      toValue: hide ? -headH : 0,
+      duration: 190,
+      // There is no native driver on web, and this same screen runs there.
+      useNativeDriver: Platform.OS !== "web",
+    }).start();
+  }, [headY, headH]);
+
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const dy = y - lastY.current;
+    lastY.current = y;
+    // The 5px deadzone is load-bearing: without it a finger that is holding still
+    // still jitters by a pixel or two and the header flickers.
+    if (y <= 0) slideHead(false);                                // at the top, always shown
+    else if (dy > 5 && headH > 0 && y > headH) slideHead(true);  // reading down: get out of the way
+    else if (dy < -5) slideHead(false);                          // reading back up: come straight back
+  }, [slideHead, headH]);
+
+  // Month ↔ 14 days changes the header's height, and a translateY of the *old* height
+  // would leave it parked half off-screen. Reset whenever the layout changes under it.
+  useEffect(() => { slideHead(false); }, [monthKey, mode, view, slideHead]);
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <ScrollView showsVerticalScrollIndicator={false} stickyHeaderIndices={[0]}>
-        {/* ---------- sticky header ---------- */}
-        <View style={styles.head}>
+      {/* ---------- the calendar: floats over the list, slides away as you read ---------- */}
+      <Animated.View
+        style={[styles.head, styles.headFloat, { transform: [{ translateY: headY }] }]}
+        onLayout={(e) => setHeadH(e.nativeEvent.layout.height)}
+      >
           <View style={styles.topRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.eyebrow}>{eyebrow.toUpperCase()}</Text>
-              <Text style={styles.month}>
+              {/* One line, always. "September 2026" at 27pt measures ~219pt and a 390pt
+                  phone leaves ~175pt next to the month controls, so this used to break
+                  across two lines mid-word — "Septe / mber". adjustsFontSizeToFit shrinks
+                  it to fit instead, down to 18pt, which is still the biggest thing on the
+                  header. Shrinking beats truncating here: "Septemb…" is worse than a
+                  slightly smaller September. */}
+              <Text
+                style={styles.month}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.66}
+              >
                 {view === "days" ? "Next 14 days" : MONTHS[monthDate.getMonth()]}
                 {view === "month" ? <Text style={styles.year}> {monthDate.getFullYear()}</Text> : null}
               </Text>
             </View>
             {view === "month" ? (
               <View style={styles.arrows}>
-                <Pressable style={styles.arrowBtn} onPress={() => shiftMonth(-1)} accessibilityLabel="Previous month">
-                  <Ionicons name="chevron-back" size={15} color="#f4f4f6" />
+                {/* The month NAME beside each chevron. A bare "chevron-back" is the same
+                    icon this app uses for "leave this screen" on every other page, so on
+                    the Calendar it read as a way out rather than a step back in time.
+                    Naming the month it goes to removes the ambiguity and says where you
+                    are heading, which a chevron alone never did. */}
+                <Pressable style={styles.arrowBtn} onPress={() => shiftMonth(-1)}
+                           accessibilityLabel={`${MONTHS[(monthDate.getMonth() + 11) % 12]}, the previous month`}>
+                  <Ionicons name="chevron-back" size={13} color={th.muted} />
+                  <Text style={styles.monthStep}>{MON_SHORT[(monthDate.getMonth() + 11) % 12]}</Text>
                 </Pressable>
                 <Pressable style={[styles.arrowBtn, styles.nowBtn]} onPress={goToday}>
                   <Text style={styles.nowText}>Today</Text>
                 </Pressable>
-                <Pressable style={styles.arrowBtn} onPress={() => shiftMonth(1)} accessibilityLabel="Next month">
-                  <Ionicons name="chevron-forward" size={15} color="#f4f4f6" />
+                <Pressable style={styles.arrowBtn} onPress={() => shiftMonth(1)}
+                           accessibilityLabel={`${MONTHS[(monthDate.getMonth() + 1) % 12]}, the next month`}>
+                  <Text style={styles.monthStep}>{MON_SHORT[(monthDate.getMonth() + 1) % 12]}</Text>
+                  <Ionicons name="chevron-forward" size={13} color={th.muted} />
                 </Pressable>
               </View>
             ) : (
@@ -296,7 +356,7 @@ export default function CalendarScreen() {
                   style={[styles.segBtn, mode === k && styles.segBtnOn]}
                   onPress={() => changeMode(k as "mine" | "city")}
                 >
-                  <Ionicons name={icon as any} size={13} color={mode === k ? ACCENT_INK : MUTED} />
+                  <Ionicons name={icon as any} size={13} color={mode === k ? th.accentInk : th.muted} />
                   <Text style={[styles.segText, mode === k && styles.segTextOn]} numberOfLines={1}>{label}</Text>
                 </Pressable>
               ))}
@@ -320,7 +380,7 @@ export default function CalendarScreen() {
               ))}
             </View>
             <View style={styles.key}>
-              {[["Ticket", ACCENT], ["Festival", FEST], ["Off", DANGER]].map(([label, c]) => (
+              {[["Ticket", th.accent], ["Festival", th.festival], ["Off", th.danger]].map(([label, c]) => (
                 <View key={label} style={styles.keyItem}>
                   <View style={[styles.keyDot, { backgroundColor: c }]} />
                   <Text style={styles.keyText}>{label}</Text>
@@ -328,9 +388,16 @@ export default function CalendarScreen() {
               ))}
             </View>
           </View>
-        </View>
+         </Animated.View>
 
-        {/* ---------- body ---------- */}
+      {/* ---------- body: gets the whole screen; the calendar floats over it ---------- */}
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        contentContainerStyle={{ paddingTop: headH }}
+      >
         <View style={styles.body}>
           {!selected && upNext ? <UpNext {...upNext} onPress={() => setDetailId(upNext.event.id)} /> : null}
 
@@ -342,14 +409,14 @@ export default function CalendarScreen() {
                     { weekday: "long", day: "numeric", month: "long" })}
                 </Text>
                 <Pressable style={styles.filterX} onPress={() => setSelected(null)} accessibilityLabel="Show the whole month">
-                  <Ionicons name="close" size={11} color={ACCENT_INK} />
+                  <Ionicons name="close" size={11} color={th.accentInk} />
                 </Pressable>
               </View>
             </View>
           ) : null}
 
           {loading ? (
-            <ActivityIndicator color={ACCENT} style={{ marginTop: 30 }} />
+            <ActivityIndicator color={th.accent} style={{ marginTop: 30 }} />
           ) : groups.length === 0 ? (
             <Empty
               mode={mode} view={view} homeCity={homeCity}
@@ -381,7 +448,7 @@ export default function CalendarScreen() {
           )}
 
           <View style={styles.foot}>
-            <Ionicons name="checkmark-circle-outline" size={12} color={MUTED} />
+            <Ionicons name="checkmark-circle-outline" size={12} color={th.muted} />
             <Text style={styles.footText}>
               Cancelled and postponed shows stay on your calendar — we never quietly drop them.
             </Text>
@@ -408,6 +475,8 @@ function MonthGrid({ monthDate, byDay, selected, onPick }: {
   selected: string | null;
   onPick: (d: string | null) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const y = monthDate.getFullYear(), m = monthDate.getMonth();
   const dim = new Date(y, m + 1, 0).getDate();
   const lead = (new Date(y, m, 1).getDay() + 6) % 7;   // Monday-first
@@ -447,7 +516,7 @@ function MonthGrid({ monthDate, byDay, selected, onPick }: {
                 ]}>{n}</Text>
                 <View style={styles.dots}>
                   {on.slice(0, 3).map((it, k) => (
-                    <View key={k} style={[styles.dot, { backgroundColor: picked ? ACCENT_INK : dotColour(it) }]} />
+                    <View key={k} style={[styles.dot, { backgroundColor: picked ? th.accentInk : dotColour(it, th) }]} />
                   ))}
                 </View>
               </Pressable>
@@ -465,6 +534,8 @@ function DayStrip({ byDay, selected, onPick }: {
   selected: string | null;
   onPick: (d: string | null) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const base = midnight();
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
@@ -485,7 +556,7 @@ function DayStrip({ byDay, selected, onPick }: {
             </Text>
             <View style={styles.dots}>
               {on.slice(0, 3).map((it, k) => (
-                <View key={k} style={[styles.dot, { backgroundColor: picked ? ACCENT_INK : dotColour(it) }]} />
+                <View key={k} style={[styles.dot, { backgroundColor: picked ? th.accentInk : dotColour(it, th) }]} />
               ))}
             </View>
           </Pressable>
@@ -497,6 +568,8 @@ function DayStrip({ byDay, selected, onPick }: {
 
 // ---------------------------------------------------------------- up next
 function UpNext({ event, days, onPress }: { event: any; days: number; onPress: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   // A countdown only earns a big number when the number means something. Inside two
   // weeks: count down. Beyond that: just state the date.
   const near = days <= 14;
@@ -521,7 +594,7 @@ function UpNext({ event, days, onPress }: { event: any; days: number; onPress: (
           {event.venue_name ?? "Venue TBA"}{event.city ? `, ${event.city}` : ""} · {zonedTime(event.starts_at, event.timezone)}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={16} color={MUTED} />
+      <Ionicons name="chevron-forward" size={16} color={th.muted} />
     </Pressable>
   );
 }
@@ -531,13 +604,15 @@ function Empty({ mode, view, homeCity, monthName, jumpTarget, onJump, onSeeCity 
   mode: "mine" | "city"; view: "month" | "days"; homeCity: string | null;
   monthName: string; jumpTarget: string | null; onJump: () => void; onSeeCity: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const where = view === "days" ? "in the next two weeks" : `in ${monthName}`;
   const jumpName = jumpTarget
     ? new Date(`${jumpTarget}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long" })
     : "";
   return (
     <View style={styles.empty}>
-      <Ionicons name="calendar-outline" size={34} color={MUTED} style={{ opacity: 0.45 }} />
+      <Ionicons name="calendar-outline" size={34} color={th.muted} style={{ opacity: 0.45 }} />
       <Text style={styles.emptyT}>
         {mode === "mine" ? `Nothing saved ${where}` : `No shows in ${homeCity ?? "your city"} ${where}`}
       </Text>
@@ -563,96 +638,106 @@ function Empty({ mode, view, homeCity, monthName, jumpTarget, onJump, onSeeCity 
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: th.bg },
 
-  head: { backgroundColor: "rgba(11,11,15,0.97)", paddingHorizontal: 16, paddingTop: 8, borderBottomWidth: 1, borderBottomColor: LINE },
+   // Solid, not 97%: the agenda now slides *underneath* this, and at 0.97 you can read
+  // the ghost of a card through the month grid.
+  head: { backgroundColor: th.bg, paddingHorizontal: 16, paddingTop: 8, borderBottomWidth: 1, borderBottomColor: th.line },
+  headFloat: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 5 },
   topRow: { flexDirection: "row", alignItems: "flex-end", gap: 12 },
-  eyebrow: { fontSize: 10, fontWeight: "900", letterSpacing: 1.4, color: MUTED },
-  month: { fontSize: 27, fontWeight: "900", letterSpacing: -0.8, color: "#f4f4f6", marginTop: 2 },
-  year: { color: MUTED, fontWeight: "800" },
-  arrows: { flexDirection: "row", gap: 6, paddingBottom: 4 },
-  arrowBtn: { minWidth: 34, height: 34, borderRadius: 11, backgroundColor: PANEL, borderWidth: 1, borderColor: LINE, alignItems: "center", justifyContent: "center" },
+  eyebrow: { fontSize: 10, fontWeight: "900", letterSpacing: 1.4, color: th.muted },
+  month: { fontSize: 27, fontWeight: "900", letterSpacing: -0.8, color: th.text, marginTop: 2 },
+  year: { color: th.muted, fontWeight: "800" },
+  arrows: { flexShrink: 0, flexDirection: "row", gap: 6, paddingBottom: 4 },
+  arrowBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 1,
+    minWidth: 34, height: 34, borderRadius: 11, paddingHorizontal: 6,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line,
+  },
+  // 11pt rather than 12: naming the month is worth ~34pt of the header, and the title is
+  // what someone is actually reading.
+  monthStep: { color: th.text2, fontSize: 11, fontWeight: "800" },
   nowBtn: { paddingHorizontal: 13 },
-  nowText: { fontSize: 12, fontWeight: "800", color: MUTED },
+  nowText: { fontSize: 12, fontWeight: "800", color: th.muted },
 
-  seg: { flexDirection: "row", backgroundColor: PANEL, borderWidth: 1, borderColor: LINE, borderRadius: 13, padding: 3, marginTop: 15 },
+  seg: { flexDirection: "row", backgroundColor: th.panel, borderWidth: 1, borderColor: th.line, borderRadius: 13, padding: 3, marginTop: 15 },
   segBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 9, paddingHorizontal: 6, borderRadius: 10 },
-  segBtnOn: { backgroundColor: ACCENT },
-  segText: { fontSize: 13, fontWeight: "800", color: MUTED, flexShrink: 1 },
-  segTextOn: { color: ACCENT_INK },
+  segBtnOn: { backgroundColor: th.accentFill },
+  segText: { fontSize: 13, fontWeight: "800", color: th.muted, flexShrink: 1 },
+  segTextOn: { color: th.accentInk },
 
   dow: { flexDirection: "row", marginTop: 13, marginBottom: 2 },
-  dowText: { flex: 1, textAlign: "center", fontSize: 9.5, fontWeight: "900", letterSpacing: 1.2, color: MUTED },
-  dowWe: { color: "rgba(232,255,71,0.6)" },
+  dowText: { flex: 1, textAlign: "center", fontSize: 9.5, fontWeight: "900", letterSpacing: 1.2, color: th.muted },
+  dowWe: { color: alpha(th.accent, 0.6) },
   grid: { flexDirection: "row", flexWrap: "wrap", paddingBottom: 4 },
   cell: { width: `${100 / 7}%`, padding: 1 },
   dayBtn: { height: 41, borderRadius: 13, alignItems: "center", justifyContent: "center", gap: 4 },
-  dayHas: { backgroundColor: "rgba(255,255,255,0.05)" },
-  dayToday: { borderWidth: 1.5, borderColor: "rgba(232,255,71,0.5)" },
-  dayPick: { backgroundColor: ACCENT, borderColor: "transparent" },
-  dayNum: { fontSize: 13.5, fontWeight: "700", color: MUTED, fontVariant: ["tabular-nums"] },
-  dayNumHas: { color: "#f4f4f6", fontWeight: "800" },
-  dayNumToday: { color: ACCENT },
-  dayNumPick: { color: ACCENT_INK },
+  dayHas: { backgroundColor: alpha(th.text, 0.05) },
+  dayToday: { borderWidth: 1.5, borderColor: alpha(th.accent, 0.5) },
+  dayPick: { backgroundColor: th.accentFill, borderColor: "transparent" },
+  dayNum: { fontSize: 13.5, fontWeight: "700", color: th.muted, fontVariant: ["tabular-nums"] },
+  dayNumHas: { color: th.text, fontWeight: "800" },
+  dayNumToday: { color: th.accent },
+  dayNumPick: { color: th.accentInk },
   dots: { flexDirection: "row", gap: 3, height: 4, alignItems: "center" },
   dot: { width: 4, height: 4, borderRadius: 2 },
 
   strip: { gap: 6, paddingTop: 15, paddingBottom: 6 },
-  sd: { width: 48, height: 66, borderRadius: 15, backgroundColor: PANEL, borderWidth: 1, borderColor: LINE, alignItems: "center", justifyContent: "center", gap: 5 },
-  sdToday: { borderColor: "rgba(232,255,71,0.5)" },
-  sdPick: { backgroundColor: ACCENT, borderColor: ACCENT },
+  sd: { width: 48, height: 66, borderRadius: 15, backgroundColor: th.panel, borderWidth: 1, borderColor: th.line, alignItems: "center", justifyContent: "center", gap: 5 },
+  sdToday: { borderColor: alpha(th.accent, 0.5) },
+  sdPick: { backgroundColor: th.accentFill, borderColor: th.accentFill },
   sdQuiet: { opacity: 0.42 },
-  sdW: { fontSize: 9.5, fontWeight: "900", letterSpacing: 1, color: MUTED },
-  sdWPick: { color: ACCENT_INK },
-  sdN: { fontSize: 17, fontWeight: "800", color: "#f4f4f6", fontVariant: ["tabular-nums"] },
-  sdNToday: { color: ACCENT },
-  sdNPick: { color: ACCENT_INK },
+  sdW: { fontSize: 9.5, fontWeight: "900", letterSpacing: 1, color: th.muted },
+  sdWPick: { color: th.accentInk },
+  sdN: { fontSize: 17, fontWeight: "800", color: th.text, fontVariant: ["tabular-nums"] },
+  sdNToday: { color: th.accent },
+  sdNPick: { color: th.accentInk },
 
   utils: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4, paddingBottom: 10 },
-  vt: { flexDirection: "row", backgroundColor: PANEL2, borderWidth: 1, borderColor: LINE, borderRadius: 10, padding: 2 },
+  vt: { flexDirection: "row", backgroundColor: th.panel2, borderWidth: 1, borderColor: th.line, borderRadius: 10, padding: 2 },
   vtBtn: { paddingVertical: 5, paddingHorizontal: 11, borderRadius: 8 },
-  vtBtnOn: { backgroundColor: PANEL },
-  vtText: { fontSize: 11.5, fontWeight: "800", color: MUTED },
-  vtTextOn: { color: "#f4f4f6" },
+  vtBtnOn: { backgroundColor: th.panel },
+  vtText: { fontSize: 11.5, fontWeight: "800", color: th.muted },
+  vtTextOn: { color: th.text },
   key: { marginLeft: "auto", flexDirection: "row", gap: 11 },
   keyItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   keyDot: { width: 6, height: 6, borderRadius: 3 },
-  keyText: { fontSize: 10, fontWeight: "800", color: MUTED },
+  keyText: { fontSize: 10, fontWeight: "800", color: th.muted },
 
   body: { padding: 16, paddingBottom: 28 },
 
   next: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 15, borderWidth: 1, borderLeftWidth: 3, padding: 13, paddingHorizontal: 15, marginBottom: 20 },
-  nextNear: { backgroundColor: "rgba(232,255,71,0.08)", borderColor: "rgba(232,255,71,0.28)", borderLeftColor: ACCENT },
-  nextFar: { backgroundColor: PANEL, borderColor: LINE, borderLeftColor: MUTED },
+  nextNear: { backgroundColor: alpha(th.accent, 0.08), borderColor: alpha(th.accent, 0.28), borderLeftColor: th.accentFill },
+  nextFar: { backgroundColor: th.panel, borderColor: th.line, borderLeftColor: th.muted },
   nextC: { alignItems: "center" },
-  nextN: { fontSize: 23, fontWeight: "800", color: ACCENT, letterSpacing: -0.7, fontVariant: ["tabular-nums"] },
-  nextNsm: { fontSize: 19, color: "#f4f4f6" },
-  nextU: { fontSize: 8.5, fontWeight: "900", letterSpacing: 1.1, color: MUTED, marginTop: 5 },
+  nextN: { fontSize: 23, fontWeight: "800", color: th.accent, letterSpacing: -0.7, fontVariant: ["tabular-nums"] },
+  nextNsm: { fontSize: 19, color: th.text },
+  nextU: { fontSize: 8.5, fontWeight: "900", letterSpacing: 1.1, color: th.muted, marginTop: 5 },
   nextD: { flex: 1, minWidth: 0 },
-  nextK: { fontSize: 9.5, fontWeight: "900", letterSpacing: 1.3, color: ACCENT },
-  nextKfar: { color: MUTED },
-  nextT: { fontSize: 15.5, fontWeight: "800", color: "#f4f4f6", marginTop: 4 },
-  nextS: { fontSize: 12, color: MUTED, marginTop: 3 },
+  nextK: { fontSize: 9.5, fontWeight: "900", letterSpacing: 1.3, color: th.accent },
+  nextKfar: { color: th.muted },
+  nextT: { fontSize: 15.5, fontWeight: "800", color: th.text, marginTop: 4 },
+  nextS: { fontSize: 12, color: th.muted, marginTop: 3 },
 
   filterRow: { flexDirection: "row", marginBottom: 16 },
-  filter: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: ACCENT, borderRadius: 999, paddingLeft: 14, paddingRight: 7, paddingVertical: 6 },
-  filterText: { color: ACCENT_INK, fontSize: 12.5, fontWeight: "800" },
-  filterX: { width: 21, height: 21, borderRadius: 11, backgroundColor: "rgba(16,18,4,0.18)", alignItems: "center", justifyContent: "center" },
+  filter: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: th.accentFill, borderRadius: 999, paddingLeft: 14, paddingRight: 7, paddingVertical: 6 },
+  filterText: { color: th.accentInk, fontSize: 12.5, fontWeight: "800" },
+  filterX: { width: 21, height: 21, borderRadius: 11, backgroundColor: alpha(th.accentInk, 0.18), alignItems: "center", justifyContent: "center" },
 
   group: { marginBottom: 20 },
   ghead: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
-  gdate: { fontSize: 11.5, fontWeight: "900", letterSpacing: 1, color: "#f4f4f6" },
-  gline: { flex: 1, height: 1, backgroundColor: LINE },
-  grel: { fontSize: 11, fontWeight: "800", color: MUTED },
-  ghot: { color: ACCENT },
+  gdate: { fontSize: 11.5, fontWeight: "900", letterSpacing: 1, color: th.text },
+  gline: { flex: 1, height: 1, backgroundColor: th.line },
+  grel: { fontSize: 11, fontWeight: "800", color: th.muted },
+  ghot: { color: th.accent },
 
   empty: { alignItems: "center", paddingHorizontal: 20, paddingTop: 26, paddingBottom: 10 },
-  emptyT: { fontSize: 17, fontWeight: "800", color: "#f4f4f6", marginTop: 12, textAlign: "center" },
-  emptyS: { color: MUTED, fontSize: 13, marginTop: 7, textAlign: "center", lineHeight: 20, maxWidth: 272 },
-  btn: { marginTop: 16, backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 18 },
-  btnText: { color: ACCENT_INK, fontWeight: "800", fontSize: 14 },
+  emptyT: { fontSize: 17, fontWeight: "800", color: th.text, marginTop: 12, textAlign: "center" },
+  emptyS: { color: th.muted, fontSize: 13, marginTop: 7, textAlign: "center", lineHeight: 20, maxWidth: 272 },
+  btn: { marginTop: 16, backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 11, paddingHorizontal: 18 },
+  btnText: { color: th.accentInk, fontWeight: "800", fontSize: 14 },
 
-  foot: { flexDirection: "row", alignItems: "flex-start", justifyContent: "center", gap: 6, paddingHorizontal: 20, paddingTop: 14, borderTopWidth: 1, borderTopColor: LINE, marginTop: 6 },
-  footText: { fontSize: 11.5, color: MUTED, lineHeight: 17, flexShrink: 1 },
+  foot: { flexDirection: "row", alignItems: "flex-start", justifyContent: "center", gap: 6, paddingHorizontal: 20, paddingTop: 14, borderTopWidth: 1, borderTopColor: th.line, marginTop: 6 },
+  footText: { fontSize: 11.5, color: th.muted, lineHeight: 17, flexShrink: 1 },
 });

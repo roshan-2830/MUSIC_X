@@ -17,16 +17,19 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import {
   SetlistfmLink, getSetlistfmLink, linkSetlistfm, unlinkSetlistfm,
 } from "../lib/api";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 const SETLISTFM = "https://www.setlist.fm/";
 
 export default function SetlistfmLinkView({ onClose, onChanged }:
   { onClose: () => void; onChanged?: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [link, setLink] = useState<SetlistfmLink | null>(null);
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
@@ -74,7 +77,7 @@ export default function SetlistfmLinkView({ onClose, onChanged }:
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.header}>
         <Pressable onPress={onClose} hitSlop={12}>
-          <Ionicons name="chevron-back" size={26} color="#f4f4f6" />
+          <Ionicons name="chevron-back" size={26} color={th.text} />
         </Pressable>
         <Text style={styles.title}>Concert history</Text>
         <View style={{ width: 26 }} />
@@ -88,7 +91,7 @@ export default function SetlistfmLinkView({ onClose, onChanged }:
 
         {!link?.available ? (
           <View style={styles.note}>
-            <Ionicons name="alert-circle-outline" size={18} color={MUTED} />
+            <Ionicons name="alert-circle-outline" size={18} color={th.muted} />
             <Text style={styles.noteT}>
               setlist.fm importing isn’t switched on for this app right now.
             </Text>
@@ -125,7 +128,7 @@ export default function SetlistfmLinkView({ onClose, onChanged }:
               value={username}
               onChangeText={setUsername}
               placeholder="e.g. yourname"
-              placeholderTextColor="#5a5a66"
+              placeholderTextColor={th.faint}
               autoCapitalize="none"
               autoCorrect={false}
               style={styles.input}
@@ -133,7 +136,7 @@ export default function SetlistfmLinkView({ onClose, onChanged }:
             />
             <Pressable style={[styles.btn, styles.primary]} disabled={busy || !username.trim()}
                        onPress={connect}>
-              {busy ? <ActivityIndicator color="#101204" size="small" />
+              {busy ? <ActivityIndicator color={th.accentInk} size="small" />
                     : <Text style={styles.primaryT}>Import my concerts</Text>}
             </Pressable>
             <Text style={styles.warn}>
@@ -156,51 +159,51 @@ export default function SetlistfmLinkView({ onClose, onChanged }:
           <Text style={styles.attrT}>
             Concert history powered by <Text style={styles.attrLink}>setlist.fm</Text>
           </Text>
-          <Ionicons name="open-outline" size={13} color={ACCENT} />
+          <Ionicons name="open-outline" size={13} color={th.accent} />
         </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   header: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 16, paddingVertical: 12,
   },
-  title: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
-  lead: { color: MUTED, fontSize: 14, lineHeight: 20, marginBottom: 18 },
-  card: { backgroundColor: "#14141b", borderRadius: 16, padding: 16,
-          borderWidth: 1, borderColor: "#23232c" },
-  cardL: { color: MUTED, fontSize: 11, fontWeight: "800", letterSpacing: 0.8,
+  title: { color: th.text, fontSize: 18, fontWeight: "800" },
+  lead: { color: th.muted, fontSize: 14, lineHeight: 20, marginBottom: 18 },
+  card: { backgroundColor: th.panel, borderRadius: 16, padding: 16,
+          borderWidth: 1, borderColor: th.panel3 },
+  cardL: { color: th.muted, fontSize: 11, fontWeight: "800", letterSpacing: 0.8,
            textTransform: "uppercase" },
-  cardV: { color: "#f4f4f6", fontSize: 20, fontWeight: "800", marginTop: 4 },
-  cardS: { color: MUTED, fontSize: 12, marginTop: 4 },
+  cardV: { color: th.text, fontSize: 20, fontWeight: "800", marginTop: 4 },
+  cardS: { color: th.muted, fontSize: 12, marginTop: 4 },
   input: {
-    backgroundColor: "#0f0f15", borderRadius: 11, borderWidth: 1, borderColor: "#2b2b36",
-    color: "#f4f4f6", fontSize: 15, paddingHorizontal: 14, paddingVertical: 12,
+    backgroundColor: th.bg, borderRadius: 11, borderWidth: 1, borderColor: th.line3,
+    color: th.text, fontSize: 15, paddingHorizontal: 14, paddingVertical: 12,
     marginTop: 8, marginBottom: 12,
   },
   btn: { flex: 1, paddingVertical: 12, borderRadius: 11, alignItems: "center" },
-  primary: { backgroundColor: ACCENT },
-  primaryT: { color: "#101204", fontSize: 15, fontWeight: "800" },
-  ghost: { backgroundColor: "#1b1b24", borderWidth: 1, borderColor: "#2b2b36" },
-  ghostT: { color: "#e6e6ee", fontSize: 14, fontWeight: "700" },
-  danger: { backgroundColor: "#1b1b24", borderWidth: 1, borderColor: "#3a2426" },
-  dangerT: { color: "#ff6b6b", fontSize: 14, fontWeight: "700" },
-  warn: { color: "#6c6c78", fontSize: 11, lineHeight: 16, marginTop: 12 },
-  note: { flexDirection: "row", gap: 10, alignItems: "center", backgroundColor: "#14141b",
-          borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#23232c" },
-  noteT: { color: MUTED, fontSize: 13, flex: 1 },
-  err: { backgroundColor: "#241a1c", borderRadius: 12, padding: 12, marginTop: 12,
-         borderWidth: 1, borderColor: "#3a2426" },
-  errT: { color: "#ff9b9b", fontSize: 13, lineHeight: 18 },
-  ok: { backgroundColor: "#17201a", borderRadius: 12, padding: 12, marginTop: 12,
-        borderWidth: 1, borderColor: "#24422f" },
-  okT: { color: "#8ee5a8", fontSize: 13 },
+  primary: { backgroundColor: th.accentFill },
+  primaryT: { color: th.accentInk, fontSize: 15, fontWeight: "800" },
+  ghost: { backgroundColor: th.panel2, borderWidth: 1, borderColor: th.line3 },
+  ghostT: { color: th.text2, fontSize: 14, fontWeight: "700" },
+  danger: { backgroundColor: th.panel2, borderWidth: 1, borderColor: alpha(th.danger, 0.28) },
+  dangerT: { color: th.danger, fontSize: 14, fontWeight: "700" },
+  warn: { color: th.faint2, fontSize: 11, lineHeight: 16, marginTop: 12 },
+  note: { flexDirection: "row", gap: 10, alignItems: "center", backgroundColor: th.panel,
+          borderRadius: 12, padding: 14, borderWidth: 1, borderColor: th.panel3 },
+  noteT: { color: th.muted, fontSize: 13, flex: 1 },
+  err: { backgroundColor: alpha(th.danger, 0.10), borderRadius: 12, padding: 12, marginTop: 12,
+         borderWidth: 1, borderColor: alpha(th.danger, 0.28) },
+  errT: { color: th.dangerSoft, fontSize: 13, lineHeight: 18 },
+  ok: { backgroundColor: alpha(th.success, 0.10), borderRadius: 12, padding: 12, marginTop: 12,
+        borderWidth: 1, borderColor: alpha(th.success, 0.32) },
+  okT: { color: th.success, fontSize: 13 },
   attr: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
           marginTop: 26 },
-  attrT: { color: MUTED, fontSize: 12 },
-  attrLink: { color: ACCENT, fontWeight: "700", textDecorationLine: "underline" },
+  attrT: { color: th.muted, fontSize: 12 },
+  attrLink: { color: th.accent, fontWeight: "700", textDecorationLine: "underline" },
 });

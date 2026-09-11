@@ -134,7 +134,6 @@ def my_shows(user_id: str = Depends(get_current_user_id), db: Session = Depends(
             shows.append(MyShow(**items[ev.id].model_dump(),
                                 state=state,
                                 booked=bool(entry.booked),
-                                has_note=bool((entry.note or "").strip()),
                                 is_suggestion=bool(entry.is_suggestion)))
 
     fests = (db.query(Festival)

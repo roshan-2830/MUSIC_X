@@ -2,11 +2,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { MusicEvent } from "../lib/api";
 import { useSaves } from "../lib/saves";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function hashNum(s: string) {
@@ -34,6 +35,8 @@ export default function EventHCard({
   reasonLabel?: string;
   reasonKind?: "artist" | "genre";
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { isSaved, toggle } = useSaves();
   const saved = isSaved(event.id);
   const sub = `${fmtDay(event.starts_at)}${event.city ? ` · ${event.city}` : ""}`;
@@ -47,7 +50,7 @@ export default function EventHCard({
         )}
         {reasonLabel ? (
           <View style={styles.reasonPill}>
-            <Ionicons name={reasonKind === "genre" ? "musical-notes" : "heart"} size={10} color="#0b0b0f" />
+            <Ionicons name={reasonKind === "genre" ? "musical-notes" : "heart"} size={10} color={th.accentInk} />
             <Text style={styles.reasonText} numberOfLines={1}>{reasonLabel}</Text>
           </View>
         ) : null}
@@ -64,7 +67,7 @@ export default function EventHCard({
           <Ionicons
             name={saved ? "bookmark" : "bookmark-outline"}
             size={15}
-            color={saved ? "#e8ff47" : "#fff"}
+            color={saved ? th.accent : "#fff"}
           />
         </Pressable>
       </View>
@@ -74,22 +77,22 @@ export default function EventHCard({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   card: { width: 152, marginRight: 14 },
   cover: { width: 152, height: 152, borderRadius: 12, overflow: "hidden", marginBottom: 8 },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   save: {
     position: "absolute", bottom: 8, right: 8,
-    backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999, padding: 6,
+    backgroundColor: alpha(th.shadow, 0.45), borderRadius: 999, padding: 6,
   },
-  mxsBadge: { position: "absolute", top: 8, right: 8, backgroundColor: "rgba(0,0,0,0.6)", borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
-  mxsText: { color: ACCENT, fontSize: 13, fontWeight: "800" },
+  mxsBadge: { position: "absolute", top: 8, right: 8, backgroundColor: th.scrim, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
+  mxsText: { color: th.accent, fontSize: 13, fontWeight: "800" },
   reasonPill: {
     position: "absolute", top: 8, left: 8, maxWidth: 128,
     flexDirection: "row", alignItems: "center", gap: 3,
-    backgroundColor: ACCENT, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3,
+    backgroundColor: th.accentFill, borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3,
   },
-  reasonText: { color: "#0b0b0f", fontSize: 11, fontWeight: "800", flexShrink: 1 },
-  title: { color: "#f4f4f6", fontSize: 14, fontWeight: "700", lineHeight: 18 },
-  sub: { color: MUTED, fontSize: 12, marginTop: 3 },
+  reasonText: { color: th.accentInk, fontSize: 11, fontWeight: "800", flexShrink: 1 },
+  title: { color: th.text, fontSize: 14, fontWeight: "700", lineHeight: 18 },
+  sub: { color: th.muted, fontSize: 12, marginTop: 3 },
 });

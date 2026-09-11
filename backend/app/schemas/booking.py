@@ -27,7 +27,6 @@ class MyShow(EventListItem):
     """
     state: str                 # interested | planning | confirmed | attended | missed
     booked: bool
-    has_note: bool
     # True when this row arrived as a suggestion rather than a deliberate save. Shown as
     # "Suggested" and dismissable, exactly as the mockup draws it.
     is_suggestion: bool = False

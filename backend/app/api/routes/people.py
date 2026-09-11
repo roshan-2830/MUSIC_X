@@ -32,6 +32,7 @@ from app.models.profile import Profile
 from app.models.venue import Venue
 from app.schemas.people import (GoerOut, GoingOut, InviteIn, InviteOut, InviteResult,
                                 InviterOut, PersonOut)
+from app.services import plan_entry
 
 router = APIRouter(tags=["people"])
 
@@ -295,6 +296,10 @@ def invite_to_event(
     note = (body.note or "").strip()[:200] or None
 
     for target in fresh:
+        # Same reason as the hotel: asking somebody to come is planning, and plan state is
+        # derived off a calendar entry. Done once before the loop would be tidier, but the
+        # loop is where we know at least one invite is actually being written.
+        plan_entry.ensure_saved(db, uid, event_id)
         db.add(EventInvite(event_id=event_id, from_user_id=uid, to_user_id=target, note=note))
         # The invitation IS the notification. There is no separate inbox to check, because a
         # second place to look is a second place to miss it.

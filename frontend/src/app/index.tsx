@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import CityPicker from "../components/city-picker";
 import EventCard from "../components/event-card";
 import EventDetailView from "../components/event-detail";
@@ -23,8 +26,6 @@ import { detectCurrentCity } from "../lib/location";
 import { useProfile } from "../lib/profile";
 import { usePush } from "../hooks/use-push";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 // Two shows by the same act is plenty for one row — otherwise a three-night stand at
 // the top of the ratings takes a quarter of the row and nine other artists never appear.
@@ -78,6 +79,8 @@ function onePerArtist(list: MusicEvent[]): MusicEvent[] {
 }
 
 export default function HomeScreen() {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { profile, setHomeCity } = useProfile();
   const router = useRouter();
   const [events, setEvents] = useState<MusicEvent[]>([]);
@@ -160,7 +163,7 @@ export default function HomeScreen() {
     }
   }
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={ACCENT} size="large" /></View>;
+  if (loading) return <View style={styles.center}><ActivityIndicator color={th.accent} size="large" /></View>;
   if (error) return <View style={styles.center}><Text style={styles.error}>Couldn’t load:{"\n"}{error}</Text></View>;
 
   const city = profile?.home_city_name ?? null;
@@ -225,7 +228,7 @@ export default function HomeScreen() {
           <Text style={styles.rowHeadTitle}>{title}</Text>
           <Pressable onPress={() => openFeed(feed, title, extra)} hitSlop={8} style={styles.viewAll}>
             <Text style={styles.seeAll}>See all</Text>
-            <Ionicons name="arrow-forward" size={13} color={ACCENT} />
+            <Ionicons name="arrow-forward" size={13} color={th.accent} />
           </Pressable>
         </View>
         {sub ? <Text style={styles.sectionSub}>{sub}</Text> : null}
@@ -244,9 +247,9 @@ export default function HomeScreen() {
         <View>
           <Text style={styles.logo}>MUSIC<Text style={styles.accent}>X</Text></Text>
           <Pressable style={styles.cityBtn} onPress={() => setPickerOpen(true)}>
-            <Ionicons name="location-sharp" size={14} color={ACCENT} />
+            <Ionicons name="location-sharp" size={14} color={th.accent} />
             <Text style={styles.cityText}>{cityLabel}</Text>
-            <Ionicons name="chevron-forward" size={13} color={MUTED} />
+            <Ionicons name="chevron-forward" size={13} color={th.muted} />
           </Pressable>
         </View>
         <View style={styles.headerActions}>
@@ -346,7 +349,7 @@ export default function HomeScreen() {
                     style={styles.viewAll}
                   >
                     <Text style={styles.seeAll}>View All</Text>
-                    <Ionicons name="arrow-forward" size={13} color={ACCENT} />
+                    <Ionicons name="arrow-forward" size={13} color={th.accent} />
                   </Pressable>
                 </View>
                 <Text style={styles.sectionSub}>Multi-day trips worth planning around</Text>
@@ -419,24 +422,24 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0b0f" },
-  center: { flex: 1, backgroundColor: "#0b0b0f", alignItems: "center", justifyContent: "center", padding: 24 },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: th.bg },
+  center: { flex: 1, backgroundColor: th.bg, alignItems: "center", justifyContent: "center", padding: 24 },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
   headerActions: { flexDirection: "row", gap: 8 },
-  logo: { color: "#f4f4f6", fontSize: 24, fontWeight: "800", letterSpacing: 1 },
-  accent: { color: ACCENT },
+  logo: { color: th.text, fontSize: 24, fontWeight: "800", letterSpacing: 1 },
+  accent: { color: th.accent },
   cityBtn: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
-  cityText: { color: "#f4f4f6", fontSize: 13, fontWeight: "600" },
+  cityText: { color: th.text, fontSize: 13, fontWeight: "600" },
   section: { marginTop: 18 },
   rowHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", paddingHorizontal: 16 },
-  rowHeadTitle: { color: "#f4f4f6", fontSize: 19, fontWeight: "800" },
-  seeAll: { color: ACCENT, fontSize: 13, fontWeight: "700" },
+  rowHeadTitle: { color: th.text, fontSize: 19, fontWeight: "800" },
+  seeAll: { color: th.accent, fontSize: 13, fontWeight: "700" },
   viewAll: { flexDirection: "row", alignItems: "center", gap: 3 },
   emptyCity: { marginTop: 18, paddingHorizontal: 16 },
-  emptyCityText: { color: MUTED, fontSize: 14, marginTop: 6, lineHeight: 20 },
-  sectionTitle: { color: "#f4f4f6", fontSize: 19, fontWeight: "800", paddingHorizontal: 16 },
-  sectionSub: { color: MUTED, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 10 },
+  emptyCityText: { color: th.muted, fontSize: 14, marginTop: 6, lineHeight: 20 },
+  sectionTitle: { color: th.text, fontSize: 19, fontWeight: "800", paddingHorizontal: 16 },
+  sectionSub: { color: th.muted, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 10 },
   hscroll: { paddingHorizontal: 16, paddingTop: 2 },
-  error: { color: "#ff6b6b", fontSize: 14, textAlign: "center" },
+  error: { color: th.danger, fontSize: 14, textAlign: "center" },
 });

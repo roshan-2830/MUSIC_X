@@ -15,7 +15,11 @@ import app.models  # noqa: F401  — importing registers every model on Base.met
 config = context.config
 
 # Point Alembic at our Supabase database (psycopg driver), pulled from .env
-db_url = settings.database_url.replace("postgresql://", "postgresql+psycopg://", 1)
+# The SESSION pooler for migrations, the transaction pooler for the app. A transaction
+# pooler hands each statement whatever connection is free, which is fine for a request and
+# wrong for DDL that depends on session state.
+_raw = settings.migration_database_url or settings.database_url
+db_url = _raw.replace("postgresql://", "postgresql+psycopg://", 1)
 config.set_main_option("sqlalchemy.url", db_url)
 
 if config.config_file_name is not None:

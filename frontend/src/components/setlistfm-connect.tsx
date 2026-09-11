@@ -15,13 +15,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { getSetlistfmLink } from "../lib/api";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 const DISMISSED = "mx_setlistfm_dismissed";
 
 export default function SetlistfmConnect({ onOpen }: { onOpen: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [show, setShow] = useState(false);
 
   const check = useCallback(async () => {
@@ -48,11 +51,11 @@ export default function SetlistfmConnect({ onOpen }: { onOpen: () => void }) {
   return (
     <View style={styles.wrap}>
       <Pressable style={styles.invite} onPress={onOpen}>
-        <Ionicons name="cloud-download-outline" size={16} color={ACCENT} />
+        <Ionicons name="cloud-download-outline" size={16} color={th.accent} />
         <Text style={styles.inviteText}>
           Been to shows before Music X? Import them from setlist.fm
         </Text>
-        <Ionicons name="chevron-forward" size={15} color={ACCENT} />
+        <Ionicons name="chevron-forward" size={15} color={th.accent} />
       </Pressable>
       <Pressable onPress={dismiss} hitSlop={10} style={styles.no}>
         <Text style={styles.noText}>I don’t use setlist.fm</Text>
@@ -61,14 +64,14 @@ export default function SetlistfmConnect({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   wrap: { marginHorizontal: 16, marginBottom: 16 },
   invite: {
     flexDirection: "row", alignItems: "center", gap: 10,
     paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14,
-    backgroundColor: "#14141b", borderWidth: 1, borderColor: "#2b2b36",
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line3,
   },
-  inviteText: { color: "#e6e6ee", fontSize: 13, fontWeight: "600", flex: 1 },
+  inviteText: { color: th.text2, fontSize: 13, fontWeight: "600", flex: 1 },
   no: { alignSelf: "center", paddingVertical: 8 },
-  noText: { color: MUTED, fontSize: 11, textDecorationLine: "underline" },
+  noText: { color: th.muted, fontSize: 11, textDecorationLine: "underline" },
 });

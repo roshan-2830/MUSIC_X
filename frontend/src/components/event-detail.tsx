@@ -4,6 +4,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { EventDetail, fetchEvent, getGoing, Going, getNearbyPlaces, NearbyPlaces} from "../lib/api";
 import ArtistDetail from "./artist-detail";
 import AroundVenue from "./around-venue";
@@ -17,11 +20,8 @@ import PlanTrip from "./plan-trip";
 import { coverColor, flagEmoji, hashHue, zonedDay } from "../lib/format";
 import { useProfile } from "../lib/profile";
 import { useSaves } from "../lib/saves";
+import { ToastHost } from "../lib/toast";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const GREEN = "#7ef0b2";
-const WARN = "#f0d47e";
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MO = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -109,9 +109,12 @@ const CONF_LABEL: Record<string, string> = {
   medium: "Mostly confirmed",
   low: "Not fully confirmed yet",
 };
-const confColor = (c?: string | null) => (c === "high" ? GREEN : c === "medium" ? "#f0d47e" : MUTED);
+const confColor = (c?: string | null, th?: Theme) =>
+  c === "high" ? th!.success : c === "medium" ? th!.warn : th!.muted;
 
 function Avatar({ name, size = 34, imageUrl }: { name: string; size?: number; imageUrl?: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const box = { width: size, height: size, borderRadius: size / 2 };
   // A real face when we hold one, initials when we do not. Never a stand-in photo: 29% of
   // artists have no exact Deezer match, and a letter is honest where another act's face
@@ -127,6 +130,8 @@ function Avatar({ name, size = 34, imageUrl }: { name: string; size?: number; im
 }
 
 export default function EventDetailView({ id, onClose }: { id: string; onClose: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [ev, setEv] = useState<EventDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +182,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
     } catch {}
   }
 
-  if (loading) return <View style={styles.center}><ActivityIndicator color={ACCENT} size="large" /></View>;
+  if (loading) return <View style={styles.center}><ActivityIndicator color={th.accent} size="large" /></View>;
   if (error) return <View style={styles.centerPad}><Text style={styles.error}>{error}</Text></View>;
   if (!ev) return null;
 
@@ -206,7 +211,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           {/* A scrim, so chips over a bright photo stay readable. Without it the genre
               text sat directly on the artwork and vanished on pale images. */}
           <LinearGradient
-            colors={["transparent", "rgba(11,11,15,0.35)", "rgba(11,11,15,0.92)"]}
+            colors={["transparent", alpha(th.bg, 0.35), alpha(th.bg, 0.92)]}
             style={styles.heroScrim}
             pointerEvents="none"
           />
@@ -232,11 +237,11 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           <Text style={styles.title}>{ev.title}</Text>
 
           <View style={styles.metaRow}>
-            <Ionicons name="calendar-outline" size={15} color={MUTED} />
+            <Ionicons name="calendar-outline" size={15} color={th.muted} />
             <Text style={styles.meta}>{fmtDate(ev.starts_at, ev.timezone)}</Text>
           </View>
           <View style={styles.metaRow}>
-            <Ionicons name="location-outline" size={15} color={MUTED} />
+            <Ionicons name="location-outline" size={15} color={th.muted} />
             <Text style={styles.meta}>
               {ev.venue_name ?? "Venue TBA"}{ev.city ? `  ·  ${flagEmoji(ev.country)} ${ev.city}` : ""}
             </Text>
@@ -260,19 +265,19 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
                 <Ionicons
                   name={showWhy ? "chevron-down" : "chevron-forward"}
                   size={15}
-                  color={ACCENT}
+                  color={th.accent}
                 />
               </View>
               <Text style={styles.segLabel}>Rating</Text>
             </Pressable>
             <Pressable style={[styles.segcell, saved && styles.segcellOn]} onPress={() => toggle(ev)}>
-              <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={20} color={saved ? ACCENT : "#f4f4f6"} />
+              <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={20} color={saved ? th.accent : th.text} />
               <Text style={[styles.segLabel, saved && styles.segLabelOn]}>{saved ? "Saved" : "Save"}</Text>
             </Pressable>
             {/* Beside Save, before Share: inviting somebody is a decision about this show,
                 where Share is a generic escape hatch to any app on the phone. */}
             <Pressable style={styles.segcell} onPress={() => setInviteOpen(true)}>
-              <Ionicons name="person-add-outline" size={20} color="#f4f4f6" />
+              <Ionicons name="person-add-outline" size={20} color={th.text} />
               <Text style={styles.segLabel}>Invite</Text>
             </Pressable>
             {/* Share used to sit here as well. Two share buttons on one screen is one
@@ -286,7 +291,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               {ev.mxs != null ? (
                 <>
                   <View style={styles.whyHead}>
-                    <Ionicons name="star" size={14} color={ACCENT} />
+                    <Ionicons name="star" size={14} color={th.accent} />
                     <Text style={styles.whyTitle}>Why {ev.mxs.toFixed(1)}?</Text>
                   </View>
 
@@ -357,7 +362,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
 
           {invitedToast ? (
             <View style={styles.invited}>
-              <Ionicons name="checkmark-circle" size={15} color="#7ef0b2" />
+              <Ionicons name="checkmark-circle" size={15} color={th.success} />
               <Text style={styles.invitedText}>{invitedToast}</Text>
             </View>
           ) : null}
@@ -391,7 +396,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
                       : ev.lineup[0].is_headliner ? "Headliner · tap for their page" : "Tap for their page"}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                <Ionicons name="chevron-forward" size={18} color={th.muted} />
               </Pressable>
             </>
           )}
@@ -410,7 +415,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           {aboutLines != null && aboutLines > 5 ? (
             <Pressable style={styles.readMore} onPress={() => setAboutOpen(true)}>
               <Text style={styles.readMoreText}>Read more</Text>
-              <Ionicons name="chevron-forward" size={14} color={ACCENT} />
+              <Ionicons name="chevron-forward" size={14} color={th.accent} />
             </Pressable>
           ) : aboutCredit(ev) ? (
             <Text style={styles.aboutSource}>ⓘ {aboutCredit(ev)}</Text>
@@ -465,7 +470,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
 
           {isAbroad ? (
             <View style={styles.abroad}>
-              <Ionicons name="airplane-outline" size={16} color="#f0d47e" />
+              <Ionicons name="airplane-outline" size={16} color={th.warn} />
               <Text style={styles.abroadText}>
                 This show is in {countryName(ev.country)}. Tickets sell on {countryName(ev.country)}’s official
                 site — booking may not be available from {countryName(homeCountry)}.
@@ -474,7 +479,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           ) : null}
 
           <View style={styles.greenLine}>
-            <Ionicons name="shield-checkmark" size={14} color={GREEN} />
+            <Ionicons name="shield-checkmark" size={14} color={th.success} />
             <Text style={styles.greenText}>We never sell tickets or add a markup — the button below opens the official seller.</Text>
           </View>
 
@@ -483,21 +488,21 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
               Only people who attended can write one — the API enforces it. */}
           <Pressable style={styles.reviewsCard} onPress={() => setReviewsOpen(true)}>
             <View style={styles.reviewsIcon}>
-              <Ionicons name="star" size={15} color={ACCENT} />
+              <Ionicons name="star" size={15} color={th.accent} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.reviewsTitle}>Reviews</Text>
               <Text style={styles.reviewsSub}>What fans who were there say</Text>
             </View>
-            <Ionicons name="chevron-forward" size={17} color={MUTED} />
+            <Ionicons name="chevron-forward" size={17} color={th.muted} />
           </Pressable>
 
           {/* how we know this — the real receipts, one row per sourced fact */}
           <Pressable style={styles.trustCard} onPress={() => setShowTrust((v) => !v)}>
             <View style={styles.trustHead}>
-              <Ionicons name="checkmark-circle" size={16} color={confColor(ev.confidence)} />
+              <Ionicons name="checkmark-circle" size={16} color={confColor(ev.confidence, th)} />
               <Text style={styles.trustTitle}>How we know this</Text>
-              <Ionicons name={showTrust ? "chevron-up" : "chevron-down"} size={14} color={MUTED} style={{ marginLeft: "auto" }} />
+              <Ionicons name={showTrust ? "chevron-up" : "chevron-down"} size={14} color={th.muted} style={{ marginLeft: "auto" }} />
             </View>
 
             <Text style={styles.trustSummary}>
@@ -514,7 +519,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
                       <Text style={styles.factLabel}>{f.label}</Text>
                       <Text style={styles.factValue}>{f.display}</Text>
                       <View style={styles.factSrc}>
-                        <View style={[styles.tierDot, { backgroundColor: f.derived ? WARN : GREEN }]} />
+                        <View style={[styles.tierDot, { backgroundColor: f.derived ? th.warn : th.success }]} />
                         <Text style={styles.factSrcText}>
                           {f.source_name ?? "source"}
                           {f.last_verified ? ` · checked ${fmtDate(f.last_verified)}` : ""}
@@ -548,7 +553,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
 
                 {sourceLink ? (
                   <Pressable style={styles.srcBtn} onPress={() => Linking.openURL(sourceLink)}>
-                    <Ionicons name="open-outline" size={14} color={ACCENT} />
+                    <Ionicons name="open-outline" size={14} color={th.accent} />
                     <Text style={styles.srcBtnText}>See the source listing</Text>
                   </Pressable>
                 ) : null}
@@ -558,26 +563,24 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
         </View>
       </ScrollView>
 
-      {/* sticky ticket bar */}
+      {/* Sticky ticket bar: one action, nothing else.
+          No price — Ticketmaster publishes one for 8% of our catalogue and only in USD and
+          CAD, so a "from" line was absent on eleven events in twelve and, where present,
+          a floor that says little about a seat worth travelling for.
+          No seller name either, and that is about accuracy rather than clutter: a third of
+          these links go to Universe, TicketWeb or Biletix, so "via Ticketmaster" was wrong
+          on thousands of shows. The destination is visible the moment the link opens. */}
       <View style={styles.ticketBar}>
-        {scheduled && offer ? (
-          <>
-            {ev.price_from_amount != null ? (
-              <View>
-                <Text style={styles.ticketCap}>Tickets from</Text>
-                <Text style={styles.ticketPrice}>{ev.price_from_currency ?? ""} {ev.price_from_amount}</Text>
-              </View>
-            ) : (
-              <View>
-                <Text style={styles.ticketCap}>Official tickets</Text>
-                <Text style={styles.ticketVia}>via Ticketmaster</Text>
-              </View>
-            )}
-            <Pressable style={styles.ticketBtn} onPress={() => offer.url && Linking.openURL(offer.url)}>
-              <Ionicons name="ticket-outline" size={16} color="#0b0b0f" />
-              <Text style={styles.ticketBtnText}>Get tickets</Text>
-            </Pressable>
-          </>
+        {scheduled && offer?.url ? (
+          <Pressable
+            style={({ pressed }) => [styles.ticketBtn, pressed && styles.ticketBtnPressed]}
+            onPress={() => Linking.openURL(offer.url!)}
+            accessibilityRole="link"
+            accessibilityLabel={`Get tickets for ${ev.title}`}
+          >
+            <Ionicons name="ticket" size={18} color={th.accentInk} />
+            <Text style={styles.ticketBtnText}>Get tickets</Text>
+          </Pressable>
         ) : (
           <Text style={styles.ticketStatus}>
             {scheduled ? "No official seller listed yet." : ev.status === "cancelled" ? "This show was cancelled." : "This show is postponed."}
@@ -594,7 +597,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
             <View style={styles.sheetTitleRow}>
               <Text style={styles.sheetTitle}>About the event</Text>
               <Pressable onPress={() => setAboutOpen(false)} hitSlop={8}>
-                <Ionicons name="close" size={22} color={MUTED} />
+                <Ionicons name="close" size={22} color={th.muted} />
               </Pressable>
             </View>
             <ScrollView style={{ maxHeight: 460 }} showsVerticalScrollIndicator={false}>
@@ -629,7 +632,7 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
                       {a.is_headliner ? "Headliner" : "Support"}
                     </Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                  <Ionicons name="chevron-forward" size={16} color={th.muted} />
                 </Pressable>
               ))}
             </ScrollView>
@@ -672,124 +675,146 @@ export default function EventDetailView({ id, onClose }: { id: string; onClose: 
           setTimeout(() => setInvitedToast(null), 4000);
         }}
       />
+      {/* This screen is a Modal, which renders above the root host — so it draws its
+          own. Several mounted at once is fine: only the topmost is on screen. */}
+      <ToastHost />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0b0f" },
-  center: { flex: 1, backgroundColor: "#0b0b0f", alignItems: "center", justifyContent: "center", padding: 40 },
-  centerPad: { flex: 1, backgroundColor: "#0b0b0f", justifyContent: "center", padding: 40 },
-  error: { color: "#ff6b6b", fontSize: 14, textAlign: "center" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: th.bg },
+  center: { flex: 1, backgroundColor: th.bg, alignItems: "center", justifyContent: "center", padding: 40 },
+  centerPad: { flex: 1, backgroundColor: th.bg, justifyContent: "center", padding: 40 },
+  error: { color: th.danger, fontSize: 14, textAlign: "center" },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
   hero: { width: "100%", height: 280 },
   heroScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: 130 },
   heroChips: { position: "absolute", left: 16, right: 16, bottom: 14, flexDirection: "row", flexWrap: "wrap", gap: 7 },
-  heroChip: { backgroundColor: "rgba(11,11,15,0.62)", borderColor: "rgba(255,255,255,0.22)", borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
-  heroChipText: { color: "#f4f4f6", fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
-  heroBtn: { position: "absolute", top: 44, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
-  statusBadge: { position: "absolute", bottom: 14, left: 16, backgroundColor: "#ff6b6b", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
+  heroChip: { backgroundColor: alpha(th.bg, 0.62), borderColor: "rgba(255,255,255,0.22)", borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 5 },
+  heroChipText: { color: th.text, fontSize: 12, fontWeight: "700", textTransform: "capitalize" },
+  heroBtn: {
+    position: "absolute", top: 44, width: 38, height: 38, borderRadius: 19,
+    // Fixed dark, not th.scrim2. These sit over a cover photo whose brightness we cannot
+    // know, and the light theme's 25% black left a white chevron at 2.22:1 over a bright
+    // image — the back button was effectively invisible, which is what prompted this.
+    // 55% black holds 4.5:1 or better against anything, and a hairline separates it from a
+    // dark photo where the scrim alone would vanish into the image.
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.35)",
+    alignItems: "center", justifyContent: "center",
+  },
+  statusBadge: { position: "absolute", bottom: 14, left: 16, backgroundColor: th.danger, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
   statusText: { color: "#fff", fontWeight: "800", fontSize: 12 },
 
   body: { padding: 16 },
-  cdPill: { alignSelf: "flex-start", backgroundColor: "#1b1b24", borderColor: "#2a2a38", borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4, marginBottom: 8 },
-  cdText: { color: ACCENT, fontSize: 12, fontWeight: "800" },
-  title: { color: "#f4f4f6", fontSize: 25, fontWeight: "800", marginBottom: 10, lineHeight: 30 },
+  cdPill: { alignSelf: "flex-start", backgroundColor: th.panel2, borderColor: th.line3, borderWidth: 1, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 4, marginBottom: 8 },
+  cdText: { color: th.accent, fontSize: 12, fontWeight: "800" },
+  title: { color: th.text, fontSize: 25, fontWeight: "800", marginBottom: 10, lineHeight: 30 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
-  meta: { color: "#c8c8d0", fontSize: 14, flex: 1 },
+  meta: { color: th.text3, fontSize: 14, flex: 1 },
 
   segrow: { flexDirection: "row", gap: 10, marginTop: 16 },
-  segcell: { flex: 1, backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, paddingVertical: 12, alignItems: "center", gap: 5, minHeight: 62, justifyContent: "center" },
-  segcellOn: { borderColor: ACCENT },
+  segcell: { flex: 1, backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14, paddingVertical: 12, alignItems: "center", gap: 5, minHeight: 62, justifyContent: "center" },
+  segcellOn: { borderColor: th.accentFill },
   scoreRow: { flexDirection: "row", alignItems: "center", gap: 3 },
-  segScore: { color: ACCENT, fontSize: 20, fontWeight: "800" },
-  segLabel: { color: "#c8c8d0", fontSize: 12, fontWeight: "700" },
+  segScore: { color: th.accent, fontSize: 20, fontWeight: "800" },
+  segLabel: { color: th.text3, fontSize: 12, fontWeight: "700" },
   // The confirmation after sending. A sheet that just closes leaves somebody wondering whether
   // it worked, and an invite is not something to be unsure about.
   invited: {
     flexDirection: "row", alignItems: "center", gap: 7, marginTop: 10,
-    backgroundColor: "rgba(126,240,178,0.10)", borderRadius: 11,
+    backgroundColor: alpha(th.success, 0.10), borderRadius: 11,
     paddingVertical: 10, paddingHorizontal: 12,
   },
-  invitedText: { color: "#7ef0b2", fontSize: 13, fontWeight: "700", flex: 1 },
-  segLabelOn: { color: ACCENT },
+  invitedText: { color: th.success, fontSize: 13, fontWeight: "700", flex: 1 },
+  segLabelOn: { color: th.accent },
 
-  whyBox: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
+  whyBox: { backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
   barRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  barLabel: { color: "#c8c8d0", fontSize: 13, fontWeight: "600" },
-  barVal: { color: ACCENT, fontSize: 13, fontWeight: "800" },
-  barTrack: { height: 7, borderRadius: 4, backgroundColor: "#26262f", overflow: "hidden" },
-  barFill: { height: 7, borderRadius: 4, backgroundColor: ACCENT },
-  whyText: { color: "#c8c8d0", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  barLabel: { color: th.text3, fontSize: 13, fontWeight: "600" },
+  barVal: { color: th.accent, fontSize: 13, fontWeight: "800" },
+  barTrack: { height: 7, borderRadius: 4, backgroundColor: th.line, overflow: "hidden" },
+  barFill: { height: 7, borderRadius: 4, backgroundColor: th.accentFill },
+  whyText: { color: th.text3, fontSize: 13, lineHeight: 19, marginTop: 12 },
   whyHead: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 12 },
-  whyTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
+  whyTitle: { color: th.text, fontSize: 15, fontWeight: "800" },
   whyRow: { marginBottom: 12 },
-  whyReason: { color: MUTED, fontSize: 11.5, lineHeight: 16, marginTop: 5 },
-  whyGap: { color: MUTED, fontSize: 11.5, lineHeight: 16, marginTop: 2, fontStyle: "italic" },
+  whyReason: { color: th.muted, fontSize: 11.5, lineHeight: 16, marginTop: 5 },
+  whyGap: { color: th.muted, fontSize: 11.5, lineHeight: 16, marginTop: 2, fontStyle: "italic" },
 
-  reviewsCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#14141b",
-                 borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 13,
+  reviewsCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: th.panel,
+                 borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 13,
                  marginTop: 22 },
-  reviewsIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: "#1e2410",
+  reviewsIcon: { width: 30, height: 30, borderRadius: 9, backgroundColor: alpha(th.accent, 0.14),
                  alignItems: "center", justifyContent: "center" },
-  reviewsTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
-  reviewsSub: { color: MUTED, fontSize: 12, marginTop: 2 },
-  section: { color: "#f4f4f6", fontSize: 17, fontWeight: "800", marginTop: 24, marginBottom: 10 },
-  lineupCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 12 },
+  reviewsTitle: { color: th.text, fontSize: 15, fontWeight: "800" },
+  reviewsSub: { color: th.muted, fontSize: 12, marginTop: 2 },
+  section: { color: th.text, fontSize: 17, fontWeight: "800", marginTop: 24, marginBottom: 10 },
+  lineupCard: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 12 },
   avStack: { flexDirection: "row" },
-  avatar: { alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#14141b" },
+  avatar: { alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: th.panel },
   avatarText: { color: "#fff", fontWeight: "800" },
-  lineupTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
-  lineupSub: { color: MUTED, fontSize: 12, marginTop: 2 },
-  about: { color: "#c8c8d0", fontSize: 14, lineHeight: 21 },
-  aboutFull: { color: "#c8c8d0", fontSize: 15, lineHeight: 23 },
+  lineupTitle: { color: th.text, fontSize: 15, fontWeight: "800" },
+  lineupSub: { color: th.muted, fontSize: 12, marginTop: 2 },
+  about: { color: th.text3, fontSize: 14, lineHeight: 21 },
+  aboutFull: { color: th.text3, fontSize: 15, lineHeight: 23 },
   readMore: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 8 },
-  readMoreText: { color: ACCENT, fontSize: 14, fontWeight: "700" },
-  aboutSource: { color: MUTED, fontSize: 11, marginTop: 8, fontStyle: "italic" },
+  readMoreText: { color: th.accent, fontSize: 14, fontWeight: "700" },
+  aboutSource: { color: th.muted, fontSize: 11, marginTop: 8, fontStyle: "italic" },
 
 
-  abroad: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: "#1f1b10", borderColor: "#3a3320", borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 22 },
-  abroadText: { color: "#e8d9a8", fontSize: 12.5, lineHeight: 18, flex: 1 },
+  abroad: { flexDirection: "row", alignItems: "flex-start", gap: 8, backgroundColor: alpha(th.warn, 0.10), borderColor: alpha(th.warn, 0.28), borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 22 },
+  abroadText: { color: th.warn, fontSize: 12.5, lineHeight: 18, flex: 1 },
   greenLine: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 16 },
-  greenText: { color: GREEN, fontSize: 12, flex: 1, lineHeight: 17 },
+  greenText: { color: th.success, fontSize: 12, flex: 1, lineHeight: 17 },
 
-  trustCard: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 16 },
+  trustCard: { backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 15, marginTop: 16 },
   trustHead: { flexDirection: "row", alignItems: "center", gap: 8 },
-  trustTitle: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
-  trustSummary: { color: MUTED, fontSize: 12.5, lineHeight: 18, marginTop: 9 },
-  factRow: { borderTopColor: "#26262f", borderTopWidth: 1, paddingTop: 10, marginTop: 10 },
-  factLabel: { color: MUTED, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4 },
-  factValue: { color: "#f4f4f6", fontSize: 13.5, lineHeight: 19, marginTop: 3 },
+  trustTitle: { color: th.text, fontSize: 14, fontWeight: "700" },
+  trustSummary: { color: th.muted, fontSize: 12.5, lineHeight: 18, marginTop: 9 },
+  factRow: { borderTopColor: th.line, borderTopWidth: 1, paddingTop: 10, marginTop: 10 },
+  factLabel: { color: th.muted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4 },
+  factValue: { color: th.text, fontSize: 13.5, lineHeight: 19, marginTop: 3 },
   factSrc: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 5 },
   tierDot: { width: 6, height: 6, borderRadius: 3 },
-  factSrcText: { color: MUTED, fontSize: 11, flex: 1 },
-  factProof: { color: "#8f8f9c", fontSize: 11, fontStyle: "italic", marginTop: 4, lineHeight: 15 },
-  gapBox: { backgroundColor: "#101017", borderColor: "#26262f", borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 14 },
-  gapTitle: { color: WARN, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.4 },
-  gapBody: { color: "#e2e2e8", fontSize: 13, lineHeight: 19, marginTop: 5 },
-  gapNote: { color: MUTED, fontSize: 11.5, lineHeight: 16.5, marginTop: 7 },
+  factSrcText: { color: th.muted, fontSize: 11, flex: 1 },
+  factProof: { color: th.muted, fontSize: 11, fontStyle: "italic", marginTop: 4, lineHeight: 15 },
+  gapBox: { backgroundColor: th.bg, borderColor: th.line, borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 14 },
+  gapTitle: { color: th.warn, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.4 },
+  gapBody: { color: th.text2, fontSize: 13, lineHeight: 19, marginTop: 5 },
+  gapNote: { color: th.muted, fontSize: 11.5, lineHeight: 16.5, marginTop: 7 },
   srcBtn: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 14 },
-  srcBtnText: { color: ACCENT, fontSize: 12.5, fontWeight: "700" },
-  trustBody: { color: "#c8c8d0", fontSize: 13, lineHeight: 19, marginTop: 12 },
+  srcBtnText: { color: th.accent, fontSize: 12.5, fontWeight: "700" },
+  trustBody: { color: th.text3, fontSize: 13, lineHeight: 19, marginTop: 12 },
 
-  ticketBar: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "#101016", borderTopColor: "#26262f", borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 26 },
-  ticketCap: { color: MUTED, fontSize: 11, fontWeight: "600" },
-  ticketPrice: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
-  ticketVia: { color: "#f4f4f6", fontSize: 15, fontWeight: "700" },
-  ticketBtn: { flexDirection: "row", alignItems: "center", gap: 7, backgroundColor: ACCENT, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 12 },
-  ticketBtnText: { color: "#0b0b0f", fontSize: 15, fontWeight: "800" },
-  ticketStatus: { color: MUTED, fontSize: 14, fontWeight: "600" },
+  ticketBar: {
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    backgroundColor: th.bg, borderTopColor: th.line, borderTopWidth: 1,
+    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 26,
+  },
+  // Full width now that nothing sits beside it: the whole bar is one target, which is both
+  // easier to hit with a thumb and reads as deliberate rather than as a row missing a half.
+  ticketBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 9,
+    backgroundColor: th.accentFill, borderRadius: 14, height: 52,
+  },
+  // Dimmed rather than moved: a button that shifts under a thumb reads as a misfire on the
+  // app's most important action.
+  ticketBtnPressed: { opacity: 0.82 },
+  ticketBtnText: { color: th.accentInk, fontSize: 16, fontWeight: "900", letterSpacing: 0.2 },
+  ticketStatus: { color: th.muted, fontSize: 14, fontWeight: "600", textAlign: "center", paddingVertical: 14 },
 
   sheetRoot: { flex: 1, justifyContent: "flex-end" },
-  sheetBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)" },
-  sheet: { backgroundColor: "#14141b", borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34, borderTopWidth: 1, borderColor: "#26262f" },
-  sheetHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: "#3a3a46", marginBottom: 12 },
+  sheetBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: th.scrim2 },
+  sheet: { backgroundColor: th.panel, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34, borderTopWidth: 1, borderColor: th.line },
+  sheetHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: th.outline, marginBottom: 12 },
   sheetTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
-  sheetTitle: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
-  sheetSub: { color: MUTED, fontSize: 13, marginTop: 2, marginBottom: 10 },
-  artistRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: "#1c1c24" },
-  artistName: { color: "#f4f4f6", fontSize: 15, fontWeight: "700" },
-  artistRole: { color: MUTED, fontSize: 12, marginTop: 2 },
-  artistRoleHead: { color: ACCENT, fontWeight: "700" },
+  sheetTitle: { color: th.text, fontSize: 18, fontWeight: "800" },
+  sheetSub: { color: th.muted, fontSize: 13, marginTop: 2, marginBottom: 10 },
+  artistRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: th.line2 },
+  artistName: { color: th.text, fontSize: 15, fontWeight: "700" },
+  artistRole: { color: th.muted, fontSize: 12, marginTop: 2 },
+  artistRoleHead: { color: th.accent, fontWeight: "700" },
 });

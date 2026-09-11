@@ -10,7 +10,7 @@ booked. Here the state is a function of facts that already exist:
 
     attended   the show has happened AND there is a ticket
     confirmed  there is a ticket
-    planning   they have started building the trip
+    planning   they have picked a hotel or invited somebody
     interested they saved it
 
 Nothing can drift, because there is nothing to keep in step. "Attended" also arrives on its own
@@ -91,10 +91,15 @@ def derive(entry, *, past: bool, has_base: bool, has_invited: bool) -> str:
     if booked:
         return "confirmed"
     # PLANNING is the step the PRD leaves undefined, so it is defined by what somebody has
-    # actually done beyond bookmarking: chosen where to sleep, asked somebody to come, or written
-    # themselves a note. All three are real acts of planning and all three are already recorded,
-    # so nothing new is tracked to know this.
-    if has_base or has_invited or (getattr(entry, "note", None) or "").strip():
+    # actually done beyond bookmarking: chosen where to sleep, or asked somebody to come.
+    # Both are real commitments and both are already recorded, so nothing new is tracked.
+    #
+    # A private note USED to count, and was dropped on 2026-09-10. It was the weakest of the
+    # three — jotting "check parking" is not planning a trip — and it was also the only one
+    # that ever worked, by accident: a note is a column ON the calendar entry, so writing one
+    # created the row derive() needs, while a hotel and an invite went to their own tables and
+    # left the show with no state at all.
+    if has_base or has_invited:
         return "planning"
     return "interested"
 
@@ -138,7 +143,7 @@ def guidance(state: str, *, past: bool, booked: bool) -> tuple:
                 "Were you there? Tick “Attended” and it goes in your Passport.")
     if state == "interested":
         return ("You're interested in this show.",
-                "Pick a hotel, invite a friend or add a note and this moves on its own.")
+                "Pick a hotel or invite a friend and this moves on its own.")
     if state == "planning":
         return ("You're planning this trip.",
                 "Add your ticket confirmation and this becomes Confirmed.")

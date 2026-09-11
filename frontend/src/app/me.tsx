@@ -11,6 +11,11 @@ import { useCallback, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
+import AppearanceView from "../components/appearance";
+import WishlistView from "../components/wishlist";
 import CityPicker from "../components/city-picker";
 import MyBookingsView from "../components/my-bookings";
 import MyShowsView from "../components/my-shows";
@@ -19,9 +24,8 @@ import PassportView from "../components/passport";
 import SetlistfmLinkView from "../components/setlistfm-link";
 import { useAuth } from "../lib/auth";
 import { useProfile } from "../lib/profile";
+import { useToast } from "../lib/toast";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 type Row = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -32,6 +36,8 @@ type Row = {
 };
 
 export default function MeScreen() {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const { signOut } = useAuth();
   const { profile, setHomeCity } = useProfile();
@@ -40,13 +46,16 @@ export default function MeScreen() {
   const [bookings, setBookings] = useState(false);
   const [setlistfm, setSetlistfm] = useState(false);
   const [alerts, setAlerts] = useState(false);
+  const [appearance, setAppearance] = useState(false);
+  const [wishlist, setWishlist] = useState(false);
   const [cityOpen, setCityOpen] = useState(false);
-  const [soon, setSoon] = useState<string | null>(null);
-
+  // One toast in the app, not two. This screen had its own — the mockup's `__soon` pattern —
+  // and a second pill with its own timing and styling would have drifted from the one the
+  // heart and the bookmark now use.
+  const { show } = useToast();
   const notYet = useCallback((what: string) => () => {
-    setSoon(what);
-    setTimeout(() => setSoon(null), 2200);
-  }, []);
+    show(`${what} — coming soon`);
+  }, [show]);
 
   const name = profile?.display_name || "You";
   const city = profile?.home_city_name || "somewhere";
@@ -63,15 +72,18 @@ export default function MeScreen() {
       go: notYet("My trips") },
     { icon: "musical-notes-outline", label: "Concert Passport",
       detail: "Every show you’ve been to", go: () => setPassport(true) },
-    { icon: "star-outline", label: "Bucket list", detail: "Artists to see before you die",
-      go: notYet("Bucket list") },
+    // "Wishlist", not "Bucket list" — the user's word as of 2026-09-09. The table behind
+    // it is still `bucket_list`, and the phase-2 mockup still says Bucket list; this is a
+    // deliberate divergence, not an oversight.
+    { icon: "heart-outline", label: "Wishlist", detail: "Acts you want to see live",
+      go: () => setWishlist(true) },
   ];
 
   const settings: Row[] = [
     { icon: "location-outline", label: "Home city", detail: city,
       go: () => setCityOpen(true) },
-    { icon: "options-outline", label: "Appearance", detail: "Theme & display",
-      go: notYet("Appearance") },
+    { icon: "options-outline", label: "Appearance", detail: "Light, dark or your device",
+      go: () => setAppearance(true) },
     { icon: "notifications-outline", label: "Notifications", detail: "Alerts & reminders",
       go: () => setAlerts(true) },
     { icon: "sparkles-outline", label: "What’s coming", detail: "Our roadmap",
@@ -85,13 +97,13 @@ export default function MeScreen() {
   const RowView = (r: Row) => (
     <Pressable key={r.label} style={styles.row} onPress={r.go}>
       <View style={styles.rowIcon}>
-        <Ionicons name={r.icon} size={18} color={r.danger ? "#ff6b6b" : ACCENT} />
+        <Ionicons name={r.icon} size={18} color={r.danger ? th.danger : th.accent} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.rowL, r.danger && { color: "#ff6b6b" }]}>{r.label}</Text>
+        <Text style={[styles.rowL, r.danger && { color: th.danger }]}>{r.label}</Text>
         <Text style={styles.rowD}>{r.detail}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={MUTED} />
+      <Ionicons name="chevron-forward" size={18} color={th.muted} />
     </Pressable>
   );
 
@@ -105,7 +117,7 @@ export default function MeScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.name}>{name}</Text>
             <Text style={styles.sub}>
-              <Ionicons name="location" size={11} color={MUTED} /> Based in {city}
+              <Ionicons name="location" size={11} color={th.muted} /> Based in {city}
             </Text>
           </View>
         </View>
@@ -123,11 +135,6 @@ export default function MeScreen() {
         <Text style={styles.foot}>Music X</Text>
       </ScrollView>
 
-      {soon ? (
-        <View style={styles.toast}>
-          <Text style={styles.toastT}>{soon} — coming soon</Text>
-        </View>
-      ) : null}
 
       <Modal visible={shows} animationType="slide" onRequestClose={() => setShows(false)}>
         <MyShowsView onClose={() => setShows(false)} />
@@ -144,6 +151,17 @@ export default function MeScreen() {
       </Modal>
       <Modal visible={setlistfm} animationType="slide" onRequestClose={() => setSetlistfm(false)}>
         <SetlistfmLinkView onClose={() => setSetlistfm(false)} />
+      </Modal>
+      <Modal visible={wishlist} animationType="slide" onRequestClose={() => setWishlist(false)}>
+        {wishlist ? (
+          <WishlistView
+            onClose={() => setWishlist(false)}
+            onOpenEvent={(id) => { setWishlist(false); router.push(`/?event=${id}`); }}
+          />
+        ) : null}
+      </Modal>
+      <Modal visible={appearance} animationType="slide" onRequestClose={() => setAppearance(false)}>
+        {appearance ? <AppearanceView onClose={() => setAppearance(false)} /> : null}
       </Modal>
       <Modal visible={alerts} animationType="slide" onRequestClose={() => setAlerts(false)}>
         <NotificationsModal
@@ -163,37 +181,32 @@ export default function MeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   hero: { flexDirection: "row", alignItems: "center", gap: 14, padding: 16, paddingBottom: 20 },
   avatar: {
-    width: 58, height: 58, borderRadius: 29, backgroundColor: "#1b1b24",
-    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#2b2b36",
+    width: 58, height: 58, borderRadius: 29, backgroundColor: th.panel2,
+    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: th.line3,
   },
-  avatarT: { color: ACCENT, fontSize: 24, fontWeight: "900" },
-  name: { color: "#f4f4f6", fontSize: 22, fontWeight: "900" },
-  sub: { color: MUTED, fontSize: 13, marginTop: 3 },
+  avatarT: { color: th.accent, fontSize: 24, fontWeight: "900" },
+  name: { color: th.text, fontSize: 22, fontWeight: "900" },
+  sub: { color: th.muted, fontSize: 13, marginTop: 3 },
 
   group: {
-    color: MUTED, fontSize: 11, fontWeight: "800", letterSpacing: 1,
+    color: th.muted, fontSize: 11, fontWeight: "800", letterSpacing: 1,
     textTransform: "uppercase", marginTop: 18, marginBottom: 6, paddingHorizontal: 16,
   },
   row: {
     flexDirection: "row", alignItems: "center", gap: 14,
     paddingVertical: 13, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: "#16161d",
+    borderBottomWidth: 1, borderBottomColor: th.panel,
   },
   rowIcon: {
-    width: 34, height: 34, borderRadius: 10, backgroundColor: "#14141b",
+    width: 34, height: 34, borderRadius: 10, backgroundColor: th.panel,
     alignItems: "center", justifyContent: "center",
   },
-  rowL: { color: "#f4f4f6", fontSize: 15, fontWeight: "700" },
-  rowD: { color: MUTED, fontSize: 12, marginTop: 2 },
-  foot: { color: "#4a4a55", fontSize: 12, textAlign: "center", marginTop: 24 },
+  rowL: { color: th.text, fontSize: 15, fontWeight: "700" },
+  rowD: { color: th.muted, fontSize: 12, marginTop: 2 },
+  foot: { color: th.outline2, fontSize: 12, textAlign: "center", marginTop: 24 },
 
-  toast: {
-    position: "absolute", left: 24, right: 24, bottom: 28,
-    backgroundColor: "#23232c", borderRadius: 12, paddingVertical: 12, alignItems: "center",
-  },
-  toastT: { color: "#f4f4f6", fontSize: 13, fontWeight: "600" },
 });

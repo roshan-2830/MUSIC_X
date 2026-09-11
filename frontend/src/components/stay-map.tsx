@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { Image, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Stay } from "../lib/api";
-import { metresBetween, TILE, tileGrid, zoomToFit } from "../lib/slippy";
 
-const ACCENT = "#e8ff47";
+import MapControls from "./map-controls";
+import { metresBetween, TILE, zoomToFit } from "../lib/slippy";
+import { useMapPan } from "../lib/use-map-pan";
+
 const INK = "#17171c";
-const LINE = "#26262f";
 /** The tiles' own paper colour, so the frame matches while they load rather than flashing. */
 const TILE_BG = "#e8e2d9";
 /** Hotel pills. Red is the convention for lodging on a map and it reads at a glance against
@@ -45,6 +49,7 @@ export default function StayMap({
   lat,
   lng,
   venue,
+  showVenue = true,
   stays,
   onPick,
   pickedHotelId,
@@ -53,12 +58,18 @@ export default function StayMap({
   lat: number;
   lng: number;
   venue: string | null;
+  /** False when the map is centred on the HOTELS because the venue's location is unknown.
+   *  The marker is then omitted entirely rather than pinned at the centre — a pin claiming
+   *  to be the venue, sitting at the average of some hotels, is a fabrication. */
+  showVenue?: boolean;
   stays: Stay[];
   /** Tapping a pin says "this is where I'm staying". Omitted, the map stays read-only. */
   onPick?: (s: Stay) => void;
   pickedHotelId?: string | null;
   picking?: boolean;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
 
@@ -74,12 +85,24 @@ export default function StayMap({
   // cluster of hotels next door does not zoom into a single street.
   const furthest = placeable.length ? Math.max(...placeable.map((s) => s.away)) : 600;
   const zoom = zoomToFit(Math.max(furthest * 2.4, 1200), width || 340);
-  const grid = width > 0 ? tileGrid(lat, lng, zoom, width, HEIGHT) : null;
+  // Draggable, via the shared hook — the zoom above is the STARTING fit, and the hook takes
+  // over from there.
+  const map = useMapPan({ lat, lng, zoom, width, height: HEIGHT });
+  const grid = map.grid;
 
   return (
-    <View style={styles.frame} onLayout={onLayout}>
+    <View
+        style={styles.frame}
+        onLayout={onLayout}
+        // The FRAME, not the tile grid: the grid is absolutely positioned and slides as you
+        // pan, so its bounding box is wrong for the wheel-zoom maths and it stops being the
+        // surface under the cursor. The frame is fixed and covers the whole map.
+        {...map.panHandlers}
+        ref={map.webRef}
+      >
       {grid ? (
-        <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}>
+        <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}
+              >
           {grid.tiles.map((t) => (
             <Image key={t.key} source={{ uri: t.url }}
                    style={[styles.tile, { left: t.left, top: t.top }]} />
@@ -124,7 +147,7 @@ export default function StayMap({
           })
         : null}
 
-      {grid ? (
+      {grid && showVenue ? (
         <View style={styles.venueLayer} pointerEvents="none">
           <View style={styles.venuePill}>
             <Ionicons name="musical-notes" size={13} color={INK} />
@@ -134,20 +157,23 @@ export default function StayMap({
         </View>
       ) : null}
 
+      <MapControls map={map} label="hotels" />
       <Text style={styles.attr}>© OpenStreetMap</Text>
       {placeable.length ? (
         <Text style={styles.count}>
-          {onPick ? "Tap a price to set your base" : `${placeable.length} stays near the venue`}
+          {onPick
+            ? "Tap a price to set your base"
+            : `${placeable.length} ${showVenue ? "stays near the venue" : "stays in this area"}`}
         </Text>
       ) : null}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   frame: {
     position: "relative", height: HEIGHT, borderRadius: 14, overflow: "hidden",
-    borderWidth: 1, borderColor: LINE, backgroundColor: TILE_BG, marginTop: 14,
+    borderWidth: 1, borderColor: th.line, backgroundColor: TILE_BG, marginTop: 14,
   },
   grid: { position: "absolute" },
   tile: { position: "absolute", width: TILE, height: TILE },
@@ -176,22 +202,22 @@ const styles = StyleSheet.create({
   },
   venuePill: {
     flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "70%",
-    backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
+    backgroundColor: th.accentFill, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10,
     shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 }, elevation: 6,
   },
   venueText: { color: INK, fontSize: 11, fontWeight: "800", flexShrink: 1 },
   venueTailWrap: { width: 20, height: 8, alignItems: "center", overflow: "hidden", marginTop: -1 },
-  venueTail: { width: 12, height: 12, backgroundColor: ACCENT, transform: [{ rotate: "45deg" }], marginTop: -7 },
+  venueTail: { width: 12, height: 12, backgroundColor: th.accentFill, transform: [{ rotate: "45deg" }], marginTop: -7 },
 
   attr: {
     position: "absolute", right: 6, bottom: 5, zIndex: 6, fontSize: 9,
-    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.75)",
+    color: th.scrim, backgroundColor: "rgba(255,255,255,0.75)",
     paddingVertical: 2, paddingHorizontal: 5, borderRadius: 6, overflow: "hidden",
   },
   count: {
     position: "absolute", left: 6, bottom: 5, zIndex: 6, fontSize: 9,
-    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.75)",
+    color: th.scrim, backgroundColor: "rgba(255,255,255,0.75)",
     paddingVertical: 2, paddingHorizontal: 5, borderRadius: 6, overflow: "hidden",
   },
 });

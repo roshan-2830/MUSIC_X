@@ -24,9 +24,9 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ArtBookItAll, ArtEveryConcert, ArtNeverMiss } from './intro-art';
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 
-const ACCENT = '#e8ff47';
-const MUTED = '#9a9aa6';
 
 const SLIDES = [
   {
@@ -50,6 +50,8 @@ const SLIDES = [
 function FadeUp({ delay, children, style }: {
   delay: number; children: React.ReactNode; style?: any;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const t = useSharedValue(0);
   const reduced = useReducedMotion();
   useEffect(() => {
@@ -67,6 +69,8 @@ function FadeUp({ delay, children, style }: {
 }
 
 function Dot({ active, onPress }: { active: boolean; onPress: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       onPress={onPress}
@@ -79,6 +83,8 @@ function Dot({ active, onPress }: { active: boolean; onPress: () => void }) {
 }
 
 export default function IntroSlides({ onDone }: { onDone: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [i, setI] = useState(0);
   const slide = SLIDES[i];
   const Art = slide.art;
@@ -120,7 +126,7 @@ export default function IntroSlides({ onDone }: { onDone: () => void }) {
               accessibilityLabel="Get started"
             >
               <Text style={styles.ctaText}>Get started</Text>
-              <Ionicons name="arrow-forward" size={18} color="#0b0b0f" />
+              <Ionicons name="arrow-forward" size={18} color={th.accentInk} />
             </Pressable>
           ) : (
             <Pressable
@@ -129,7 +135,7 @@ export default function IntroSlides({ onDone }: { onDone: () => void }) {
               accessibilityRole="button"
               accessibilityLabel="Next"
             >
-              <Ionicons name="chevron-forward" size={24} color="#0b0b0f" />
+              <Ionicons name="chevron-forward" size={24} color={th.accentInk} />
             </Pressable>
           )}
         </View>
@@ -138,10 +144,10 @@ export default function IntroSlides({ onDone }: { onDone: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0b0b0f' },
   top: { alignItems: 'flex-end', paddingHorizontal: 22, paddingTop: 6 },
-  skip: { color: MUTED, fontSize: 14, fontWeight: '700' },
+  skip: { color: th.muted, fontSize: 14, fontWeight: '700' },
 
   stageWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
@@ -150,25 +156,25 @@ const styles = StyleSheet.create({
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#3a3a46' },
   // The active dot widens into a pill rather than just changing colour — the mockup's own
   // cue, and the one that still reads for someone who cannot separate grey from yellow.
-  dotOn: { width: 20, backgroundColor: ACCENT },
+  dotOn: { width: 20, backgroundColor: th.accentFill },
 
   title: {
     color: '#f4f4f6', fontSize: 27, fontWeight: '800', textAlign: 'center',
     lineHeight: 36, letterSpacing: -0.3,
   },
   sub: {
-    color: MUTED, fontSize: 15, textAlign: 'center', lineHeight: 22,
+    color: th.muted, fontSize: 15, textAlign: 'center', lineHeight: 22,
     marginTop: 10, paddingHorizontal: 8,
   },
 
   action: { marginTop: 26, minHeight: 54, justifyContent: 'center' },
   fab: {
-    width: 54, height: 54, borderRadius: 27, backgroundColor: ACCENT,
+    width: 54, height: 54, borderRadius: 27, backgroundColor: th.accentFill,
     alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end',
   },
   cta: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    height: 54, borderRadius: 27, backgroundColor: ACCENT,
+    height: 54, borderRadius: 27, backgroundColor: th.accentFill,
   },
   ctaText: { color: '#0b0b0f', fontSize: 16, fontWeight: '800' },
 });

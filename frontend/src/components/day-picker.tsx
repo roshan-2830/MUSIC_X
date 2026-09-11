@@ -18,8 +18,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 const DOW = ["M", "T", "W", "T", "F", "S", "S"];
 const MONTHS = 14;
 
@@ -52,6 +53,8 @@ export default function DayPicker({
   onClose: () => void;
   onChange: (day: string | null) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [picked, setPicked] = useState<string | null>(value);
 
   // The modal stays mounted between openings, so without this it would reopen holding the
@@ -78,7 +81,7 @@ export default function DayPicker({
       <SafeAreaView style={styles.root} edges={["top"]}>
         <View style={styles.head}>
           <Pressable onPress={onClose} hitSlop={10} style={styles.back}>
-            <Ionicons name="chevron-back" size={22} color="#f4f4f6" />
+            <Ionicons name="chevron-back" size={22} color={th.text} />
           </Pressable>
           <Text style={styles.title}>{title}</Text>
           {allowClear ? (
@@ -133,25 +136,25 @@ export default function DayPicker({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   head: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 14, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: "#1c1c24",
+    borderBottomWidth: 1, borderBottomColor: th.line2,
   },
   back: { width: 40 },
-  title: { color: "#f4f4f6", fontSize: 16, fontWeight: "800" },
-  clear: { color: MUTED, fontSize: 13, fontWeight: "700", width: 40, textAlign: "right" },
+  title: { color: th.text, fontSize: 16, fontWeight: "800" },
+  clear: { color: th.muted, fontSize: 13, fontWeight: "700", width: 40, textAlign: "right" },
 
   // Capped and centred: cells are a seventh of the width and square, so on a desktop browser
   // an uncapped grid gives 200px-tall days.
   dow: { flexDirection: "row", paddingHorizontal: 10, paddingTop: 10, paddingBottom: 4,
          width: "100%", maxWidth: 420, alignSelf: "center" },
-  dowT: { flex: 1, textAlign: "center", color: MUTED, fontSize: 11, fontWeight: "800" },
+  dowT: { flex: 1, textAlign: "center", color: th.muted, fontSize: 11, fontWeight: "800" },
 
   month: {
-    color: "#f4f4f6", fontSize: 14, fontWeight: "800",
+    color: th.text, fontSize: 14, fontWeight: "800",
     paddingHorizontal: 16, marginTop: 12, marginBottom: 6,
     width: "100%", maxWidth: 420, alignSelf: "center",
   },
@@ -159,14 +162,14 @@ const styles = StyleSheet.create({
           width: "100%", maxWidth: 420, alignSelf: "center" },
   cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center" },
   day: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
-  dayOn: { backgroundColor: ACCENT },
-  dayT: { color: "#d6d6de", fontSize: 14, fontWeight: "600" },
-  dayTOn: { color: "#101204", fontWeight: "900" },
+  dayOn: { backgroundColor: th.accentFill },
+  dayT: { color: th.text2, fontSize: 14, fontWeight: "600" },
+  dayTOn: { color: th.accentInk, fontWeight: "900" },
 
-  foot: { padding: 14, borderTopWidth: 1, borderTopColor: "#1c1c24" },
+  foot: { padding: 14, borderTopWidth: 1, borderTopColor: th.line2 },
   footInner: { width: "100%", maxWidth: 420, alignSelf: "center" },
-  btn: { backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
-  btnOff: { backgroundColor: "#23232c" },
-  btnT: { color: "#101204", fontSize: 15, fontWeight: "900" },
-  btnTOff: { color: MUTED },
+  btn: { backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
+  btnOff: { backgroundColor: th.panel3 },
+  btnT: { color: th.accentInk, fontSize: 15, fontWeight: "900" },
+  btnTOff: { color: th.muted },
 });

@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import (
-    CheckConstraint, Column, String, Text, Boolean, DateTime, ForeignKey, Numeric, Uuid,
+    CheckConstraint, Column, String, Boolean, DateTime, ForeignKey, Numeric, Uuid,
     func, text,
     UniqueConstraint,
 )
@@ -24,7 +24,6 @@ class CalendarEntry(Base):
     state = Column(String, nullable=False, server_default="interested")   # interested | planning | confirmed | attended
     is_suggestion = Column(Boolean, nullable=False, server_default=text("false"))  # "dotted" suggested, not yet actively saved
     reminder_level = Column(String, nullable=False, server_default="normal")       # minimal | normal | high
-    note = Column(Text, nullable=True)
 
     booked = Column(Boolean, nullable=False, server_default=text("false"))
     booked_via_link = Column(Boolean, nullable=False, server_default=text("false"))

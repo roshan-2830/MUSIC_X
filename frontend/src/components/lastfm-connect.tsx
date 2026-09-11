@@ -7,9 +7,9 @@ import {
 import {
   connectLastfm, disconnectLastfm, getLastfmStatus, LastfmStatus,
 } from "../lib/api";
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 /** Connect a Last.fm account so recommendations are built on real listening.
  *
@@ -17,6 +17,8 @@ const MUTED = "#9a9aa6";
  *  once it is. Deliberately states what we take and what we do not: Last.fm profiles are
  *  public, so this needs a username and no password, and we never write anything back. */
 export default function LastfmConnect({ onChanged }: { onChanged?: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [status, setStatus] = useState<LastfmStatus>({ connected: false });
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("");
@@ -70,11 +72,11 @@ export default function LastfmConnect({ onChanged }: { onChanged?: () => void })
   return (
     <>
       <Pressable style={styles.invite} onPress={() => setOpen(true)}>
-        <Ionicons name="musical-notes" size={16} color={ACCENT} />
+        <Ionicons name="musical-notes" size={16} color={th.accent} />
         <Text style={styles.inviteText}>
           Connect Last.fm to build this from what you actually play
         </Text>
-        <Ionicons name="chevron-forward" size={15} color={ACCENT} />
+        <Ionicons name="chevron-forward" size={15} color={th.accent} />
       </Pressable>
       {done ? <Text style={styles.done}>{done}</Text> : null}
       {sheet()}
@@ -89,14 +91,14 @@ export default function LastfmConnect({ onChanged }: { onChanged?: () => void })
           <View style={styles.sheet}>
             <Text style={styles.sheetTitle}>Your Last.fm username</Text>
             <Text style={styles.sheetSub}>
-              The name in your profile URL — last.fm/user/<Text style={{ color: ACCENT }}>yourname</Text>
+              The name in your profile URL — last.fm/user/<Text style={{ color: th.accent }}>yourname</Text>
             </Text>
             <TextInput
               style={styles.input}
               value={username}
               onChangeText={(t) => { setUsername(t); setError(null); }}
               placeholder="yourname"
-              placeholderTextColor={MUTED}
+              placeholderTextColor={th.muted}
               autoCapitalize="none"
               autoCorrect={false}
               autoFocus
@@ -105,7 +107,7 @@ export default function LastfmConnect({ onChanged }: { onChanged?: () => void })
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable style={[styles.cta, busy && { opacity: 0.6 }]} onPress={submit} disabled={busy}>
               {busy ? (
-                <ActivityIndicator color="#0b0b0f" size="small" />
+                <ActivityIndicator color={th.accentInk} size="small" />
               ) : (
                 <Text style={styles.ctaText}>Connect</Text>
               )}
@@ -117,31 +119,31 @@ export default function LastfmConnect({ onChanged }: { onChanged?: () => void })
   }
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   invite: {
     flexDirection: "row", alignItems: "center", gap: 9,
-    backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1,
     borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14,
     marginHorizontal: 16, marginTop: 4,
   },
-  inviteText: { color: "#e2e2e8", fontSize: 13, flex: 1, lineHeight: 18 },
+  inviteText: { color: th.text2, fontSize: 13, flex: 1, lineHeight: 18 },
   cta: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 12, marginTop: 14,
+    backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 12, marginTop: 14,
   },
-  ctaText: { color: "#0b0b0f", fontSize: 14.5, fontWeight: "800" },
-  done: { color: ACCENT, fontSize: 12.5, marginTop: 10, marginHorizontal: 16 },
+  ctaText: { color: th.accentInk, fontSize: 14.5, fontWeight: "800" },
+  done: { color: th.accent, fontSize: 12.5, marginTop: 10, marginHorizontal: 16 },
   sheetWrap: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)" },
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: th.scrim },
   sheet: {
-    backgroundColor: "#14141b", borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 20, paddingBottom: 34, borderTopColor: "#26262f", borderTopWidth: 1,
+    backgroundColor: th.panel, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    padding: 20, paddingBottom: 34, borderTopColor: th.line, borderTopWidth: 1,
   },
-  sheetTitle: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
-  sheetSub: { color: MUTED, fontSize: 13, marginTop: 6, lineHeight: 19 },
+  sheetTitle: { color: th.text, fontSize: 18, fontWeight: "800" },
+  sheetSub: { color: th.muted, fontSize: 13, marginTop: 6, lineHeight: 19 },
   input: {
-    backgroundColor: "#0b0b0f", borderColor: "#2a2a38", borderWidth: 1, borderRadius: 12,
-    color: "#f4f4f6", fontSize: 16, paddingHorizontal: 14, paddingVertical: 12, marginTop: 14,
+    backgroundColor: th.bg, borderColor: th.line3, borderWidth: 1, borderRadius: 12,
+    color: th.text, fontSize: 16, paddingHorizontal: 14, paddingVertical: 12, marginTop: 14,
   },
-  error: { color: "#ff6b6b", fontSize: 12.5, marginTop: 10, lineHeight: 18 },
+  error: { color: th.danger, fontSize: 12.5, marginTop: 10, lineHeight: 18 },
 });

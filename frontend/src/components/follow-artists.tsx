@@ -12,6 +12,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import {
   ArtistSearchResult,
   FollowedArtist,
@@ -23,8 +26,6 @@ import {
 import { audienceLine } from "../lib/format";
 
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 /**
  * The "follow your artists" screen. Reusable: pass `onDone` to show the onboarding
@@ -37,6 +38,8 @@ export default function FollowArtists({
   onDone?: () => void;
   title?: string;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<ArtistSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -129,20 +132,20 @@ export default function FollowArtists({
       </View>
 
       <View style={styles.searchbar}>
-        <Ionicons name="search" size={18} color={MUTED} />
+        <Ionicons name="search" size={18} color={th.muted} />
         <TextInput
           style={styles.input}
           value={q}
           onChangeText={setQ}
           placeholder="Search artists — Coldplay, Arijit Singh…"
-          placeholderTextColor={MUTED}
+          placeholderTextColor={th.muted}
           autoCorrect={false}
           autoCapitalize="none"
         />
       </View>
 
       {loading ? (
-        <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
+        <ActivityIndicator color={th.accent} style={{ marginTop: 24 }} />
       ) : q.trim().length < 2 ? (
         mine.length ? (
           <FlatList
@@ -246,59 +249,59 @@ export default function FollowArtists({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f", paddingHorizontal: 20 },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg, paddingHorizontal: 20 },
   header: { paddingTop: 8, paddingBottom: 14 },
-  logo: { color: "#f4f4f6", fontSize: 20, fontWeight: "800", letterSpacing: 1, marginBottom: 14 },
-  accent: { color: ACCENT },
-  title: { color: "#f4f4f6", fontSize: 27, fontWeight: "800", letterSpacing: -0.5 },
-  sub: { color: MUTED, fontSize: 14, marginTop: 8, lineHeight: 20 },
+  logo: { color: th.text, fontSize: 20, fontWeight: "800", letterSpacing: 1, marginBottom: 14 },
+  accent: { color: th.accent },
+  title: { color: th.text, fontSize: 27, fontWeight: "800", letterSpacing: -0.5 },
+  sub: { color: th.muted, fontSize: 14, marginTop: 8, lineHeight: 20 },
   searchbar: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#14141b",
+    backgroundColor: th.panel,
     borderWidth: 1,
-    borderColor: "#26262f",
+    borderColor: th.line,
     borderRadius: 12,
     paddingHorizontal: 14,
     height: 48,
     marginBottom: 6,
   },
-  input: { flex: 1, color: "#f4f4f6", fontSize: 15, padding: 0 },
+  input: { flex: 1, color: th.text, fontSize: 15, padding: 0 },
   groupHead: {
-    color: MUTED, fontSize: 12, fontWeight: "800", letterSpacing: 0.8,
+    color: th.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.8,
     textTransform: "uppercase", paddingHorizontal: 20, paddingBottom: 8, paddingTop: 4,
   },
-  hint: { color: MUTED, fontSize: 14, textAlign: "center", paddingVertical: 28, lineHeight: 20 },
+  hint: { color: th.muted, fontSize: 14, textAlign: "center", paddingVertical: 28, lineHeight: 20 },
   row: {
     flexDirection: "row",
     alignItems: "center",
     gap: 13,
     paddingVertical: 9,
   },
-  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: "#1b1b24" },
+  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: th.panel2 },
   avatarFallback: { alignItems: "center", justifyContent: "center" },
-  avatarInitial: { color: MUTED, fontSize: 20, fontWeight: "800" },
-  name: { color: "#f4f4f6", fontSize: 16, fontWeight: "700" },
-  audienceText: { color: MUTED, fontSize: 12, fontWeight: "600", marginTop: 2 },
+  avatarInitial: { color: th.muted, fontSize: 20, fontWeight: "800" },
+  name: { color: th.text, fontSize: 16, fontWeight: "700" },
+  audienceText: { color: th.muted, fontSize: 12, fontWeight: "600", marginTop: 2 },
   followBtn: {
     borderRadius: 999,
     paddingHorizontal: 18,
     paddingVertical: 8,
-    backgroundColor: ACCENT,
+    backgroundColor: th.accentFill,
   },
-  followingBtn: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#3a3a46" },
-  followText: { color: "#0b0b0f", fontSize: 14, fontWeight: "800" },
-  followingText: { color: MUTED, fontSize: 14, fontWeight: "700" },
+  followingBtn: { backgroundColor: "transparent", borderWidth: 1, borderColor: th.outline },
+  followText: { color: th.accentInk, fontSize: 14, fontWeight: "800" },
+  followingText: { color: th.muted, fontSize: 14, fontWeight: "700" },
   footer: { paddingTop: 10, paddingBottom: 6, gap: 12, alignItems: "center" },
   cta: {
     width: "100%",
-    backgroundColor: ACCENT,
+    backgroundColor: th.accentFill,
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: "center",
   },
-  ctaText: { color: "#0b0b0f", fontSize: 16, fontWeight: "800" },
-  skip: { color: MUTED, fontSize: 14, fontWeight: "700" },
+  ctaText: { color: th.accentInk, fontSize: 16, fontWeight: "800" },
+  skip: { color: th.muted, fontSize: 14, fontWeight: "700" },
 });

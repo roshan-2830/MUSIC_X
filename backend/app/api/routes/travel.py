@@ -31,7 +31,7 @@ from app.models.venue import Venue
 from app.models.venue_place import VenuePlace
 from app.schemas.travel import (Flight, NearbyPlaces, Place, Stay, StayBase, TravelContext,
                                 TravelOptions)
-from app.services import nearby, tripsure
+from app.services import nearby, plan_entry, tripsure
 
 router = APIRouter(prefix="/events", tags=["travel"])
 
@@ -575,6 +575,11 @@ def set_stay_base(
         raise HTTPException(
             status_code=502,
             detail="We couldn't get this hotel's details from our travel partner just now.")
+
+    # Choosing where to sleep is an act of planning, and plan state is derived from a
+    # calendar entry — so without this the show has no state at all and the stepper stays
+    # blank. Booking a bed says more about intent than tapping a bookmark does.
+    plan_entry.ensure_saved(db, _uuid.UUID(user_id), event_id)
 
     row = (db.query(HotelBooking)
              .filter(HotelBooking.user_id == _uuid.UUID(user_id),

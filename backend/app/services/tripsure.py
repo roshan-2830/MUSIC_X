@@ -341,7 +341,17 @@ def search_hotels(location: dict, check_in: str, check_out: str, *, adults: int 
             "lat": coords.get("lat") or location.get("lat"),
             "lon": coords.get("lon") or location.get("lon"),
         },
-        "state": location.get("state"),
+            # Tripsure REQUIRES state ("When mapSearch is false, city, state, country name and
+            # country code are required") but its own autosuggest does not always return one:
+            # measured 2026-09-10, Dublin comes back with state="" and EVERY city comes back with
+            # countryCode=None. Sending the empty string had the whole listing rejected as Bad
+            # Request, which the app reported as "we couldn't reach our travel partner" — a
+            # network story for what was really a missing field.
+            #
+            # The city's own name satisfies the check and changes nothing about WHERE it searches:
+            # the locationSuggestion id and coordinates above are what locate it. Verified —
+            # Dublin: 0 hotels with state="", 176 with this. Cities that HAVE a state are untouched.
+            "state": location.get("state") or location.get("city") or location.get("name"),
         "countryName": location.get("country"),
         "circularSearch": False,
         "nationalityCode": "IN",

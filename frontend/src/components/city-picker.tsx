@@ -20,9 +20,9 @@ import {
   searchGlobalCities,
 } from "../lib/api";
 import { detectCurrentCity } from "../lib/location";
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 function countryFlag(cc: string) {
   if (!cc || cc.length !== 2) return "";
@@ -38,6 +38,8 @@ export default function CityPicker({
   onClose: () => void;
   onSelect: (city: City) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [q, setQ] = useState("");
   const [appCities, setAppCities] = useState<CityWithShows[]>([]);
   const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
@@ -100,27 +102,27 @@ export default function CityPicker({
           <View style={styles.headerRow}>
             <Text style={styles.title}>Your city</Text>
             <Pressable onPress={onClose} hitSlop={8}>
-              <Ionicons name="close" size={22} color={MUTED} />
+              <Ionicons name="close" size={22} color={th.muted} />
             </Pressable>
           </View>
 
           <Pressable style={styles.locBtn} onPress={useLocation} disabled={locating}>
             {locating ? (
-              <ActivityIndicator color={ACCENT} size="small" />
+              <ActivityIndicator color={th.accent} size="small" />
             ) : (
-              <Ionicons name="navigate" size={16} color={ACCENT} />
+              <Ionicons name="navigate" size={16} color={th.accent} />
             )}
             <Text style={styles.locText}>{locating ? "Finding you…" : "Use my current location"}</Text>
           </Pressable>
 
           <View style={styles.searchbar}>
-            <Ionicons name="search" size={18} color={MUTED} />
+            <Ionicons name="search" size={18} color={th.muted} />
             <TextInput
               style={styles.input}
               value={q}
               onChangeText={setQ}
               placeholder="Search any city — London, Bangalore…"
-              placeholderTextColor={MUTED}
+              placeholderTextColor={th.muted}
               autoFocus
               autoCorrect={false}
             />
@@ -128,7 +130,7 @@ export default function CityPicker({
           {msg ? <Text style={styles.msg}>{msg}</Text> : null}
 
           {loading ? (
-            <ActivityIndicator color={ACCENT} style={{ marginTop: 24 }} />
+            <ActivityIndicator color={th.accent} style={{ marginTop: 24 }} />
           ) : query.length < 2 ? (
             <Text style={styles.empty}>Type your city name to find shows near you.</Text>
           ) : (
@@ -169,50 +171,50 @@ export default function CityPicker({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   root: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)" },
+  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: th.scrim2 },
   sheet: {
-    backgroundColor: "#14141b",
+    backgroundColor: th.panel,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 30,
     borderTopWidth: 1,
-    borderColor: "#26262f",
+    borderColor: th.line,
   },
-  handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: "#3a3a46", marginBottom: 12 },
+  handle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: th.outline, marginBottom: 12 },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  title: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
-  locBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#1b1b24", borderColor: "#26262f", borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 10 },
-  locText: { color: ACCENT, fontSize: 14, fontWeight: "700" },
+  title: { color: th.text, fontSize: 18, fontWeight: "800" },
+  locBtn: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: th.panel2, borderColor: th.line, borderWidth: 1, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: 10 },
+  locText: { color: th.accent, fontSize: 14, fontWeight: "700" },
   searchbar: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    backgroundColor: "#0b0b0f",
+    backgroundColor: th.bg,
     borderWidth: 1,
-    borderColor: "#26262f",
+    borderColor: th.line,
     borderRadius: 12,
     paddingHorizontal: 14,
     height: 46,
     marginBottom: 8,
   },
-  input: { flex: 1, color: "#f4f4f6", fontSize: 15, padding: 0 },
-  msg: { color: MUTED, fontSize: 12, marginBottom: 6, paddingHorizontal: 2 },
+  input: { flex: 1, color: th.text, fontSize: 15, padding: 0 },
+  msg: { color: th.muted, fontSize: 12, marginBottom: 6, paddingHorizontal: 2 },
   row: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: "#1c1c24",
+    borderBottomColor: th.line2,
   },
-  rowText: { color: "#f4f4f6", fontSize: 16, fontWeight: "600" },
-  rowCountry: { color: MUTED, fontSize: 13, fontWeight: "600" },
-  showsBadge: { backgroundColor: "rgba(232,255,71,0.14)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  showsBadgeText: { color: ACCENT, fontSize: 12, fontWeight: "800" },
-  groupLabel: { color: MUTED, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 16, marginBottom: 2, paddingHorizontal: 2 },
-  empty: { color: MUTED, fontSize: 14, textAlign: "center", paddingVertical: 24, lineHeight: 20 },
+  rowText: { color: th.text, fontSize: 16, fontWeight: "600" },
+  rowCountry: { color: th.muted, fontSize: 13, fontWeight: "600" },
+  showsBadge: { backgroundColor: th.accentTint14, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  showsBadgeText: { color: th.accent, fontSize: 12, fontWeight: "800" },
+  groupLabel: { color: th.muted, fontSize: 11, fontWeight: "800", textTransform: "uppercase", letterSpacing: 0.6, marginTop: 16, marginBottom: 2, paddingHorizontal: 2 },
+  empty: { color: th.muted, fontSize: 14, textAlign: "center", paddingVertical: 24, lineHeight: 20 },
 });

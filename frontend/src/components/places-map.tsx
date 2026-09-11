@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { Image, LayoutChangeEvent, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Place } from "../lib/api";
-import { metresBetween, TILE, tileGrid, zoomToFit } from "../lib/slippy";
+import { metresBetween, TILE, zoomToFit } from "../lib/slippy";
+import { useMapPan } from "../lib/use-map-pan";
 
-const ACCENT = "#e8ff47";
+import MapControls from "./map-controls";
+
 const INK = "#17171c";
-const LINE = "#26262f";
 /** The tiles' own paper colour, so the frame matches while they load rather than flashing. */
 const TILE_BG = "#e8e2d9";
 /** Height follows width rather than being fixed. At phone width 260px is a good frame; on a
@@ -51,6 +55,8 @@ export default function PlacesMap({
   venue: string | null;
   places: Place[];
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
   const height = heightFor(width);
@@ -66,12 +72,21 @@ export default function PlacesMap({
 
   const furthest = placeable.length ? Math.max(...placeable.map((p) => p.away)) : 500;
   const zoom = zoomToFit(Math.max(furthest * 2.4, 900), width || 340);
-  const grid = width > 0 ? tileGrid(lat, lng, zoom, width, height) : null;
+  // Draggable, via the shared hook — the zoom above is the STARTING fit, and the hook takes
+  // over from there.
+  const map = useMapPan({ lat, lng, zoom, width, height: height });
+  const grid = map.grid;
 
   return (
-    <View style={[styles.frame, { height }]} onLayout={onLayout}>
+    <View
+      style={[styles.frame, { height }]}
+      onLayout={onLayout}
+      {...map.panHandlers}
+      ref={map.webRef}
+    >
       {grid ? (
-        <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}>
+        <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}
+              >
           {grid.tiles.map((t) => (
             <Image key={t.key} source={{ uri: t.url }}
                    style={[styles.tile, { left: t.left, top: t.top }]} />
@@ -109,6 +124,7 @@ export default function PlacesMap({
         </View>
       ) : null}
 
+      <MapControls map={map} label="venue" />
       <Text style={styles.attr}>© OpenStreetMap</Text>
       {placeable.length ? (
         <View style={styles.legend}>
@@ -122,10 +138,10 @@ export default function PlacesMap({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   frame: {
     position: "relative", borderRadius: 14, overflow: "hidden",
-    borderWidth: 1, borderColor: LINE, backgroundColor: TILE_BG, marginTop: 4,
+    borderWidth: 1, borderColor: th.line, backgroundColor: TILE_BG, marginTop: 4,
   },
   grid: { position: "absolute" },
   tile: { position: "absolute", width: TILE, height: TILE },
@@ -148,17 +164,17 @@ const styles = StyleSheet.create({
   },
   venuePill: {
     flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "72%",
-    backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 11,
+    backgroundColor: th.accentFill, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 11,
     shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 8,
     shadowOffset: { width: 0, height: 3 }, elevation: 6,
   },
   venueText: { color: INK, fontSize: 11.5, fontWeight: "800", flexShrink: 1 },
   venueTailWrap: { width: 20, height: 8, alignItems: "center", overflow: "hidden", marginTop: -1 },
-  venueTail: { width: 12, height: 12, backgroundColor: ACCENT, transform: [{ rotate: "45deg" }], marginTop: -7 },
+  venueTail: { width: 12, height: 12, backgroundColor: th.accentFill, transform: [{ rotate: "45deg" }], marginTop: -7 },
 
   attr: {
     position: "absolute", right: 6, bottom: 5, zIndex: 6, fontSize: 9,
-    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.75)",
+    color: th.scrim, backgroundColor: "rgba(255,255,255,0.75)",
     paddingVertical: 2, paddingHorizontal: 5, borderRadius: 6, overflow: "hidden",
   },
   legend: {

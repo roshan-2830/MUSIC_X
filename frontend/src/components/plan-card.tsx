@@ -6,15 +6,11 @@ import { Ionicons } from "@expo/vector-icons";
 
 import {
   clearTicket, declareTicket, getPlan, markAttended, markMissed, pasteTicket, Plan, PlanStep,
-  setPlanNote, setPlanReminder,
+  setPlanReminder,
 } from "../lib/api";
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const CARD = "#14141b";
-const GOOD = "#7ef0b2";
-const INK = "#101204";
 
 /** What each level actually sends, matching the server's own table in services/reminders.py.
  *
@@ -39,6 +35,8 @@ const REMINDERS: { key: "minimal" | "normal" | "high"; label: string; note: stri
  *  with the node it leads to.
  */
 function Step({ step, first }: { step: PlanStep; first: boolean }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const on = step.reached || step.current;
   return (
     <View style={styles.step}>
@@ -49,9 +47,9 @@ function Step({ step, first }: { step: PlanStep; first: boolean }) {
         step.current && styles.nodeNow,
         step.locked && !on && styles.nodeLocked,
       ]}>
-        {step.reached ? <Ionicons name="checkmark" size={15} color={INK} /> : null}
+        {step.reached ? <Ionicons name="checkmark" size={15} color={th.accentInk} /> : null}
         {step.current ? <View style={styles.dot} /> : null}
-        {step.locked && !on ? <Ionicons name="lock-closed" size={10} color={MUTED} /> : null}
+        {step.locked && !on ? <Ionicons name="lock-closed" size={10} color={th.muted} /> : null}
       </View>
       <Text style={[
         styles.stepLabel,
@@ -68,7 +66,7 @@ function Step({ step, first }: { step: PlanStep; first: boolean }) {
  * "Your plan" — the four calendar states of PRD F3, and the things that move them.
  *
  * Three of the four move on their own: saving gives Interested; picking a hotel, inviting
- * somebody or writing a note gives Planning; the show happening with a ticket on record gives
+ * somebody gives Planning; the show happening with a ticket on record gives
  * Attended. Only the ticket needs telling, and only because a purchase happens on a seller's
  * site that never reports back to us — so it is asked for rather than assumed.
  *
@@ -87,11 +85,11 @@ export default function PlanCard({
    *  exactly the stale "Save this show to start planning" this replaced. */
   onSaveRequested: () => Promise<void> | void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [noteText, setNoteText] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -100,7 +98,6 @@ export default function PlanCard({
   const load = useCallback(async () => {
     const p = await getPlan(eventId);
     setPlan(p);
-    setNoteText(p?.note ?? "");
     setLoading(false);
   }, [eventId]);
 
@@ -147,7 +144,7 @@ export default function PlanCard({
     return (
       <View style={styles.card}>
         <Text style={styles.h}>Your plan</Text>
-        <View style={styles.state}><ActivityIndicator color={ACCENT} /></View>
+        <View style={styles.state}><ActivityIndicator color={th.accent} /></View>
       </View>
     );
   }
@@ -165,8 +162,8 @@ export default function PlanCard({
       </View>
 
       <View style={styles.guide}>
-        <View style={[styles.guideDot, plan.state === "confirmed" && { backgroundColor: GOOD },
-                      plan.state === "attended" && { backgroundColor: ACCENT }]} />
+        <View style={[styles.guideDot, plan.state === "confirmed" && { backgroundColor: th.success },
+                      plan.state === "attended" && { backgroundColor: th.accentFill }]} />
         <View style={{ flex: 1 }}>
           <Text style={styles.guideHead}>{plan.headline}</Text>
           {plan.hint ? <Text style={styles.guideHint}>{plan.hint}</Text> : null}
@@ -189,9 +186,9 @@ export default function PlanCard({
             }
           }}
         >
-          {busy ? <ActivityIndicator color={INK} /> : (
+          {busy ? <ActivityIndicator color={th.accentInk} /> : (
             <>
-              <Ionicons name="bookmark" size={15} color={INK} />
+              <Ionicons name="bookmark" size={15} color={th.accentInk} />
               <Text style={styles.primaryText}>Save this show to start planning</Text>
             </>
           )}
@@ -204,7 +201,7 @@ export default function PlanCard({
           {!plan.ticket ? (
             <View style={styles.block}>
               <View style={styles.blockHead}>
-                <Ionicons name="ticket-outline" size={14} color={ACCENT} />
+                <Ionicons name="ticket-outline" size={14} color={th.accent} />
                 <Text style={styles.blockTitle}>YOUR TICKET</Text>
               </View>
               <Text style={styles.blockNote}>
@@ -215,7 +212,7 @@ export default function PlanCard({
               {!pasteOpen ? (
                 <>
                   <Pressable style={styles.primary} onPress={() => setPasteOpen(true)}>
-                    <Ionicons name="clipboard-outline" size={15} color={INK} />
+                    <Ionicons name="clipboard-outline" size={15} color={th.accentInk} />
                     <Text style={styles.primaryText}>Paste my confirmation</Text>
                   </Pressable>
                   <Pressable style={styles.ghost} onPress={() => apply(() => declareTicket(eventId))}
@@ -228,7 +225,7 @@ export default function PlanCard({
                   <TextInput
                     style={styles.paste}
                     placeholder={"Paste the whole confirmation email here…"}
-                    placeholderTextColor={MUTED}
+                    placeholderTextColor={th.muted}
                     value={pasteText}
                     onChangeText={setPasteText}
                     multiline
@@ -247,7 +244,7 @@ export default function PlanCard({
                     </Pressable>
                     <Pressable style={[styles.primary, { flex: 1, marginTop: 0 }]}
                                onPress={submitPaste} disabled={busy}>
-                      {busy ? <ActivityIndicator color={INK} />
+                      {busy ? <ActivityIndicator color={th.accentInk} />
                             : <Text style={styles.primaryText}>Read it</Text>}
                     </Pressable>
                   </View>
@@ -257,8 +254,8 @@ export default function PlanCard({
           ) : (
             <View style={styles.block}>
               <View style={styles.blockHead}>
-                <Ionicons name="checkmark-circle" size={14} color={GOOD} />
-                <Text style={[styles.blockTitle, { color: GOOD }]}>TICKET SAVED</Text>
+                <Ionicons name="checkmark-circle" size={14} color={th.success} />
+                <Text style={[styles.blockTitle, { color: th.success }]}>TICKET SAVED</Text>
               </View>
               <Text style={styles.ticketLine}>
                 {[plan.ticket.provider, plan.ticket.reference && `ref ${plan.ticket.reference}`]
@@ -289,7 +286,7 @@ export default function PlanCard({
           {plan.past && plan.state !== "attended" ? (
             <Pressable style={styles.primary} onPress={() => apply(() => markAttended(eventId))}
                        disabled={busy}>
-              <Ionicons name="checkmark-done" size={15} color={INK} />
+              <Ionicons name="checkmark-done" size={15} color={th.accentInk} />
               <Text style={styles.primaryText}>I was there</Text>
             </Pressable>
           ) : null}
@@ -304,7 +301,7 @@ export default function PlanCard({
           {/* ── reminders ───────────────────────────────────────────────────────── */}
           <View style={styles.block}>
             <View style={styles.blockHead}>
-              <Ionicons name="notifications-outline" size={14} color={ACCENT} />
+              <Ionicons name="notifications-outline" size={14} color={th.accent} />
               <Text style={styles.blockTitle}>REMINDERS</Text>
             </View>
             <View style={styles.seg}>
@@ -322,60 +319,17 @@ export default function PlanCard({
             <Text style={styles.blockNote}>{level.note}</Text>
           </View>
 
-          {/* ── notes ───────────────────────────────────────────────────────────── */}
-          <View style={styles.block}>
-            <View style={styles.blockHead}>
-              <Ionicons name="chatbubble-outline" size={14} color={ACCENT} />
-              <Text style={styles.blockTitle}>YOUR NOTES</Text>
-            </View>
-            {noteOpen ? (
-              <>
-                <TextInput
-                  style={styles.noteInput}
-                  placeholder="Anything you want to remember…"
-                  placeholderTextColor={MUTED}
-                  value={noteText}
-                  onChangeText={setNoteText}
-                  multiline
-                  maxLength={500}
-                  textAlignVertical="top"
-                />
-                <View style={styles.row}>
-                  <Pressable style={[styles.ghost, { flex: 1, marginTop: 0 }]}
-                             onPress={() => { setNoteOpen(false); setNoteText(plan.note ?? ""); }}>
-                    <Text style={styles.ghostText}>Cancel</Text>
-                  </Pressable>
-                  <Pressable style={[styles.primary, { flex: 1, marginTop: 0 }]}
-                             onPress={async () => {
-                               await apply(() => setPlanNote(eventId, noteText));
-                               setNoteOpen(false);
-                             }}
-                             disabled={busy}>
-                    <Text style={styles.primaryText}>Save note</Text>
-                  </Pressable>
-                </View>
-              </>
-            ) : (
-              <>
-                {plan.note ? <Text style={styles.noteBody}>{plan.note}</Text> : null}
-                <Pressable style={styles.noteBtn} onPress={() => setNoteOpen(true)}>
-                  <Ionicons name={plan.note ? "create-outline" : "add"} size={14} color={ACCENT} />
-                  <Text style={styles.noteBtnText}>{plan.note ? "Edit note" : "Add a note"}</Text>
-                </Pressable>
-              </>
-            )}
-          </View>
 
           {message ? (
-            <View style={[styles.flash, { borderColor: "rgba(126,240,178,0.4)" }]}>
-              <Ionicons name="checkmark-circle" size={14} color={GOOD} />
-              <Text style={[styles.flashText, { color: GOOD }]}>{message}</Text>
+            <View style={[styles.flash, { borderColor: alpha(th.success, 0.4) }]}>
+              <Ionicons name="checkmark-circle" size={14} color={th.success} />
+              <Text style={[styles.flashText, { color: th.success }]}>{message}</Text>
             </View>
           ) : null}
           {problem ? (
-            <View style={[styles.flash, { borderColor: "rgba(255,122,107,0.4)" }]}>
-              <Ionicons name="alert-circle" size={14} color="#ff7a6b" />
-              <Text style={[styles.flashText, { color: "#ff7a6b" }]}>{problem}</Text>
+            <View style={[styles.flash, { borderColor: alpha(th.danger2, 0.4) }]}>
+              <Ionicons name="alert-circle" size={14} color={th.danger2} />
+              <Text style={[styles.flashText, { color: th.danger2 }]}>{problem}</Text>
             </View>
           ) : null}
         </>
@@ -384,78 +338,70 @@ export default function PlanCard({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   quiet: { alignItems: "center", paddingVertical: 10, marginTop: 4 },
-  quietText: { color: "#6c6c78", fontSize: 12, textDecorationLine: "underline" },
+  quietText: { color: th.faint2, fontSize: 12, textDecorationLine: "underline" },
   card: {
-    backgroundColor: CARD, borderColor: LINE, borderWidth: 1, borderRadius: 16,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 16,
     padding: 16, marginTop: 18,
   },
-  h: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
-  sub: { color: MUTED, fontSize: 13, marginTop: 3, marginBottom: 20, lineHeight: 18 },
+  h: { color: th.text, fontSize: 17, fontWeight: "800" },
+  sub: { color: th.muted, fontSize: 13, marginTop: 3, marginBottom: 20, lineHeight: 18 },
 
   rail: { flexDirection: "row" },
   step: { flex: 1, alignItems: "center" },
   // The connector reaches LEFT from its own node, so each step owns the line that leads to it.
   conn: {
     position: "absolute", top: 15, right: "50%", left: -8, height: 2,
-    backgroundColor: LINE,
+    backgroundColor: th.line,
   },
-  connOn: { backgroundColor: ACCENT },
+  connOn: { backgroundColor: th.accentFill },
   conn0: { height: 0 },
   node: {
-    width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: LINE,
-    alignItems: "center", justifyContent: "center", backgroundColor: CARD,
+    width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: th.line,
+    alignItems: "center", justifyContent: "center", backgroundColor: th.panel,
   },
-  nodeDone: { backgroundColor: ACCENT, borderColor: ACCENT },
-  nodeNow: { borderColor: ACCENT, backgroundColor: CARD },
+  nodeDone: { backgroundColor: th.accentFill, borderColor: th.accentFill },
+  nodeNow: { borderColor: th.accentFill, backgroundColor: th.panel },
   nodeLocked: { borderStyle: "dashed" },
-  dot: { width: 11, height: 11, borderRadius: 6, backgroundColor: ACCENT },
-  stepLabel: { color: MUTED, fontSize: 11.5, fontWeight: "700", marginTop: 8 },
-  stepLabelNow: { color: ACCENT, fontWeight: "800" },
-  stepLabelDone: { color: "#f4f4f6" },
+  dot: { width: 11, height: 11, borderRadius: 6, backgroundColor: th.accentFill },
+  stepLabel: { color: th.muted, fontSize: 11.5, fontWeight: "700", marginTop: 8 },
+  stepLabelNow: { color: th.accent, fontWeight: "800" },
+  stepLabelDone: { color: th.text },
 
   guide: { flexDirection: "row", gap: 9, marginTop: 18, alignItems: "flex-start" },
-  guideDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: MUTED, marginTop: 5 },
-  guideHead: { color: "#f4f4f6", fontSize: 13.5, fontWeight: "700" },
-  guideHint: { color: MUTED, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  guideDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: th.muted, marginTop: 5 },
+  guideHead: { color: th.text, fontSize: 13.5, fontWeight: "700" },
+  guideHint: { color: th.muted, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
 
-  block: { borderTopWidth: 1, borderTopColor: LINE, marginTop: 18, paddingTop: 14 },
+  block: { borderTopWidth: 1, borderTopColor: th.line, marginTop: 18, paddingTop: 14 },
   blockHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
-  blockTitle: { color: MUTED, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.9 },
-  blockNote: { color: MUTED, fontSize: 11.5, lineHeight: 16, marginTop: 8 },
+  blockTitle: { color: th.muted, fontSize: 10.5, fontWeight: "800", letterSpacing: 0.9 },
+  blockNote: { color: th.muted, fontSize: 11.5, lineHeight: 16, marginTop: 8 },
 
-  seg: { flexDirection: "row", backgroundColor: "#0f0f14", borderRadius: 999, padding: 3, gap: 3 },
+  seg: { flexDirection: "row", backgroundColor: th.bg, borderRadius: 999, padding: 3, gap: 3 },
   segCell: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 999 },
-  segOn: { backgroundColor: ACCENT },
-  segText: { color: MUTED, fontSize: 13, fontWeight: "700" },
-  segTextOn: { color: INK, fontWeight: "800" },
+  segOn: { backgroundColor: th.accentFill },
+  segText: { color: th.muted, fontSize: 13, fontWeight: "700" },
+  segTextOn: { color: th.accentInk, fontWeight: "800" },
 
   paste: {
-    backgroundColor: "#0f0f14", borderWidth: 1, borderColor: LINE, borderRadius: 11,
-    color: "#f4f4f6", fontSize: 13, padding: 12, minHeight: 110, marginTop: 4,
+    backgroundColor: th.bg, borderWidth: 1, borderColor: th.line, borderRadius: 11,
+    color: th.text, fontSize: 13, padding: 12, minHeight: 110, marginTop: 4,
   },
-  noteInput: {
-    backgroundColor: "#0f0f14", borderWidth: 1, borderColor: LINE, borderRadius: 11,
-    color: "#f4f4f6", fontSize: 13.5, padding: 12, minHeight: 70,
-  },
-  noteBody: { color: "#e6e6ec", fontSize: 13.5, lineHeight: 19, marginBottom: 4 },
-  noteBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 8 },
-  noteBtnText: { color: ACCENT, fontSize: 13.5, fontWeight: "800" },
-
-  ticketLine: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
+  ticketLine: { color: th.text, fontSize: 14, fontWeight: "700" },
 
   row: { flexDirection: "row", gap: 9, marginTop: 12 },
   primary: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 13, marginTop: 14,
+    backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 13, marginTop: 14,
   },
-  primaryText: { color: INK, fontSize: 14, fontWeight: "800" },
+  primaryText: { color: th.accentInk, fontSize: 14, fontWeight: "800" },
   ghost: {
-    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: LINE,
+    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: th.line,
     borderRadius: 11, paddingVertical: 11, marginTop: 9,
   },
-  ghostText: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
+  ghostText: { color: th.muted, fontSize: 12.5, fontWeight: "700" },
 
   state: { paddingVertical: 26, alignItems: "center" },
   flash: {

@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
 import {
@@ -11,15 +14,15 @@ import CityPicker from "./city-picker";
 import StayMap from "./stay-map";
 import VenueMap from "./venue-map";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const CARD = "#14141b";
 
 type Tab = "getting" | "stay" | "map";
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: "getting", label: "Getting there" },
+  // "Flights", not "Getting there" — the standard word, and what most people opening this
+  // tab are actually after. The key stays `getting` because a local or regional traveller
+  // gets "no flight needed" here rather than a flight search, and renaming the key would
+  // touch a dozen call sites for nothing a user can see.
+  { key: "getting", label: "Flights" },
   { key: "stay", label: "Stay" },
   { key: "map", label: "Venue map" },
 ];
@@ -76,6 +79,8 @@ function dayOffset(from: string | null, to: string | null): number {
 /** The honest empty state. A travel section that says nothing at all reads as broken; one
  *  that says "no hotels here" when the truth is "we could not ask" is worse than broken. */
 function Empty({ options, kind }: { options: TravelOptions | null; kind: string }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   if (!options) return null;
   const line =
     options.status === "not_configured"
@@ -83,7 +88,7 @@ function Empty({ options, kind }: { options: TravelOptions | null; kind: string 
       : options.reason ?? `No ${kind.toLowerCase()} to show right now.`;
   return (
     <View style={styles.empty}>
-      <Ionicons name="information-circle-outline" size={16} color={MUTED} />
+      <Ionicons name="information-circle-outline" size={16} color={th.muted} />
       <Text style={styles.emptyText}>{line}</Text>
     </View>
   );
@@ -101,6 +106,8 @@ function Leg({
   n: number; last?: boolean; icon: string; label: string; title: string; sub?: string | null;
   children?: React.ReactNode;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.leg}>
       <View style={styles.legRail}>
@@ -111,7 +118,7 @@ function Leg({
       </View>
       <View style={styles.legBody}>
         <View style={styles.legHead}>
-          <Ionicons name={icon as any} size={12} color={MUTED} />
+          <Ionicons name={icon as any} size={12} color={th.muted} />
           <Text style={styles.legLabel}>{label}</Text>
         </View>
         <Text style={styles.legTitle} numberOfLines={2}>{title}</Text>
@@ -132,16 +139,18 @@ function Leg({
  *  The mockup has exactly this control, and it is the last of the three pieces it specified.
  */
 function FlyingFrom({ city, onPress }: { city: string | null; onPress: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <>
       <Text style={styles.fieldLabel}>FLYING FROM</Text>
       <Pressable style={styles.field} onPress={onPress} accessibilityRole="button"
                  accessibilityLabel={city ? `Flying from ${city}. Change` : "Choose where you're flying from"}>
-        <Ionicons name="airplane-outline" size={15} color={city ? ACCENT : MUTED} />
+        <Ionicons name="airplane-outline" size={15} color={city ? th.accent : th.muted} />
         <Text style={[styles.fieldText, !city && styles.fieldTextEmpty]} numberOfLines={1}>
           {city ?? "Choose your city"}
         </Text>
-        <Ionicons name="chevron-down" size={15} color={MUTED} />
+        <Ionicons name="chevron-down" size={15} color={th.muted} />
       </Pressable>
     </>
   );
@@ -162,6 +171,8 @@ function JourneyRest({
   doorsLabel: string | null;
   onChooseStay: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const away = base?.metres_to_venue;
   const dist = away == null ? null
     : away >= 1000 ? `${(away / 1000).toFixed(1)} km from the venue`
@@ -189,7 +200,7 @@ function JourneyRest({
         <Leg n={1} icon="bed-outline" label="YOUR BASE" title="Not chosen yet"
              sub="Pick a hotel on the Stay tab and the walk to the venue shows up here.">
           <Pressable style={styles.legBtn} onPress={onChooseStay}>
-            <Ionicons name="map-outline" size={13} color={ACCENT} />
+            <Ionicons name="map-outline" size={13} color={th.accent} />
             <Text style={styles.legBtnText}>Choose where you're staying</Text>
           </Pressable>
         </Leg>
@@ -200,11 +211,11 @@ function JourneyRest({
            sub={doorsLabel}>
         {dirUrl ? (
           <Pressable style={styles.dirBtn} onPress={() => Linking.openURL(dirUrl)}>
-            <Ionicons name="navigate" size={14} color="#101204" />
+            <Ionicons name="navigate" size={14} color={th.accentInk} />
             <Text style={styles.dirBtnText}>
               {base ? "Directions from your hotel" : "Directions to the venue"}
             </Text>
-            <Ionicons name="open-outline" size={12} color="#101204" />
+            <Ionicons name="open-outline" size={12} color={th.accentInk} />
           </Pressable>
         ) : null}
       </Leg>
@@ -220,13 +231,15 @@ function JourneyRest({
  *  the map app starts from wherever they are standing.
  */
 function NoFlightNeeded({ ctx, doorsLabel }: { ctx: TravelContext; doorsLabel: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const local = ctx.kind === "local";
   const km = ctx.distance_km;
   return (
     <>
       <View style={styles.hereRow}>
         <View style={styles.hereIcon}>
-          <Ionicons name={local ? "location" : "car"} size={17} color={ACCENT} />
+          <Ionicons name={local ? "location" : "car"} size={17} color={th.accent} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.hereTitle}>
@@ -245,11 +258,11 @@ function NoFlightNeeded({ ctx, doorsLabel }: { ctx: TravelContext; doorsLabel: s
       </View>
       {ctx.directions_url ? (
         <Pressable style={styles.dirBtn} onPress={() => Linking.openURL(ctx.directions_url!)}>
-          <Ionicons name="navigate" size={14} color="#101204" />
+          <Ionicons name="navigate" size={14} color={th.accentInk} />
           <Text style={styles.dirBtnText}>
             Directions to {ctx.venue_name ?? "the venue"}
           </Text>
-          <Ionicons name="open-outline" size={12} color="#101204" />
+          <Ionicons name="open-outline" size={12} color={th.accentInk} />
         </Pressable>
       ) : null}
     </>
@@ -275,6 +288,8 @@ function BaseCard({
   onDirections: () => void;
   onClear: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const km = base.metres_to_venue != null
     ? base.metres_to_venue >= 1000
       ? `${(base.metres_to_venue / 1000).toFixed(1)} km`
@@ -283,7 +298,7 @@ function BaseCard({
   return (
     <View style={styles.base}>
       <View style={styles.baseHead}>
-        <Ionicons name="bed" size={14} color={ACCENT} />
+        <Ionicons name="bed" size={14} color={th.accent} />
         <Text style={styles.baseLabel}>YOUR BASE</Text>
         <Pressable onPress={onClear} hitSlop={10} accessibilityLabel="Remove your base">
           <Text style={styles.baseClear}>Change</Text>
@@ -307,9 +322,9 @@ function BaseCard({
       ) : null}
       {base.directions_url ? (
         <Pressable style={styles.dirBtn} onPress={onDirections}>
-          <Ionicons name="navigate" size={14} color="#101204" />
+          <Ionicons name="navigate" size={14} color={th.accentInk} />
           <Text style={styles.dirBtnText}>Directions to the venue</Text>
-          <Ionicons name="open-outline" size={12} color="#101204" />
+          <Ionicons name="open-outline" size={12} color={th.accentInk} />
         </Pressable>
       ) : null}
       {/* Said plainly, once. A card this confident could easily be read as a reservation. */}
@@ -322,11 +337,13 @@ function BaseCard({
  *  /stays/hotel/{key} variant 404s — so the hand-over is at city level, pre-filled with the
  *  show's dates. */
 function BookButton({ url }: { url: string }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable style={styles.bookWide} onPress={() => Linking.openURL(url)}>
-      <Ionicons name="bed-outline" size={16} color="#101204" />
+      <Ionicons name="bed-outline" size={16} color={th.accentInk} />
       <Text style={styles.bookWideText}>Book a hotel</Text>
-      <Ionicons name="open-outline" size={13} color="#101204" />
+      <Ionicons name="open-outline" size={13} color={th.accentInk} />
     </Pressable>
   );
 }
@@ -339,9 +356,6 @@ function duration(mins: number | null): string | null {
   return h ? `${h}h${String(m).padStart(2, "0")}` : `${m}m`;
 }
 
-const GOOD = "#7ef0b2";
-const TIGHT = "#ffc266";
-const LATE = "#ff7a6b";
 
 /** Does this flight actually get them to the show?
  *
@@ -354,23 +368,26 @@ function verdict(
   m: number | null,
   arrivesAt: string | null,
   showLocal: string | null,
+  th: Theme,
 ): { text: string; tone: string; icon: string } | null {
   if (m == null) return null;
-  if (m < 0) return { text: "Lands after the show starts", tone: LATE, icon: "close-circle" };
+  if (m < 0) return { text: "Lands after the show starts", tone: th.danger2, icon: "close-circle" };
   // Decided by the calendar, not by a number of hours. An earlier cut said "the day before"
   // past 1440 minutes and "23h55 before the show" just under it — the same situation described
   // two ways, split by a cliff that means nothing to a traveller.
   if (arrivesAt && showLocal && dayOffset(arrivesAt, showLocal) > 0) {
-    return { text: "Lands the day before", tone: GOOD, icon: "checkmark-circle" };
+    return { text: "Lands the day before", tone: th.success, icon: "checkmark-circle" };
   }
   const label = duration(m) ?? `${m}m`;
   // Under three hours means landing, clearing an airport and crossing a city before the doors.
   // Possible, and not something to reassure anyone about.
-  if (m < 180) return { text: `Only ${label} before the show`, tone: TIGHT, icon: "alert-circle" };
-  return { text: `Lands ${label} before the show`, tone: GOOD, icon: "checkmark-circle" };
+  if (m < 180) return { text: `Only ${label} before the show`, tone: th.warn, icon: "alert-circle" };
+  return { text: `Lands ${label} before the show`, tone: th.success, icon: "checkmark-circle" };
 }
 
 function FlightRow({ flight, showLocal }: { flight: Flight; showLocal: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const price = money(flight.price_amount, flight.price_currency);
   const direct = flight.stops === 0;
   const stops = flight.stops == null ? null
@@ -395,7 +412,7 @@ function FlightRow({ flight, showLocal }: { flight: Flight; showLocal: string | 
   const arrDay = landsLater ? weekday(flight.arrives_at) : depDay;
   return (
     <View style={styles.row}>
-      <View style={styles.thumb}><Ionicons name="airplane" size={18} color={MUTED} /></View>
+      <View style={styles.thumb}><Ionicons name="airplane" size={18} color={th.muted} /></View>
       <View style={styles.rowBody}>
         <Text style={styles.rowTitle} numberOfLines={1}>
           {depDay ? <Text style={styles.dayTag}>{depDay} </Text> : null}
@@ -409,7 +426,7 @@ function FlightRow({ flight, showLocal }: { flight: Flight; showLocal: string | 
           {[flight.airline, durLabel, stops].filter(Boolean).join(" · ")}
         </Text>
         {(() => {
-          const v = verdict(flight.minutes_before_show, flight.arrives_at, showLocal);
+          const v = verdict(flight.minutes_before_show, flight.arrives_at, showLocal, th);
           if (!v) return null;
           return (
             <View style={styles.verdict}>
@@ -444,6 +461,8 @@ export default function PlanTrip({
   /** Where this person is travelling from. Flights cannot be searched without it. */
   homeCity: string | null;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   // The map opens first, deliberately: it is the one tab that always has an answer, so the
   // card is never introduced by an apology.
   const [tab, setTab] = useState<Tab>("map");
@@ -506,7 +525,7 @@ export default function PlanTrip({
     let alive = true;
     getStayBase(eventId).then((b) => { if (alive) setBase(b); });
     // Two small queries against our own tables, no supplier — cheap enough to ask on every
-    // event page, and the Getting there tab cannot render honestly without the answer.
+    // event page, and the Flights tab cannot render honestly without the answer.
     getTravelContext(eventId).then((t) => { if (alive) { setCtx(t); setCtxDone(true); } });
     return () => { alive = false; };
   }, [eventId, homeCity]);
@@ -548,7 +567,35 @@ export default function PlanTrip({
     await clearStayBase(eventId);
   };
 
-  const hasMap = lat != null && lng != null && !(lat === 0 && lng === 0);
+  const hasVenuePoint = lat != null && lng != null && !(lat === 0 && lng === 0);
+
+  // WHERE TO CENTRE THE STAY MAP when the venue has no coordinates.
+  //
+  // 965 of 20,198 upcoming shows have no usable venue point — 724 carry no venue row at all
+  // and 241 have one without coordinates — and the Stay tab used to render nothing for them:
+  // hotels fetched, prices known, and a blank space where the map belongs.
+  //
+  // The hotels themselves are the way out. Every stay Tripsure returns carries its own
+  // lat/lng (measured: 20 of 20 on an event with no venue point), so their midpoint is a
+  // perfectly good centre — it is the neighbourhood being offered, which is what the map is
+  // there to show. The venue pin is simply omitted, because we genuinely do not know where
+  // the venue is and a guessed pin is the one thing worse than no pin.
+  const stayCentre = (() => {
+    const pts = (stays?.stays ?? []).filter((h) => h.lat != null && h.lng != null);
+    if (!pts.length) return null;
+    return {
+      lat: pts.reduce((a, h) => a + h.lat!, 0) / pts.length,
+      lng: pts.reduce((a, h) => a + h.lng!, 0) / pts.length,
+    };
+  })();
+
+  const stayLat = hasVenuePoint ? lat! : stayCentre?.lat ?? null;
+  const stayLng = hasVenuePoint ? lng! : stayCentre?.lng ?? null;
+  const hasStayMap = stayLat != null && stayLng != null;
+
+  // The "around the venue" tab still needs the VENUE, not a hotel average — its whole
+  // subject is what is walkable from the doors.
+  const hasMap = hasVenuePoint;
 
   // "Doors 20:30" — from the show's own local clock. Silent when the venue has not published a
   // time, rather than inventing one: 494 shows carry no timezone at all and 45 more resolve to
@@ -564,7 +611,7 @@ export default function PlanTrip({
   return (
     <View style={styles.card}>
       <Text style={styles.h}>Plan your trip</Text>
-      <Text style={styles.sub}>Getting there, a room near the venue, and the way in.</Text>
+      <Text style={styles.sub}>Flights, a room near the venue, and the way in.</Text>
 
       <View style={styles.tabs}>
         {TABS.map((t) => (
@@ -579,7 +626,7 @@ export default function PlanTrip({
       </View>
 
       {loading ? (
-        <View style={styles.empty}><ActivityIndicator color={ACCENT} /></View>
+        <View style={styles.empty}><ActivityIndicator color={th.accent} /></View>
       ) : null}
 
       {!loading && tab === "map" ? (
@@ -587,7 +634,7 @@ export default function PlanTrip({
           <VenueMap lat={lat!} lng={lng!} venue={venueName || "the venue"} city={city} />
         ) : (
           <View style={styles.empty}>
-            <Ionicons name="information-circle-outline" size={16} color={MUTED} />
+            <Ionicons name="information-circle-outline" size={16} color={th.muted} />
             <Text style={styles.emptyText}>We don't know where this venue is yet.</Text>
           </View>
         )
@@ -605,18 +652,31 @@ export default function PlanTrip({
                 the question is "is there anywhere near the venue", and a pin per hotel around
                 a marked venue answers it at a glance. Prices ride on the pins. Booking
                 happens on Tripsure's own page, so there is nothing here to tap through. */}
-            {hasMap ? (
-              <StayMap
-                lat={lat!} lng={lng!} venue={venueName} stays={stays.stays}
-                onPick={pick} pickedHotelId={base?.hotel_id ?? null} picking={picking}
-              />
+            {hasStayMap ? (
+              <>
+                <StayMap
+                  lat={stayLat!} lng={stayLng!}
+                  // No venue name when we are centred on the hotels: the marker would claim
+                  // to be the venue, and we do not know where the venue is.
+                  venue={hasVenuePoint ? venueName : null}
+                  showVenue={hasVenuePoint}
+                  stays={stays.stays}
+                  onPick={pick} pickedHotelId={base?.hotel_id ?? null} picking={picking}
+                />
+                {!hasVenuePoint ? (
+                  <Text style={styles.dates}>
+                    Centred on these hotels — we don&rsquo;t have this venue&rsquo;s exact
+                    location yet.
+                  </Text>
+                ) : null}
+              </>
             ) : null}
             {picking ? (
-              <View style={styles.empty}><ActivityIndicator color={ACCENT} /></View>
+              <View style={styles.empty}><ActivityIndicator color={th.accent} /></View>
             ) : null}
             {pickError ? (
               <View style={styles.empty}>
-                <Ionicons name="alert-circle-outline" size={16} color={MUTED} />
+                <Ionicons name="alert-circle-outline" size={16} color={th.muted} />
                 <Text style={styles.emptyText}>{pickError}</Text>
               </View>
             ) : null}
@@ -651,7 +711,7 @@ export default function PlanTrip({
           showing "set your city" or a flight list and then swapping it is worse than a beat
           of waiting. Our own database, so the beat is short. */}
       {!loading && tab === "getting" && !ctxDone ? (
-        <View style={styles.empty}><ActivityIndicator color={ACCENT} /></View>
+        <View style={styles.empty}><ActivityIndicator color={th.accent} /></View>
       ) : null}
 
       {!loading && ctxDone && tab === "getting" ? (
@@ -663,7 +723,7 @@ export default function PlanTrip({
             <NoFlightNeeded ctx={ctx} doorsLabel={doorsLabel} />
             {ctx.kind === "regional" && !wantFlights ? (
               <Pressable style={styles.anyway} onPress={() => setWantFlights(true)}>
-                <Ionicons name="airplane-outline" size={14} color={MUTED} />
+                <Ionicons name="airplane-outline" size={14} color={th.muted} />
                 <Text style={styles.anywayText}>Flying instead? Show flights</Text>
               </Pressable>
             ) : null}
@@ -740,7 +800,7 @@ export default function PlanTrip({
         && !(tab === "getting" && (ctx?.kind === "local"
              || (ctx?.kind === "regional" && !wantFlights))) ? (
         <View style={styles.promise}>
-          <Ionicons name="shield-checkmark" size={13} color="#7ef0b2" />
+          <Ionicons name="shield-checkmark" size={13} color={th.success} />
           <Text style={styles.promiseText}>
             We may earn a referral fee if you book — it never changes what's listed here, or the
             order it's in.
@@ -751,55 +811,55 @@ export default function PlanTrip({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   card: {
-    backgroundColor: CARD, borderColor: LINE, borderWidth: 1, borderRadius: 16,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 16,
     padding: 16, marginTop: 24,
   },
-  h: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
-  sub: { color: MUTED, fontSize: 13, marginTop: 3, marginBottom: 14 },
-  tabs: { flexDirection: "row", backgroundColor: "#0f0f14", borderRadius: 12, padding: 3, gap: 3 },
+  h: { color: th.text, fontSize: 17, fontWeight: "800" },
+  sub: { color: th.muted, fontSize: 13, marginTop: 3, marginBottom: 14 },
+  tabs: { flexDirection: "row", backgroundColor: th.bg, borderRadius: 12, padding: 3, gap: 3 },
   tab: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 10 },
-  tabOn: { backgroundColor: ACCENT },
-  tabText: { color: MUTED, fontSize: 13, fontWeight: "700" },
-  tabTextOn: { color: "#101204" },
-  dates: { color: MUTED, fontSize: 12, marginTop: 12, marginBottom: 2 },
+  tabOn: { backgroundColor: th.accentFill },
+  tabText: { color: th.muted, fontSize: 13, fontWeight: "700" },
+  tabTextOn: { color: th.accentInk },
+  dates: { color: th.muted, fontSize: 12, marginTop: 12, marginBottom: 2 },
   row: {
     flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 11,
-    borderBottomWidth: 1, borderBottomColor: "#1e1e26",
+    borderBottomWidth: 1, borderBottomColor: th.line2,
   },
   thumb: {
-    width: 46, height: 46, borderRadius: 10, backgroundColor: "#1b1b24",
+    width: 46, height: 46, borderRadius: 10, backgroundColor: th.panel2,
     alignItems: "center", justifyContent: "center", overflow: "hidden",
   },
   rowBody: { flex: 1 },
-  rowTitle: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
-  rowSub: { color: MUTED, fontSize: 12, marginTop: 2 },
+  rowTitle: { color: th.text, fontSize: 14, fontWeight: "700" },
+  rowSub: { color: th.muted, fontSize: 12, marginTop: 2 },
   rowEnd: { alignItems: "flex-end", gap: 5 },
-  price: { color: "#f4f4f6", fontSize: 14, fontWeight: "800" },
+  price: { color: th.text, fontSize: 14, fontWeight: "800" },
   book: {
-    flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: ACCENT,
+    flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: th.accentFill,
     borderRadius: 999, paddingVertical: 4, paddingHorizontal: 10,
   },
-  bookText: { color: "#101204", fontSize: 12, fontWeight: "800" },
+  bookText: { color: th.accentInk, fontSize: 12, fontWeight: "800" },
   bookWide: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
-    backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 13, marginTop: 14,
+    backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 13, marginTop: 14,
   },
-  bookWideText: { color: "#101204", fontSize: 15, fontWeight: "800" },
+  bookWideText: { color: th.accentInk, fontSize: 15, fontWeight: "800" },
   empty: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 22 },
-  emptyText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
-  footnote: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 12, fontStyle: "italic" },
+  emptyText: { color: th.muted, fontSize: 13, flex: 1, lineHeight: 18 },
+  footnote: { color: th.muted, fontSize: 11, lineHeight: 16, marginTop: 12, fontStyle: "italic" },
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 14 },
   // The day marker on an arrival. Accent, because "+1" changing to "+2" is the difference
   // between making the show and missing it.
   // Same size as the times it sits between — a smaller day name looked like a footnote on the
   // arrival rather than part of it. Accent coloured, because landing on a different day is the
   // difference between making the show and missing it.
-  nextDay: { color: ACCENT, fontSize: 14, fontWeight: "800" },
+  nextDay: { color: th.accent, fontSize: 14, fontWeight: "800" },
   // The ordinary day, when nothing has crossed midnight: present so both ends read alike, and
   // muted so it does not compete with the times themselves.
-  dayTag: { color: MUTED, fontSize: 14, fontWeight: "700" },
+  dayTag: { color: th.muted, fontSize: 14, fontWeight: "700" },
   verdict: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
   verdictText: { fontSize: 11.5, fontWeight: "700", flexShrink: 1 },
   // The journey. A rail of numbered dots down the left with a line between them, so three
@@ -807,76 +867,76 @@ const styles = StyleSheet.create({
   leg: { flexDirection: "row", gap: 12, marginTop: 16 },
   legRail: { alignItems: "center", width: 22 },
   legDot: {
-    width: 22, height: 22, borderRadius: 11, backgroundColor: "rgba(232,255,71,0.14)",
+    width: 22, height: 22, borderRadius: 11, backgroundColor: th.accentTint14,
     alignItems: "center", justifyContent: "center",
   },
-  legNum: { color: ACCENT, fontSize: 11, fontWeight: "800" },
-  legLine: { flex: 1, width: 1.5, backgroundColor: LINE, marginTop: 5, minHeight: 14 },
+  legNum: { color: th.accent, fontSize: 11, fontWeight: "800" },
+  legLine: { flex: 1, width: 1.5, backgroundColor: th.line, marginTop: 5, minHeight: 14 },
   legBody: { flex: 1, paddingBottom: 4 },
   legHead: { flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 3 },
-  legLabel: { color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
-  legTitle: { color: "#f4f4f6", fontSize: 14.5, fontWeight: "800" },
-  legSub: { color: MUTED, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
+  legLabel: { color: th.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
+  legTitle: { color: th.text, fontSize: 14.5, fontWeight: "800" },
+  legSub: { color: th.muted, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
   legBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    borderWidth: 1, borderColor: "rgba(232,255,71,0.35)", borderRadius: 10,
+    borderWidth: 1, borderColor: th.accentTint35, borderRadius: 10,
     paddingVertical: 10, marginTop: 10,
   },
-  legBtnText: { color: ACCENT, fontSize: 13, fontWeight: "800" },
+  legBtnText: { color: th.accent, fontSize: 13, fontWeight: "800" },
 
   divider: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 20 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: LINE },
-  dividerText: { color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: th.line },
+  dividerText: { color: th.muted, fontSize: 10, fontWeight: "800", letterSpacing: 1 },
 
   fieldLabel: {
-    color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8,
+    color: th.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.8,
     marginTop: 14, marginBottom: 6,
   },
   field: {
     flexDirection: "row", alignItems: "center", gap: 9,
-    borderWidth: 1, borderColor: LINE, borderRadius: 11,
-    paddingVertical: 12, paddingHorizontal: 12, backgroundColor: "#0f0f14",
+    borderWidth: 1, borderColor: th.line, borderRadius: 11,
+    paddingVertical: 12, paddingHorizontal: 12, backgroundColor: th.bg,
   },
-  fieldText: { color: "#f4f4f6", fontSize: 14, fontWeight: "700", flex: 1 },
-  fieldTextEmpty: { color: MUTED, fontWeight: "600" },
+  fieldText: { color: th.text, fontSize: 14, fontWeight: "700", flex: 1 },
+  fieldTextEmpty: { color: th.muted, fontWeight: "600" },
   hereRow: {
     flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 4, marginTop: 4,
   },
   hereIcon: {
     width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(232,255,71,0.12)",
+    backgroundColor: th.accentTint12,
   },
-  hereTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
-  hereSub: { color: MUTED, fontSize: 12.5, marginTop: 2 },
+  hereTitle: { color: th.text, fontSize: 15, fontWeight: "800" },
+  hereSub: { color: th.muted, fontSize: 12.5, marginTop: 2 },
   // Offered quietly, underneath: 250 km is a drive for most people and a flight for some, and
   // that is theirs to decide — but it is not the answer we lead with.
   anyway: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
     paddingVertical: 11, marginTop: 10, borderRadius: 11,
-    borderWidth: 1, borderColor: LINE,
+    borderWidth: 1, borderColor: th.line,
   },
-  anywayText: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
+  anywayText: { color: th.muted, fontSize: 12.5, fontWeight: "700" },
 
   // The base card. Bordered in the accent rather than filled with it: it is a fact the
   // traveller told us, worth finding at a glance, but not a call to action.
   base: {
     marginTop: 14, padding: 14, borderRadius: 14, borderWidth: 1,
-    borderColor: "rgba(232,255,71,0.35)", backgroundColor: "#101014",
+    borderColor: th.accentTint35, backgroundColor: th.bg,
   },
   baseHead: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 },
   baseLabel: {
-    color: ACCENT, fontSize: 10, fontWeight: "800", letterSpacing: 0.8, flex: 1,
+    color: th.accent, fontSize: 10, fontWeight: "800", letterSpacing: 0.8, flex: 1,
   },
-  baseClear: { color: MUTED, fontSize: 12, fontWeight: "700" },
-  baseName: { color: "#f4f4f6", fontSize: 15, fontWeight: "800" },
-  baseAddr: { color: MUTED, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
-  baseMeta: { color: "#c9c9d2", fontSize: 12.5, marginTop: 5, fontWeight: "600" },
+  baseClear: { color: th.muted, fontSize: 12, fontWeight: "700" },
+  baseName: { color: th.text, fontSize: 15, fontWeight: "800" },
+  baseAddr: { color: th.muted, fontSize: 12.5, marginTop: 3, lineHeight: 17 },
+  baseMeta: { color: th.text3, fontSize: 12.5, marginTop: 5, fontWeight: "600" },
   dirBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    backgroundColor: ACCENT, borderRadius: 11, paddingVertical: 11, marginTop: 12,
+    backgroundColor: th.accentFill, borderRadius: 11, paddingVertical: 11, marginTop: 12,
   },
-  dirBtnText: { color: "#101204", fontSize: 13.5, fontWeight: "800" },
-  baseNote: { color: MUTED, fontSize: 11, marginTop: 9, textAlign: "center" },
+  dirBtnText: { color: th.accentInk, fontSize: 13.5, fontWeight: "800" },
+  baseNote: { color: th.muted, fontSize: 11, marginTop: 9, textAlign: "center" },
 
-  promiseText: { color: MUTED, fontSize: 11, lineHeight: 16, flex: 1 },
+  promiseText: { color: th.muted, fontSize: 11, lineHeight: 16, flex: 1 },
 });

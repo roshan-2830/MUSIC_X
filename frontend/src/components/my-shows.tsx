@@ -8,7 +8,7 @@
  *
  * THE STATES ARE NOT A MENU. Nothing on this screen moves a show between tabs, because nothing
  * should: the state is derived on the server from the ticket, the hotel, the invites and the
- * note (see services/plan.py). Tapping through to the show and doing one of those things is
+ * (see services/plan.py). Tapping through to the show and doing one of those things is
  * what moves it. A "mark as Planning" button here would let the label disagree with the facts
  * underneath it, which is the exact failure the derived design exists to prevent.
  *
@@ -23,15 +23,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import EventDetailView from "./event-detail";
 import FestivalDetailView from "./festival-detail";
 import { Festival, MyShow, MyShows as MyShowsT, getMyShows } from "../lib/api";
 import { coverColor, flagEmoji, formatDay } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#16161d";
-const FEST = "#ffb200";
 
 type TabKey = "interested" | "planning" | "confirmed" | "attended" | "missed" | "festivals";
 
@@ -49,25 +48,32 @@ const TABS: { key: TabKey; label: string }[] = [
 const EMPTY: Record<TabKey, string> = {
   interested: "Nothing saved yet. Tap the bookmark on any show and it lands here.",
   planning: "A show moves here once you start building the trip around it — a place to stay, "
-    + "an invite to a friend, or a note to yourself.",
+    + "or an invite to a friend.",
   confirmed: "Shows land here when you add your ticket, on the show's own page.",
   attended: "Shows land here after they happen, if you had a ticket or told us you went.",
   missed: "Shows you told us you didn't make. Nothing to see is the good outcome.",
   festivals: "No festivals saved. Bookmark one and it lands here.",
 };
 
-function Tag({ text, color = ACCENT, icon }: {
+function Tag({ text, color, icon }: {
   text: string; color?: string; icon?: keyof typeof Ionicons.glyphMap;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  // Defaulted here rather than in the signature: a default parameter is evaluated before
+  // the body, where the theme does not exist yet.
+  const tint = color ?? th.accent;
   return (
-    <View style={[styles.tag, { borderColor: color }]}>
-      {icon ? <Ionicons name={icon} size={11} color={color} /> : null}
-      <Text style={[styles.tagT, { color }]}>{text}</Text>
+    <View style={[styles.tag, { borderColor: tint }]}>
+      {icon ? <Ionicons name={icon} size={11} color={tint} /> : null}
+      <Text style={[styles.tagT, { color: tint }]}>{text}</Text>
     </View>
   );
 }
 
 function ShowRow({ s, onOpen }: { s: MyShow; onOpen: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable style={styles.row} onPress={onOpen}>
       <View style={[styles.thumb, { backgroundColor: coverColor(s.headliner || s.title) }]}>
@@ -78,17 +84,18 @@ function ShowRow({ s, onOpen }: { s: MyShow; onOpen: () => void }) {
         <Text style={styles.rowD} numberOfLines={1}>
           {formatDay(s.starts_at, s.timezone)}
           {s.city ? ` · ${s.city}` : ""}
-          {s.has_note ? "  ✎ note" : ""}
         </Text>
       </View>
       {s.booked ? <Tag text="Ticket" icon="ticket-outline" />
-        : s.is_suggestion ? <Tag text="Suggested" color={MUTED} /> : null}
-      <Ionicons name="chevron-forward" size={16} color={MUTED} />
+        : s.is_suggestion ? <Tag text="Suggested" color={th.muted} /> : null}
+      <Ionicons name="chevron-forward" size={16} color={th.muted} />
     </Pressable>
   );
 }
 
 function FestivalRow({ f, onOpen }: { f: Festival; onOpen: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable style={styles.row} onPress={onOpen}>
       <View style={[styles.thumb, { backgroundColor: coverColor(f.name) }]}>
@@ -100,13 +107,15 @@ function FestivalRow({ f, onOpen }: { f: Festival; onOpen: () => void }) {
           {f.starts_on ? formatDay(f.starts_on) : "Dates TBA"}{f.city ? ` · ${f.city}` : ""}
         </Text>
       </View>
-      <Tag text="Festival" color={FEST} />
-      <Ionicons name="chevron-forward" size={16} color={MUTED} />
+      <Tag text="Festival" color={th.festival} />
+      <Ionicons name="chevron-forward" size={16} color={th.muted} />
     </Pressable>
   );
 }
 
 export default function MyShowsView({ onClose }: { onClose: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [data, setData] = useState<MyShowsT | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -148,7 +157,7 @@ export default function MyShowsView({ onClose }: { onClose: () => void }) {
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.head}>
         <Pressable onPress={onClose} hitSlop={10} style={{ width: 40 }}>
-          <Ionicons name="chevron-back" size={22} color="#f4f4f6" />
+          <Ionicons name="chevron-back" size={22} color={th.text} />
         </Pressable>
         <Text style={styles.title}>My shows</Text>
         <View style={{ width: 40 }} />
@@ -177,7 +186,7 @@ export default function MyShowsView({ onClose }: { onClose: () => void }) {
       </ScrollView>
 
       {loading ? (
-        <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={th.accent} style={{ marginTop: 40 }} />
       ) : error ? (
         <View style={styles.empty}>
           <Text style={styles.emptyT}>{error}</Text>
@@ -218,37 +227,37 @@ export default function MyShowsView({ onClose }: { onClose: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   head: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 14, paddingVertical: 12,
   },
-  title: { color: "#f4f4f6", fontSize: 17, fontWeight: "900" },
-  sub: { color: MUTED, fontSize: 13, paddingHorizontal: 16, marginBottom: 12 },
+  title: { color: th.text, fontSize: 17, fontWeight: "900" },
+  sub: { color: th.muted, fontSize: 13, paddingHorizontal: 16, marginBottom: 12 },
 
   // alignItems, not just padding: a horizontal ScrollView on web stretches its children to
   // the full cross-axis height unless told otherwise, which turns these pills into columns.
   pills: { paddingHorizontal: 12, gap: 8, paddingBottom: 12, alignItems: "center" },
   pill: {
     paddingHorizontal: 13, paddingVertical: 8, borderRadius: 999,
-    backgroundColor: "#14141b", borderWidth: 1, borderColor: "#23232c",
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.panel3,
   },
-  pillOn: { backgroundColor: ACCENT, borderColor: ACCENT },
-  pillT: { color: "#d6d6de", fontSize: 13, fontWeight: "700" },
-  pillTOn: { color: "#101204", fontWeight: "900" },
+  pillOn: { backgroundColor: th.accentFill, borderColor: th.accentFill },
+  pillT: { color: th.text2, fontSize: 13, fontWeight: "700" },
+  pillTOn: { color: th.accentInk, fontWeight: "900" },
 
   row: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingVertical: 11, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: LINE,
+    borderBottomWidth: 1, borderBottomColor: th.line,
   },
   thumb: {
     width: 44, height: 44, borderRadius: 10, alignItems: "center", justifyContent: "center",
   },
   thumbT: { fontSize: 18 },
-  rowT: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
-  rowD: { color: MUTED, fontSize: 12, marginTop: 3 },
+  rowT: { color: th.text, fontSize: 14, fontWeight: "700" },
+  rowD: { color: th.muted, fontSize: 12, marginTop: 3 },
 
   tag: {
     flexDirection: "row", alignItems: "center", gap: 4,
@@ -258,10 +267,10 @@ const styles = StyleSheet.create({
 
   empty: { paddingHorizontal: 28, paddingTop: 44, alignItems: "center",
            maxWidth: 460, alignSelf: "center" },
-  emptyT: { color: MUTED, fontSize: 13, textAlign: "center", lineHeight: 20 },
+  emptyT: { color: th.muted, fontSize: 13, textAlign: "center", lineHeight: 20 },
   retry: {
-    marginTop: 16, backgroundColor: "#23232c", borderRadius: 10,
+    marginTop: 16, backgroundColor: th.panel3, borderRadius: 10,
     paddingHorizontal: 18, paddingVertical: 10,
   },
-  retryT: { color: "#f4f4f6", fontSize: 13, fontWeight: "700" },
+  retryT: { color: th.text, fontSize: 13, fontWeight: "700" },
 });

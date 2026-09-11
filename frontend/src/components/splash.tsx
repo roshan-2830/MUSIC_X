@@ -29,10 +29,10 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import Svg, { Circle, Defs, Path, RadialGradient, Rect, Stop } from 'react-native-svg';
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 
-const ACCENT = '#e8ff47';
 const INK = '#0b0b0f';
-const MUTED = '#9a9aa6';
 
 // A fixed halo rather than a percentage of the viewport. Sized as a share of the window,
 // the glow was a small tight circle on a phone and an enormous diffuse cloud across a
@@ -72,6 +72,8 @@ function useFadeUp(delay: number) {
 }
 
 function Bar({ delay }: { delay: number }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const t = useSharedValue(0);
   const reduced = useReducedMotion();
   useEffect(() => {
@@ -91,6 +93,8 @@ function Bar({ delay }: { delay: number }) {
 }
 
 export default function Splash() {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const pop = usePop(0);
   const eq = useFadeUp(300);
   const tag = useFadeUp(550);
@@ -120,9 +124,9 @@ export default function Splash() {
         <Svg width={GLOW} height={GLOW}>
           <Defs>
             <RadialGradient id="wash" cx="50%" cy="50%" r="50%">
-              <Stop offset="0%" stopColor={ACCENT} stopOpacity={0.18} />
-              <Stop offset="45%" stopColor={ACCENT} stopOpacity={0.06} />
-              <Stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+              <Stop offset="0%" stopColor={th.accent} stopOpacity={0.18} />
+              <Stop offset="45%" stopColor={th.accent} stopOpacity={0.06} />
+              <Stop offset="100%" stopColor={th.accent} stopOpacity={0} />
             </RadialGradient>
           </Defs>
           <Rect x="0" y="0" width={GLOW} height={GLOW} fill="url(#wash)" />
@@ -154,7 +158,7 @@ export default function Splash() {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   container: { flex: 1, backgroundColor: INK, alignItems: 'center', justifyContent: 'center', gap: 20 },
 
   // Full bleed: the gradient itself carries the `at 50% 32%` offset.
@@ -166,15 +170,15 @@ const styles = StyleSheet.create({
 
   logoRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   mark: {
-    width: 64, height: 64, borderRadius: 18, backgroundColor: ACCENT,
+    width: 64, height: 64, borderRadius: 18, backgroundColor: th.accentFill,
     alignItems: 'center', justifyContent: 'center',
   },
   // 34px / 800 / .04em — the mockup's .splash-logo .wd, to the number.
   wordmark: { color: '#f4f4f6', fontSize: 34, fontWeight: '800', letterSpacing: 1.36 },
-  wordmarkX: { color: ACCENT },
+  wordmarkX: { color: th.accent },
 
   eq: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 38 },
-  bar: { width: 6, borderRadius: 3, backgroundColor: ACCENT },
+  bar: { width: 6, borderRadius: 3, backgroundColor: th.accentFill },
 
-  tag: { color: MUTED, fontSize: 15 },
+  tag: { color: th.muted, fontSize: 15 },
 });

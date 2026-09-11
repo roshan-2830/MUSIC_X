@@ -4,11 +4,14 @@ import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { FollowedArtist, getFollows } from "../lib/api";
+
+import WishlistHeart from "./wishlist-heart";
 import { coverColor } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 /** Strip accents, case and punctuation — so "A.R. Rahman" and "AR Rahman" match.
  *  Mirrors the backend's `_norm`, which is what the rest of the app dedupes on. */
@@ -74,6 +77,8 @@ export default function ArtistsRow({
   onSeeAll: () => void;
   onAdd: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [artists, setArtists] = useState<FollowedArtist[]>([]);
 
   const load = useCallback(() => {
@@ -96,7 +101,7 @@ export default function ArtistsRow({
         {artists.length ? (
           <Pressable onPress={onSeeAll} hitSlop={8} style={styles.seeAllRow}>
             <Text style={styles.seeAll}>See all</Text>
-            <Ionicons name="arrow-forward" size={13} color={ACCENT} />
+            <Ionicons name="arrow-forward" size={13} color={th.accent} />
           </Pressable>
         ) : null}
       </View>
@@ -109,7 +114,7 @@ export default function ArtistsRow({
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <Pressable style={styles.tile} onPress={onAdd}>
           <View style={styles.addCircle}>
-            <Ionicons name="add" size={26} color={ACCENT} />
+            <Ionicons name="add" size={26} color={th.accent} />
           </View>
           <Text style={styles.name} numberOfLines={1}>Add</Text>
         </Pressable>
@@ -124,6 +129,11 @@ export default function ArtistsRow({
             {/* Two short lines, not the first word: truncating gave "Cold" for Cold War
                 Kids and "Major" for Major Lazer, which reads as a different act. */}
             <Text style={styles.name} numberOfLines={2}>{a.name}</Text>
+            {/* Overlapping the circle rather than adding a row: this strip is 66pt of
+                artwork and a caption, and a third line would push the whole row taller
+                on every screen for a control most taps never touch. */}
+            <WishlistHeart artistName={a.name} artistId={a.id} imageUrl={a.image_url}
+                           variant="panel" style={styles.wish} />
           </Pressable>
         ))}
       </ScrollView>
@@ -132,20 +142,28 @@ export default function ArtistsRow({
 }
 
 const CIRCLE = 66;
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   section: { marginTop: 20 },
+  // Bottom-right of the avatar, on its own solid disc so the heart reads against any
+  // photo. hitSlop on the control gives it a real tap target without a bigger icon.
+  wish: {
+    position: "absolute", top: CIRCLE - 20, right: 2,
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line,
+    alignItems: "center", justifyContent: "center",
+  },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16 },
-  title: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
+  title: { color: th.text, fontSize: 18, fontWeight: "800" },
   seeAllRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  seeAll: { color: ACCENT, fontSize: 13, fontWeight: "700" },
-  sub: { color: MUTED, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 12, lineHeight: 18 },
+  seeAll: { color: th.accent, fontSize: 13, fontWeight: "700" },
+  sub: { color: th.muted, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 12, lineHeight: 18 },
   scroll: { gap: 14, paddingHorizontal: 16 },
   tile: { width: CIRCLE + 8, alignItems: "center" },
   circle: { width: CIRCLE, height: CIRCLE, borderRadius: CIRCLE / 2, marginBottom: 7 },
   addCircle: {
     width: CIRCLE, height: CIRCLE, borderRadius: CIRCLE / 2, marginBottom: 7,
-    borderWidth: 1.5, borderColor: ACCENT, borderStyle: "dashed",
+    borderWidth: 1.5, borderColor: th.accentFill, borderStyle: "dashed",
     alignItems: "center", justifyContent: "center",
   },
-  name: { color: "#c8c8d0", fontSize: 11.5, fontWeight: "600", textAlign: "center", lineHeight: 14 },
+  name: { color: th.text3, fontSize: 11.5, fontWeight: "600", textAlign: "center", lineHeight: 14 },
 });

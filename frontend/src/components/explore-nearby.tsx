@@ -1,15 +1,14 @@
 import { useMemo } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
 import { NearbyPlaces } from "../lib/api";
 import CollapsibleCard from "./collapsible-card";
 import PlacesMap from "./places-map";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const CARD = "#14141b";
 
 /** Set once the GetYourGuide affiliate account is approved. Not hardcoded, and not committed:
  *  it lives in .env as EXPO_PUBLIC_GYG_PARTNER_ID. */
@@ -110,6 +109,8 @@ export default function ExploreNearby({
   currency?: string;
   locale?: string;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const q = useMemo(() => buildQuery(venueName, city), [venueName, city]);
 
   if (!q) return null;
@@ -145,9 +146,9 @@ export default function ExploreNearby({
       {/* The button that does the actual handing over. Loud, because on web it is the whole
           mechanism and on a phone it is still the way to everything the three cards omit. */}
       <Pressable style={styles.book} onPress={() => Linking.openURL(searchUrl(q))}>
-        <Ionicons name="ticket" size={15} color="#101204" />
+        <Ionicons name="ticket" size={15} color={th.accentInk} />
         <Text style={styles.bookText}>Book tours on GetYourGuide</Text>
-        <Ionicons name="open-outline" size={13} color="#101204" />
+        <Ionicons name="open-outline" size={13} color={th.accentInk} />
       </Pressable>
 
       {!hasMap && lat != null && lng != null ? (
@@ -158,7 +159,7 @@ export default function ExploreNearby({
               `https://www.google.com/maps/search/${encodeURIComponent(
                 `things to do near ${venueName ?? ""} ${city ?? ""}`.trim())}`)}
         >
-          <Ionicons name="map-outline" size={14} color={MUTED} />
+          <Ionicons name="map-outline" size={14} color={th.muted} />
           <Text style={styles.altText}>Or look on the map</Text>
         </Pressable>
       ) : null}
@@ -167,7 +168,7 @@ export default function ExploreNearby({
           the page. It names the amount rather than hiding behind "may earn", and it adapts —
           without a partner id there is no commission to claim. */}
       <View style={styles.promise}>
-        <Ionicons name="shield-checkmark" size={13} color="#7ef0b2" />
+        <Ionicons name="shield-checkmark" size={13} color={th.success} />
         <Text style={styles.promiseText}>
           {PARTNER_ID
             ? "We earn a commission if you book an activity here — it never changes what's shown or the order it's in. Concert tickets are different: we earn nothing on those."
@@ -178,28 +179,28 @@ export default function ExploreNearby({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   // No card/h/sub here any more: CollapsibleCard is the shell, and duplicating its padding and
   // border produced a box inside a box.
   frame: { borderRadius: 12, overflow: "hidden", backgroundColor: "#fff", marginTop: 12 },
   web: { flex: 1, backgroundColor: "#fff" },
 
   state: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 18 },
-  stateText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
+  stateText: { color: th.muted, fontSize: 13, flex: 1, lineHeight: 18 },
 
   // The primary action of the section, so it is filled rather than outlined.
   book: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 14, marginTop: 14,
+    backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 14, marginTop: 14,
   },
-  bookText: { color: "#101204", fontSize: 14.5, fontWeight: "800" },
+  bookText: { color: th.accentInk, fontSize: 14.5, fontWeight: "800" },
 
   alt: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
-    borderWidth: 1, borderColor: LINE, borderRadius: 11, paddingVertical: 11, marginTop: 10,
+    borderWidth: 1, borderColor: th.line, borderRadius: 11, paddingVertical: 11, marginTop: 10,
   },
-  altText: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
+  altText: { color: th.muted, fontSize: 12.5, fontWeight: "700" },
 
   promise: { flexDirection: "row", gap: 7, marginTop: 14, alignItems: "flex-start" },
-  promiseText: { color: MUTED, fontSize: 11.5, lineHeight: 16, flex: 1 },
+  promiseText: { color: th.muted, fontSize: 11.5, lineHeight: 16, flex: 1 },
 });

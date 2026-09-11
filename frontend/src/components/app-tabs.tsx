@@ -1,14 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 
+import { useTheme } from '../lib/use-theme';
+
 export default function AppTabs() {
+  // The bar is the one piece of chrome on every screen, so it has to follow the theme with
+  // them. Left hardcoded, a light app sat on a black tab bar — the single most visible way
+  // to get a theme switch half done.
+  const th = useTheme();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#e8ff47',
-        tabBarInactiveTintColor: '#9a9aa6',
-        tabBarStyle: { backgroundColor: '#0b0b0f', borderTopColor: '#1c1c24' },
+        tabBarActiveTintColor: th.accent,
+        tabBarInactiveTintColor: th.muted,
+        tabBarStyle: { backgroundColor: th.bg, borderTopColor: th.line2 },
       }}>
       <Tabs.Screen
         name="index"

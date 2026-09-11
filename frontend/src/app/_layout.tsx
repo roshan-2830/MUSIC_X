@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, useColorScheme, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider, initialWindowMetrics } from 'react-native-safe-area-context';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -14,7 +14,10 @@ import PickGenres from '@/components/pick-genres';
 import Splash from '@/components/splash';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { ProfileProvider } from '@/lib/profile';
+import { ThemeProvider as AppThemeProvider, useTheme, useThemeChoice } from '@/lib/use-theme';
 import { SavesProvider } from '@/lib/saves';
+import { ToastProvider } from '@/lib/toast';
+import { WishlistProvider } from '@/lib/wishlist';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -25,9 +28,10 @@ const ONBOARDED_KEY = 'mx_onboarded';
 const INTRO_KEY = 'mx_intro_seen';
 
 function Loader() {
+  const th = useTheme();
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0b0f', alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator color="#e8ff47" size="large" />
+    <View style={{ flex: 1, backgroundColor: th.bg, alignItems: 'center', justifyContent: 'center' }}>
+      <ActivityIndicator color={th.accent} size="large" />
     </View>
   );
 }
@@ -76,9 +80,14 @@ function SignedInApp({ userId }: { userId: string }) {
 
   return (
     <ProfileProvider>
-      <SavesProvider>
-        <AppTabs />
-      </SavesProvider>
+      {/* Above Saves and Wishlist: both of those call useToast() when a toggle lands. */}
+      <ToastProvider>
+        <SavesProvider>
+          <WishlistProvider>
+            <AppTabs />
+          </WishlistProvider>
+        </SavesProvider>
+      </ToastProvider>
     </ProfileProvider>
   );
 }
@@ -124,14 +133,28 @@ function Gate() {
   return <AuthScreen />;
 }
 
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+/** Navigation chrome follows the CHOSEN theme, not the phone's.
+ *
+ *  This read useColorScheme() directly, so picking Light in the app would have left the
+ *  navigator's own background and header dark underneath — a light app on a dark frame. */
+function NavigationThemed() {
+  const { theme } = useThemeChoice();
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={theme.mode === 'dark' ? DarkTheme : DefaultTheme}>
       <AuthProvider>
         <AnimatedSplashOverlay />
         <Gate />
       </AuthProvider>
     </ThemeProvider>
+  );
+}
+
+export default function TabLayout() {
+  // Outermost, so the splash, the auth screen and the onboarding slides are themed too —
+  // they render before any of the app's own providers exist.
+  return (
+    <AppThemeProvider>
+      <NavigationThemed />
+    </AppThemeProvider>
   );
 }

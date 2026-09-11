@@ -33,7 +33,7 @@ de-duplicated against notifications that already exist. Re-running produces noth
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.db.session import SessionLocal
 from app.models.artist import Artist
@@ -151,7 +151,13 @@ def alerts_for_changes(db: Session) -> dict:
         return {"changes": 0, "notifications": 0, "skipped_by_pref": 0}
 
     event_ids = {c.event_id for c in pending}
-    events = {e.id: e for e in db.query(Event).filter(Event.id.in_(event_ids)).all()}
+    # Bounded by event_ids, so far smaller than the read above — but the same two fat
+    # columns ride along on every row, and a change notification reads neither.
+    events = {e.id: e for e in
+              db.query(Event)
+                .options(load_only(Event.id, Event.title, Event.starts_at, Event.timezone,
+                                   Event.status, Event.venue_id, Event.headliner_artist_id))
+                .filter(Event.id.in_(event_ids)).all()}
 
     # who saved these shows (real saves only — a "suggestion" is not a commitment)
     savers: dict = {}
@@ -230,7 +236,18 @@ def alerts_for_new_shows(db: Session, window_days: int = NEW_SHOW_WINDOW_DAYS) -
     tally = {"candidates": 0, "no_announce_date": 0, "notifications": 0,
              "already_sent": 0, "skipped_by_pref": 0, "held_by_artist_cap": 0}
 
+    # ONLY THE FOUR COLUMNS THIS USES. `db.query(Event)` meant all 29, and two of them are
+    # most of a row: `description` (674 B of seller small print) and `mxs_breakdown` (586 B
+    # of the scorer's own output), neither of which an alert reads. Measured 2026-09-11:
+    # 9,770 events created in the last seven days, so 12.3 MB a run — and this is reached
+    # from the HOURLY reminders job, which is 0.29 GB a day of pure waste in production.
+    #
+    # The same fix the scoring pass got (1,255 B a row -> 458 B) and the recommendations
+    # endpoint got on the same day. This was the last of the three readers the handoff
+    # flagged that still pulled whole rows.
     fresh = (db.query(Event)
+               .options(load_only(Event.id, Event.title, Event.starts_at,
+                                  Event.headliner_artist_id))
                .filter(Event.created_at >= since,
                        Event.headliner_artist_id.isnot(None),
                        Event.status == "scheduled")

@@ -51,6 +51,24 @@ def get_current_user_id(
     return user_id
 
 
+def get_current_user_id_optional(
+    creds: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+) -> str | None:
+    """The caller's id when they sent a valid token, None when they did not.
+
+    For routes that are PUBLIC but answer better when they know who is asking — search is
+    open to anyone, and gains "only acts I follow" once you are signed in. A bad or expired
+    token returns None rather than 401: a stale token in an old tab should degrade the
+    personal filters, not break search for everybody.
+    """
+    if creds is None:
+        return None
+    try:
+        return _verify(creds.credentials).get("sub") or None
+    except Exception:
+        return None
+
+
 def get_current_user_claims(
     creds: HTTPAuthorizationCredentials = Depends(_bearer),
 ) -> dict:

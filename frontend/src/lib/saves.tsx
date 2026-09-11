@@ -10,6 +10,7 @@ import {
   unsaveEvent,
   unsaveFestival,
 } from "./api";
+import { useToast } from "./toast";
 
 type SavesContextValue = {
   saves: MusicEvent[];
@@ -27,6 +28,7 @@ type SavesContextValue = {
 const SavesContext = createContext<SavesContextValue | undefined>(undefined);
 
 export function SavesProvider({ children }: { children: ReactNode }) {
+  const { show } = useToast();
   const [saves, setSaves] = useState<MusicEvent[]>([]);
   const [savedFestivals, setSavedFestivals] = useState<Festival[]>([]);
 
@@ -49,6 +51,19 @@ export function SavesProvider({ children }: { children: ReactNode }) {
       const saved = savedIds.has(event.id);
       // optimistic update
       setSaves((prev) => (saved ? prev.filter((e) => e.id !== event.id) : [...prev, event]));
+
+      // Named, because a bookmark on a list of cards gives no other clue about WHICH one
+      // you just hit. Undo only on removal: re-saving is one tap on the same bookmark,
+      // whereas an accidental unsave silently drops a show off the calendar.
+      if (saved) {
+        show(`Removed ${event.title} from your calendar`, {
+          label: "UNDO",
+          onPress: () => { toggle(event); },
+        });
+      } else {
+        show(`Saved ${event.title} to your calendar`);
+      }
+
       try {
         if (saved) await unsaveEvent(event.id);
         else await saveEvent(event.id);
@@ -56,7 +71,8 @@ export function SavesProvider({ children }: { children: ReactNode }) {
         refresh(); // revert to server truth on failure
       }
     },
-    [savedIds, refresh]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [savedIds, refresh, show]
   );
 
   const toggleFestival = useCallback(
@@ -65,6 +81,16 @@ export function SavesProvider({ children }: { children: ReactNode }) {
       setSavedFestivals((prev) =>
         saved ? prev.filter((f) => f.id !== festival.id) : [...prev, festival]
       );
+
+      if (saved) {
+        show(`Removed ${festival.name} from your calendar`, {
+          label: "UNDO",
+          onPress: () => { toggleFestival(festival); },
+        });
+      } else {
+        show(`Saved ${festival.name} to your calendar`);
+      }
+
       try {
         if (saved) await unsaveFestival(festival.id);
         else await saveFestival(festival.id);
@@ -72,7 +98,8 @@ export function SavesProvider({ children }: { children: ReactNode }) {
         refresh();
       }
     },
-    [savedFestivalIds, refresh]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [savedFestivalIds, refresh, show]
   );
 
   return (

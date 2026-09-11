@@ -2,31 +2,31 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { CalendarEvent, Festival } from "../lib/api";
 import { coverColor, flagEmoji, zonedTime } from "../lib/format";
 import { useSaves } from "../lib/saves";
 
-const ACCENT = "#e8ff47";
-const ACCENT_INK = "#101204";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const PANEL = "#14141b";
-const PANEL2 = "#1b1b24";
-const DANGER = "#ff6b6b";
-const FEST = "#ffb200";
 
 /** One label per card, strongest claim first — a cancellation outranks everything,
  *  because it is the thing the person most needs to see. Mirrors the backend's
  *  tag_kind, which is resolved where the saves and follows actually live. */
-const TAGS: Record<string, { text: string; bg: string; fg: string }> = {
-  cancelled: { text: "Cancelled", bg: "rgba(255,107,107,0.16)", fg: DANGER },
-  postponed: { text: "Postponed", bg: "rgba(255,107,107,0.16)", fg: DANGER },
-  ticket: { text: "Ticket saved", bg: ACCENT, fg: ACCENT_INK },
-  plan: { text: "In your plan", bg: "rgba(232,255,71,0.14)", fg: ACCENT },
-  following: { text: "Following", bg: "rgba(255,255,255,0.07)", fg: MUTED },
-};
+// A function of the theme, not a constant. It has to be: a table of colours declared at
+// module level is fixed at import time, and a hook cannot be called out here to ask which
+// theme is live.
+const tagsFor = (th: Theme): Record<string, { text: string; bg: string; fg: string }> => ({
+  cancelled: { text: "Cancelled", bg: alpha(th.danger, 0.16), fg: th.danger },
+  postponed: { text: "Postponed", bg: alpha(th.danger, 0.16), fg: th.danger },
+  ticket: { text: "Ticket saved", bg: th.accentFill, fg: th.accentInk },
+  plan: { text: "In your plan", bg: alpha(th.accent, 0.14), fg: th.accent },
+  following: { text: "Following", bg: alpha(th.text, 0.07), fg: th.muted },
+});
 
 function Tag({ text, bg, fg }: { text: string; bg: string; fg: string }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={[styles.tag, { backgroundColor: bg }]}>
       <Text style={[styles.tagText, { color: fg }]} numberOfLines={1}>{text}</Text>
@@ -35,6 +35,8 @@ function Tag({ text, bg, fg }: { text: string; bg: string; fg: string }) {
 }
 
 function Money({ amount, currency }: { amount: number | null; currency: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   if (amount == null) return <Text style={styles.priceDash}>—</Text>;
   return (
     <Text style={styles.price}>
@@ -46,6 +48,8 @@ function Money({ amount, currency }: { amount: number | null; currency: string |
 
 /** A saved-state bookmark that never opens the card underneath it. */
 function SaveButton({ on, onPress }: { on: boolean; onPress: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable
       style={[styles.save, on && styles.saveOn]}
@@ -54,20 +58,22 @@ function SaveButton({ on, onPress }: { on: boolean; onPress: () => void }) {
       accessibilityRole="button"
       accessibilityLabel={on ? "Remove from your calendar" : "Save to your calendar"}
     >
-      <Ionicons name={on ? "bookmark" : "bookmark-outline"} size={14} color={on ? ACCENT : MUTED} />
+      <Ionicons name={on ? "bookmark" : "bookmark-outline"} size={14} color={on ? th.accent : th.muted} />
     </Pressable>
   );
 }
 
 export function CalendarEventCard({ event, onPress }: { event: CalendarEvent; onPress: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { isSaved, toggle } = useSaves();
   // The server said what it knew when the page loaded; the context knows what the user
   // has tapped since. The context wins so the icon reacts instantly.
   const saved = isSaved(event.id) || event.saved;
   const off = event.status !== "scheduled";
-  const tag = event.tag_kind ? TAGS[event.tag_kind] : null;
+  const tag = event.tag_kind ? tagsFor(th)[event.tag_kind] : null;
   const cityTag = event.tag_kind === "city" && event.city
-    ? { text: `In ${event.city}`, bg: "rgba(255,255,255,0.07)", fg: MUTED }
+    ? { text: `In ${event.city}`, bg: alpha(th.text, 0.07), fg: th.muted }
     : null;
   const time = event.starts_at ? zonedTime(event.starts_at, event.timezone) : "TBA";
 
@@ -104,6 +110,8 @@ export function CalendarEventCard({ event, onPress }: { event: CalendarEvent; on
 }
 
 export function CalendarFestivalCard({ festival, onPress }: { festival: Festival; onPress?: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const { isFestivalSaved, toggleFestival } = useSaves();
   const saved = isFestivalSaved(festival.id) || !!festival.saved;
   const days = festival.days ?? 1;
@@ -120,7 +128,7 @@ export function CalendarFestivalCard({ festival, onPress }: { festival: Festival
           <Text style={styles.artTag}>{days} {days === 1 ? "DAY" : "DAYS"}</Text>
         </View>
         <View style={styles.mid}>
-          <Tag text={days === 1 ? "Festival" : `${days}-day festival`} bg="rgba(255,178,0,0.16)" fg={FEST} />
+          <Tag text={days === 1 ? "Festival" : `${days}-day festival`} bg={alpha(th.festival, 0.16)} fg={th.festival} />
           <Text style={styles.title} numberOfLines={1}>{festival.name}</Text>
           <Text style={styles.sub} numberOfLines={1}>
             {flagEmoji(festival.country)} {festival.city ?? "Location TBA"}
@@ -142,41 +150,41 @@ export function CalendarFestivalCard({ festival, onPress }: { festival: Festival
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   card: {
-    backgroundColor: PANEL, borderColor: LINE, borderWidth: 1, borderRadius: 16,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 16,
     padding: 11, marginBottom: 9, position: "relative",
   },
-  cardMine: { borderColor: "rgba(232,255,71,0.32)" },
+  cardMine: { borderColor: alpha(th.accent, 0.32) },
   cardOff: { opacity: 0.7 },
   top: { flexDirection: "row", gap: 12 },
-  art: { width: 62, height: 62, borderRadius: 12, overflow: "hidden", backgroundColor: PANEL2 },
+  art: { width: 62, height: 62, borderRadius: 12, overflow: "hidden", backgroundColor: th.panel2 },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   artTag: {
     position: "absolute", left: 0, right: 0, bottom: 0, textAlign: "center",
     fontSize: 8.5, fontWeight: "900", letterSpacing: 0.6, paddingVertical: 3,
-    backgroundColor: "rgba(0,0,0,0.5)", color: "#fff",
+    backgroundColor: th.scrim2, color: "#fff",
   },
   mid: { flex: 1, minWidth: 0, paddingRight: 28 },
   tag: { alignSelf: "flex-start", borderRadius: 5, paddingHorizontal: 7, paddingVertical: 3, marginBottom: 6 },
   tagText: { fontSize: 9, fontWeight: "900", letterSpacing: 0.9, textTransform: "uppercase" },
-  title: { color: "#f4f4f6", fontSize: 15.5, fontWeight: "800", lineHeight: 19 },
-  sub: { color: MUTED, fontSize: 12.5, marginTop: 3 },
+  title: { color: th.text, fontSize: 15.5, fontWeight: "800", lineHeight: 19 },
+  sub: { color: th.muted, fontSize: 12.5, marginTop: 3 },
   save: {
     position: "absolute", top: 10, right: 10, width: 30, height: 30, borderRadius: 9,
-    backgroundColor: PANEL2, borderColor: LINE, borderWidth: 1,
+    backgroundColor: th.panel2, borderColor: th.line, borderWidth: 1,
     alignItems: "center", justifyContent: "center",
   },
-  saveOn: { backgroundColor: "rgba(232,255,71,0.13)", borderColor: "rgba(232,255,71,0.45)" },
+  saveOn: { backgroundColor: alpha(th.accent, 0.13), borderColor: alpha(th.accent, 0.45) },
   foot: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    marginTop: 11, paddingTop: 9, borderTopWidth: 1, borderTopColor: LINE,
+    marginTop: 11, paddingTop: 9, borderTopWidth: 1, borderTopColor: th.line,
   },
-  time: { color: ACCENT, fontSize: 12.5, fontWeight: "800", fontVariant: ["tabular-nums"] },
-  timeMute: { color: MUTED },
-  sep: { width: 3, height: 3, borderRadius: 2, backgroundColor: MUTED, opacity: 0.7 },
-  genre: { color: MUTED, fontSize: 11.5, fontWeight: "600", flex: 1 },
-  price: { color: "#f4f4f6", fontSize: 14, fontWeight: "800" },
-  priceFrom: { color: MUTED, fontSize: 9.5, fontWeight: "800", letterSpacing: 0.5 },
-  priceDash: { color: MUTED, fontSize: 14, fontWeight: "800" },
+  time: { color: th.accent, fontSize: 12.5, fontWeight: "800", fontVariant: ["tabular-nums"] },
+  timeMute: { color: th.muted },
+  sep: { width: 3, height: 3, borderRadius: 2, backgroundColor: th.muted, opacity: 0.7 },
+  genre: { color: th.muted, fontSize: 11.5, fontWeight: "600", flex: 1 },
+  price: { color: th.text, fontSize: 14, fontWeight: "800" },
+  priceFrom: { color: th.muted, fontSize: 9.5, fontWeight: "800", letterSpacing: 0.5 },
+  priceDash: { color: th.muted, fontSize: 14, fontWeight: "800" },
 });

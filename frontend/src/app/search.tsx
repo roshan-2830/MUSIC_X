@@ -10,34 +10,42 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import ArtistDetail from "../components/artist-detail";
 import EventDetailView from "../components/event-detail";
 import FestivalDetailView from "../components/festival-detail";
+import WishlistHeart from "../components/wishlist-heart";
+import DateRangePicker from "../components/date-range-picker";
 import {
   ArtistSearchResult,
   Festival,
   fetchEvents,
   followArtist,
-  getFestivals,
   FollowedArtist,
+  getFestivals,
   getFollows,
   getRecommended,
   MusicEvent,
+  searchAll,
+  SearchAllResults,
+  SearchFilters,
   searchArtists,
-  searchFestivals,
-  searchFestivalsLive,
   searchEvents,
-  searchEventsLocal,
+  searchFestivalsLive,
   unfollowArtist,
 } from "../lib/api";
 import { audienceLine } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
+// The dropdown's fixed width, shared by its style and the clamp that keeps it on screen,
+// so the two cannot drift and let a menu slide off the edge.
+const MENU_WIDTH = 232;
 
 /* ---------------- small helpers ---------------- */
 function hashNum(s: string) {
@@ -67,124 +75,116 @@ function countryFlag(cc: string | null) {
   if (!cc || cc.length !== 2) return "";
   return String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 127397 + c.charCodeAt(0)));
 }
-function inWhen(iso: string | null, mode: string) {
-  if (!iso) return false;
-  const d = new Date(iso);
-  const now = new Date();
-  if (mode === "today") {
-    const s = new Date(now); s.setHours(0, 0, 0, 0);
-    const end = new Date(now); end.setHours(23, 59, 59, 999);
-    return d >= s && d <= end;
-  }
-  if (mode === "tomorrow") {
-    const s = new Date(now); s.setDate(now.getDate() + 1); s.setHours(0, 0, 0, 0);
-    const end = new Date(s); end.setHours(23, 59, 59, 999);
-    return d >= s && d <= end;
-  }
-  if (mode === "week") {
-    const s = new Date(now); s.setHours(0, 0, 0, 0);
-    const end = new Date(now); end.setDate(now.getDate() + 7); end.setHours(23, 59, 59, 999);
-    return d >= s && d <= end;
-  }
-  if (mode === "weekend") {
-    const end = new Date(now);
-    end.setDate(now.getDate() + (now.getDay() === 0 ? 0 : 7 - now.getDay()));
-    end.setHours(23, 59, 59, 999);
-    return d >= now && d <= end;
-  }
-  if (mode === "month") return d <= new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-  if (mode === "3m") {
-    const end = new Date(now);
-    end.setMonth(now.getMonth() + 3);
-    return d <= end;
-  }
-  return true;
-}
 
-/* ---------------- filter option lists (apply to concerts) ---------------- */
-type Opt = { value: string; label: string; short?: string };
-const SORT_OPTS: Opt[] = [
-  { value: "soonest", label: "Soonest first", short: "Soonest" },
-  { value: "rating", label: "Highest rated", short: "Top rated" },
-  { value: "price", label: "Lowest price", short: "Cheapest" },
-];
-const DATE_OPTS: Opt[] = [
-  { value: "", label: "Any date" },
-  { value: "today", label: "Today", short: "Today" },
-  { value: "tomorrow", label: "Tomorrow", short: "Tomorrow" },
-  { value: "weekend", label: "This weekend", short: "Weekend" },
-  { value: "week", label: "Next 7 days", short: "7 days" },
-  { value: "month", label: "This month", short: "This month" },
-  { value: "3m", label: "Next 3 months", short: "3 months" },
-];
-const COUNTRY_CODES = ["GB", "US", "DE", "NL", "FR", "ES", "IT", "IE", "IN", "JP", "KR", "BR", "MX", "AU", "CA"];
-const COUNTRY_OPTS: Opt[] = [
-  { value: "", label: "Any country" },
-  ...COUNTRY_CODES.map((cc) => ({ value: cc, label: `${countryFlag(cc)}  ${cc}`, short: `${countryFlag(cc)} ${cc}` })),
-];
-
-/* ---------------- feeds ----------------
-   Every "See all" on Home lands here rather than in its own modal, so one screen owns
-   browsing: the same filters, sort and search bar apply whatever you arrived from.
-   `feed` says WHICH list to load; `label` is what the user tapped, shown as a chip
-   they can clear to fall back to browsing everything. */
 const FEED_LABELS: Record<string, string> = {
   recommended: "Recommended for you",
-  soon: "Coming up soon",
-  rated: "Highest rated",
+  rated: "Top rated",
+  soon: "On soon",
   city: "In your city",
-  country: "In your country",
-  all: "All concerts",
+  country: "Around the country",
 };
 
-type Filters = { sort: string; when: string; country: string };
-const EMPTY: Filters = { sort: "soonest", when: "", country: "" };
+/** One act as this screen lists it, from either of the two places acts come from.
+ *
+ *  `via` is the honest label for WHY it is on screen, and the three values are three
+ *  different claims:
+ *    name    — our catalogue has an act by this name
+ *    lineup  — our catalogue has them on a bill the term matched (searching "Wembley"
+ *              finds Megadeth because Megadeth plays there, not because of their name)
+ *    deezer  — nobody by that name is in our catalogue; Deezer's global one has them.
+ *              Followable, but we hold no dates, so it must never claim any.
+ */
+type Person = {
+  key: string;
+  name: string;
+  image_url: string | null;
+  deezer_id: number | null;
+  fans: number | null;
+  upcoming_events: number;
+  upcoming_festivals: number;
+  via: "name" | "lineup" | "deezer";
+};
 
-/* ---------------- one dropdown filter (pill + bottom sheet) ---------------- */
-function FilterDropdown({
-  icon, title, placeholder, options, value, defaultValue = "", onChange,
-}: {
-  icon: keyof typeof Ionicons.glyphMap; title: string; placeholder: string;
-  options: Opt[]; value: string; defaultValue?: string; onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const active = value !== "" && value !== defaultValue;
-  const selected = options.find((o) => o.value === value);
-  const pillText = active ? selected?.short ?? selected?.label ?? placeholder : placeholder;
-  return (
-    <>
-      <Pressable style={[styles.pill, active && styles.pillOn]} onPress={() => setOpen(true)}>
-        <Ionicons name={icon} size={14} color={active ? "#0b0b0f" : MUTED} />
-        <Text style={[styles.pillText, active && styles.pillTextOn]} numberOfLines={1}>{pillText}</Text>
-        <Ionicons name="chevron-down" size={13} color={active ? "#0b0b0f" : MUTED} />
-      </Pressable>
-      <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-        <View style={styles.modalRoot}>
-          <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
-          <View style={styles.sheet}>
-            <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>{title}</Text>
-            <ScrollView style={{ maxHeight: 360 }}>
-              {options.map((o) => {
-                const on = o.value === value;
-                return (
-                  <Pressable key={o.value || "any"} style={styles.optRow}
-                    onPress={() => { onChange(o.value); setOpen(false); }}>
-                    <Text style={[styles.optText, on && styles.optTextOn]}>{o.label}</Text>
-                    {on ? <Ionicons name="checkmark" size={20} color={ACCENT} /> : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-    </>
-  );
+const NO_RESULTS: SearchAllResults = { artists: [], events: [], festivals: [], applied: [] };
+
+/* ---------------- the filter panel's options ----------------
+   `count` names the field in the server's counts payload, so each option can say how many
+   matching CONCERTS it would leave. Options without a count key have none to show: the
+   server counts concerts, and "in my city" or "only acts I follow" would need their own
+   aggregate each. Nothing shows a made-up number. */
+type Opt = { value: string; label: string; count?: keyof NonNullable<SearchAllResults["counts"]> };
+
+const WHEN_OPTS: Opt[] = [
+  { value: "today", label: "Today", count: "today" },
+  { value: "tomorrow", label: "Tomorrow", count: "tomorrow" },
+  { value: "weekend", label: "This weekend", count: "weekend" },
+  { value: "d7", label: "Next 7 days", count: "d7" },
+  { value: "month", label: "This month", count: "month" },
+  { value: "m3", label: "Next 3 months", count: "m3" },
+  { value: "custom", label: "Pick exact dates…" },
+];
+const ONSALE_OPTS: Opt[] = [
+  { value: "now", label: "On sale now", count: "onsale_now" },
+  { value: "coming", label: "Coming on sale", count: "onsale_coming" },
+];
+const RATING_OPTS: Opt[] = [
+  { value: "8", label: "Top rated · 8.0+", count: "rating_8" },
+  { value: "7", label: "Highly rated · 7.0+", count: "rating_7" },
+];
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+/** The label a pill wears. Unset it names the filter; set it names the ANSWER — so the row
+ *  states what is on, and no second chip row underneath has to repeat it. */
+function pillLabel(group: Group, f: SearchFilters): string {
+  const v = group.valueOf(f);
+  if (!v) return group.label;
+  if (group.key === "when" && v === "custom") {
+    return f.from ? (f.to && f.to !== f.from ? `${f.from} → ${f.to}` : f.from) : "Dates";
+  }
+  return (group.opts.find((o) => o.value === v)?.label ?? group.label).replace("…", "");
 }
 
-/* ---------------- the screen ---------------- */
+type Group = {
+  key: "when" | "onsale" | "rating";
+  label: string;
+  opts: Opt[];
+  note?: string;
+  valueOf: (f: SearchFilters) => string | null;
+  pick: (f: SearchFilters, value: string) => SearchFilters;
+};
+
+/** What clearing a pill resets. `when` owns the exact-date range too, so its × must drop
+ *  from/to as well or the server would keep filtering by a range with no pill showing. */
+const CLEARED: Record<Group["key"], Partial<SearchFilters>> = {
+  when: { when: null, from: null, to: null },
+  onsale: { onsale: null },
+  rating: { rating: null },
+};
+
+const GROUPS: Group[] = [
+  {
+    key: "when", label: "When", opts: WHEN_OPTS,
+    valueOf: (f) => f.when ?? null,
+    // Choosing a preset clears any exact range, and vice versa — they answer the same
+    // question and holding both would send the server two contradictory windows.
+    pick: (f, v) => ({ ...f, when: f.when === v ? null : (v as any), from: null, to: null }),
+  },
+  {
+    key: "onsale", label: "Tickets", opts: ONSALE_OPTS,
+    note: "Applies to concerts — festivals publish no on-sale date.",
+    valueOf: (f) => f.onsale ?? null,
+    pick: (f, v) => ({ ...f, onsale: f.onsale === v ? null : (v as any) }),
+  },
+  {
+    key: "rating", label: "Rating", opts: RATING_OPTS,
+    valueOf: (f) => (f.rating ? String(f.rating) : null),
+    pick: (f, v) => ({ ...f, rating: f.rating === Number(v) ? null : Number(v) }),
+  },
+];
+
 export default function SearchScreen() {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const router = useRouter();
   const params = useLocalSearchParams<{
     type?: string; feed?: string; label?: string; city_id?: string; country?: string;
@@ -193,44 +193,63 @@ export default function SearchScreen() {
   // held in state, not read straight from the params, so the chip can be cleared
   const [feed, setFeed] = useState(params.feed ?? "");
   const feedLabel = params.label || FEED_LABELS[params.feed ?? ""] || "";
-  const [mode, setMode] = useState<"concerts" | "festivals" | "artists">(
-    params.type === "festivals" ? "festivals" : params.type === "artists" ? "artists" : "concerts"
-  );
-  // Everyone the user follows. Shown in Artists mode when the box is empty, so this
-  // screen is where you both browse your artists AND find new ones — the same shape as
-  // Concerts and Festivals. NOT de-duplicated: this is the surface where near-duplicates
-  // ("AR Rahman" beside "A.R. Rahman") get unfollowed, so hiding them would trap them.
-  const [myArtists, setMyArtists] = useState<FollowedArtist[]>([]);
+
   const [q, setQ] = useState("");
-  const [raw, setRaw] = useState<MusicEvent[]>([]);
-  const [artists, setArtists] = useState<ArtistSearchResult[]>([]);
-  const [festAll, setFestAll] = useState<Festival[]>([]);
-  const [festResults, setFestResults] = useState<Festival[]>([]);
+  const [raw, setRaw] = useState<MusicEvent[]>([]);           // the browse feed
+  const [festBrowse, setFestBrowse] = useState<Festival[]>([]);
+  const [myArtists, setMyArtists] = useState<FollowedArtist[]>([]);
+  // NOT a tab and not selectable — it only reflects which Home row was tapped. The three
+  // links that used to preselect a tab (the artists row's "See all", the same row's search
+  // shortcut, the festivals row's "View All") would otherwise land on a list of concerts,
+  // which answers a question nobody asked.
+  const browseKind = params.type === "festivals" ? "festivals"
+    : params.type === "artists" ? "artists" : "concerts";
+  const [res, setRes] = useState<SearchAllResults>(NO_RESULTS);
+  const [people, setPeople] = useState<Person[]>([]);
   const [followed, setFollowed] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searched, setSearched] = useState(false);
-  const [f, setF] = useState<Filters>(
-    params.feed === "soon" ? { ...EMPTY, when: "week" }
-      : params.feed === "rated" ? { ...EMPTY, sort: "rating" }
-      : EMPTY
-  );
+  const [browsing, setBrowsing] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<string | null>(null);
   const [selectedFest, setSelectedFest] = useState<string | null>(null);
-  const [browsing, setBrowsing] = useState(true);
+
+  // Filters persist until cleared, which is what people expect of a funnel — and the chip
+  // row below the box keeps that visible, so nobody stares at three results wondering why.
+  // They reset on leaving the screen: state, not a store, on purpose.
+  const [filters, setFilters] = useState<SearchFilters>({});
+  const [rangeOpen, setRangeOpen] = useState(false);
+  // Which pill's dropdown is open, and where each pill sits so its menu can be anchored
+  // under it. Measured rather than guessed: the pills are as wide as their labels, and a
+  // label changes the moment you pick something ("When" becomes "Next 3 months").
+  const [menu, setMenu] = useState<Group["key"] | null>(null);
+  const pillX = useRef<Record<string, number>>({});
+  // How far the pill row has been slid. Held in state, not a ref, because an open menu has
+  // to travel with its own pill: onLayout reports x within the row's CONTENT, so the moment
+  // the row scrolls, content-x and screen-x stop agreeing.
+  const [pillScroll, setPillScroll] = useState(0);
+  const { width: winW } = useWindowDimensions();
+  const menuLeft = useMemo(() => {
+    const x = (menu ? pillX.current[menu] ?? 0 : 0) - pillScroll;
+    // Kept on screen at both ends: a menu hanging off the left edge is unreachable, and one
+    // off the right gets its counts clipped.
+    return Math.max(0, Math.min(x, Math.max(0, winW - 32 - MENU_WIDTH)));
+  }, [menu, pillScroll, winW]);
+  const counts = res.counts ?? null;
 
   async function loadBrowse(which: string = feed) {
-    setLoading(true); setError(null); setSearched(true); setBrowsing(true);
-    setArtists([]); setFestResults([]);
+    setLoading(true); setError(null); setBrowsing(true);
+    setRes(NO_RESULTS); setPeople([]);
     try {
-      if (which === "recommended") setRaw(await getRecommended(200));
-      else if (which === "rated") setRaw(await fetchEvents("mxs", 200));
+      const sort = filters.sort === "rating" ? "mxs" : "date";
+      if (which === "recommended") setRaw(await getRecommended(200, filters));
+      else if (which === "rated") setRaw(await fetchEvents("mxs", 200, undefined, undefined, filters));
       else if (which === "city" && params.city_id)
-        setRaw(await fetchEvents("date", 200, params.city_id));
+        setRaw(await fetchEvents(sort, 200, params.city_id, undefined, filters));
       else if (which === "country" && params.country)
-        setRaw(await fetchEvents("date", 200, undefined, params.country));
-      else setRaw(await fetchEvents("date", 200));
+        setRaw(await fetchEvents(sort, 200, undefined, params.country, filters));
+      else if (browseKind === "festivals") setFestBrowse(await getFestivals(300, filters));
+      else setRaw(await fetchEvents(sort, 200, undefined, undefined, filters));
     } catch (e) {
       setError(String(e)); setRaw([]);
     } finally {
@@ -238,33 +257,19 @@ export default function SearchScreen() {
     }
   }
 
-  // Same trap as `feed` below: expo-router can hand over an empty params object on the
-  // first render and fill it in on the next, so reading params.type ONLY in the useState
-  // initialiser left mode stuck on "concerts". That is why "See all" on the artists row
-  // landed here showing concerts. Keyed on params.type so it corrects itself the moment
-  // the router tells us — and this covers the festivals "View All" too, which had the
-  // same latent bug.
-  useEffect(() => {
-    if (params.type === "artists") setMode("artists");
-    else if (params.type === "festivals") setMode("festivals");
-    else if (params.type) setMode("concerts");
-  }, [params.type]);
-
   // Load the list from the feed, and RE-load whenever it changes.
   //
-  // This must not live in the mount effect. expo-router can deliver an empty params
-  // object on the first render and fill it in on the next, so `feed` initialises to ""
-  // and a mount-time load falls through to the generic browse — which returned exactly
-  // 200 unrelated concerts for "Recommended for you". Keying off params.feed means we
-  // load once the router has actually told us which list was tapped.
+  // This must not live in a mount effect. expo-router can deliver an empty params object
+  // on the first render and fill it in on the next, so `feed` initialises to "" and a
+  // mount-time load falls through to the generic browse — which returned exactly 200
+  // unrelated concerts for "Recommended for you". Keying off params.feed means we load
+  // once the router has actually told us which list was tapped.
   useEffect(() => {
     const incoming = params.feed ?? "";
     setFeed(incoming);
-    if (incoming === "soon") setF({ ...EMPTY, when: "week" });
-    else if (incoming === "rated") setF({ ...EMPTY, sort: "rating" });
     loadBrowse(incoming);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.feed]);
+  }, [params.feed, params.type]);
 
   const loadFollows = useCallback(() => {
     getFollows()
@@ -272,19 +277,17 @@ export default function SearchScreen() {
         const m: Record<string, string> = {};
         list.forEach((a) => (m[a.name.toLowerCase()] = a.id));
         setFollowed(m);
+        // Not de-duplicated on purpose: this is the surface where a near-duplicate follow
+        // ("AR Rahman" beside "A.R. Rahman") gets unfollowed, so hiding one would trap it.
         setMyArtists(list);
       })
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    getFestivals(300).then(setFestAll).catch(() => {});
-    loadFollows();
-  }, []);
+  useEffect(() => { loadFollows(); }, [loadFollows]);
 
   function clearFeed() {
     setFeed("");
-    setF(EMPTY);
     loadBrowse("");
   }
 
@@ -294,75 +297,94 @@ export default function SearchScreen() {
   // looking at the results for "cor".
   const searchSeq = useRef(0);
 
-  // The cheap half: our own database, the festival list already in memory, and Deezer's
-  // artist search. Nothing here costs Ticketmaster budget, so it can run while you type.
+  /** DB artists first — only they can carry dates — then Deezer fills the gaps.
+   *
+   *  Merged on the lowercased name because the two catalogues spell the same act two ways
+   *  and the whole point of the Deezer pass is the acts we do NOT hold. Listing "Coldplay"
+   *  twice, once with their tour and once without, would be worse than not asking Deezer.
+   */
+  function mergePeople(ours: SearchAllResults["artists"], theirs: ArtistSearchResult[]): Person[] {
+    const mine: Person[] = ours.map((a) => ({
+      key: a.id,
+      name: a.name,
+      image_url: a.image_url,
+      deezer_id: null,
+      fans: a.deezer_fans,
+      upcoming_events: a.upcoming_events,
+      upcoming_festivals: a.upcoming_festivals,
+      via: a.via,
+    }));
+    const seen = new Set(mine.map((p) => p.name.toLowerCase()));
+    const extra: Person[] = theirs
+      .filter((a) => a.name && !seen.has(a.name.toLowerCase()))
+      .slice(0, 4)
+      .map((a) => ({
+        key: `dz-${a.deezer_id ?? a.name}`,
+        name: a.name,
+        image_url: a.image_url,
+        deezer_id: a.deezer_id,
+        fans: a.fans,
+        upcoming_events: 0,
+        upcoming_festivals: 0,
+        via: "deezer" as const,
+      }));
+    return [...mine, ...extra];
+  }
+
+  // The cheap half: our own database in ONE request — artists, their concerts, their
+  // festivals and, when the term is a place or a festival, who is on the bill — plus
+  // Deezer's global artist search so an act with no dates yet can still be followed.
+  // Neither costs Ticketmaster budget, so both can run while you type.
   async function runLocalSearch(term: string, seq: number) {
     const stale = () => seq !== searchSeq.current;
     setFeed("");        // a typed search replaces whatever feed we arrived from
-    if (mode === "artists") {
-      setLoading(true);
-      try {
-        const list = await searchArtists(term);
-        if (!stale()) setArtists(list);
-      } catch {
-        if (!stale()) setArtists([]);
-      } finally {
-        if (!stale()) setLoading(false);
-      }
-      return;
-    }
-    setSearched(true); setBrowsing(false); setError(null);
-    // Server-side now, and ranked. The old client-side filter searched only the 100
-    // festivals this screen had fetched, so a search for something we DO hold returned
-    // nothing but whatever noise happened to be in those 100 — "ade" matched "BULL
-    // BRIGADE" and "Shred Fest Adelaide" while Corona Capital was unreachable.
-    searchFestivals(term).then((l) => { if (!stale()) setFestResults(l); }).catch(() => {});
-    // No artist lookup here any more: Concerts and Festivals no longer render artists, and
-    // this fired a Deezer request on every keystroke to fill a list nobody sees.
-    setArtists([]);
+    setBrowsing(false); setError(null); setLoading(true);
 
-    setLoading(true);
+    // Deezer runs alongside rather than after: it is the slower of the two and nothing
+    // in our own answer depends on it.
+    const global = searchArtists(term).catch(() => [] as ArtistSearchResult[]);
     try {
-      const local = await searchEventsLocal(term);
-      if (!stale()) setRaw(local);
+      const ours = await searchAll(term);
+      if (stale()) return;
+      setRes(ours);
+      setPeople(mergePeople(ours.artists, []));      // show ours immediately
+      const theirs = await global;
+      if (!stale()) setPeople(mergePeople(ours.artists, theirs));
     } catch {
-      if (!stale()) setRaw([]);
+      if (!stale()) { setRes(NO_RESULTS); setPeople([]); }
     } finally {
       if (!stale()) setLoading(false);
     }
   }
 
-  // The paid half: a live Ticketmaster search, which finds shows we have never ingested.
-  // Kept separate and on a longer delay because Ticketmaster's free tier is 5,000 calls a
-  // DAY and the discovery sweep plus the nightly re-verify already spend most of it. Per
-  // keystroke this would drain the quota in a single session of typing.
+  // The paid half: a live Ticketmaster search, which finds shows and festivals we have
+  // never ingested. Kept separate and on a longer delay because the free tier is 5,000
+  // calls a DAY and the discovery sweep plus the nightly re-verify already spend most of
+  // it. Per keystroke this would drain the quota in one session of typing.
+  //
+  // Two calls now rather than one, because a single box has to answer for both kinds —
+  // still only on the settled term, so a session of typing costs two, not two per letter.
   async function runLiveSearch(term: string, seq: number) {
-    if (mode === "artists") return;
-    if (mode === "festivals") {
-      // The same deal the concert side has always had: our own festivals appear instantly,
-      // then Ticketmaster is asked once for anything we have never swept. Merged by id, so
-      // a festival we already held is not listed twice.
-      try {
-        const live = await searchFestivalsLive(term);
-        if (seq !== searchSeq.current) return;
-        setFestResults((prev) => {
-          const seen = new Set(prev.map((f) => f.id));
-          return [...prev, ...live.filter((f) => !seen.has(f.id))];
-        });
-      } catch {
-        /* the local results already stand on their own */
-      }
-      return;
-    }
+    const stale = () => seq !== searchSeq.current;
     try {
       const live = await searchEvents(term);
-      if (seq !== searchSeq.current) return;
-      setRaw((prev) => {
-        const seen = new Set(prev.map((e) => e.id));
-        return [...prev, ...live.filter((e) => !seen.has(e.id))];
+      if (stale()) return;
+      setRes((prev) => {
+        const seen = new Set(prev.events.map((e) => e.id));
+        return { ...prev, events: [...prev.events, ...live.filter((e) => !seen.has(e.id))] };
       });
     } catch {
       /* the local results already stand on their own */
+    }
+    try {
+      const live = await searchFestivalsLive(term);
+      if (stale()) return;
+      setRes((prev) => {
+        const seen = new Set(prev.festivals.map((f) => f.id));
+        return { ...prev, festivals: [...prev.festivals, ...live.filter((f) => !seen.has(f.id))] };
+      });
+    } catch {
+      /* same */
     }
   }
 
@@ -377,15 +399,12 @@ export default function SearchScreen() {
 
   // Search as you type. Two delays on purpose:
   //
-  //   250ms → the local pass, which is what makes it feel live. Typing "corona" surfaces
-  //           Corona Capital before you finish the word; the backend already matched on a
-  //           substring, so nothing had to change there — the screen simply never asked
-  //           until you pressed the search key.
+  //   250ms → our own database, which is what makes it feel live.
   //   900ms → the live Ticketmaster pass. Both are TRAILING, so continuous typing costs
-  //           exactly one live call at the end, the same as one press of search used to.
+  //           exactly one round of live calls at the end.
   //
   // Under two characters nothing runs: one letter matches a large slice of the catalogue,
-  // and Deezer's artist search rejects a single character anyway.
+  // and the endpoint rejects a single character anyway.
   useEffect(() => {
     const term = q.trim();
     if (!term) {
@@ -398,24 +417,32 @@ export default function SearchScreen() {
     const liveTimer = setTimeout(() => runLiveSearch(term, seq), 900);
     return () => { clearTimeout(localTimer); clearTimeout(liveTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, mode]);
+  }, [q, filters]);
 
-  async function toggleFollow(a: ArtistSearchResult) {
-    // whatever happens, re-read the follows afterwards so Artists mode stays truthful
+  // A filter change while browsing has to re-ask too, or the funnel does nothing until you
+  // type. Skipped on the first render, which loadBrowse already handled.
+  const firstFilterRun = useRef(true);
+  useEffect(() => {
+    if (firstFilterRun.current) { firstFilterRun.current = false; return; }
+    if (!q.trim()) loadBrowse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters]);
+
+  async function toggleFollow(p: { name: string; image_url: string | null; deezer_id: number | null }) {
     const refresh = () => loadFollows();
-    const key = a.name.toLowerCase();
+    const key = p.name.toLowerCase();
     const id = followed[key];
     if (id) {
       setFollowed((m) => { const n = { ...m }; delete n[key]; return n; });
-      // Drop it from the visible list straight away. Without this the row stayed on
-      // screen after a successful unfollow, so it looked broken — and a second tap fell
-      // through to the else-branch and re-followed the artist.
+      // Drop it from the visible list at once. Without this the row stayed on screen after
+      // a successful unfollow, so it looked broken — and a second tap fell through to the
+      // else-branch and re-followed the artist.
       setMyArtists((prev) => prev.filter((x) => x.name.toLowerCase() !== key));
       if (id !== "pending") unfollowArtist(id).catch(() => {}).finally(refresh);
     } else {
       setFollowed((m) => ({ ...m, [key]: "pending" }));
       try {
-        const saved = await followArtist({ name: a.name, deezer_id: a.deezer_id, image_url: a.image_url });
+        const saved = await followArtist({ name: p.name, deezer_id: p.deezer_id, image_url: p.image_url });
         setFollowed((m) => ({ ...m, [key]: saved.id }));
         refresh();
       } catch {
@@ -424,41 +451,24 @@ export default function SearchScreen() {
     }
   }
 
-  const concerts = useMemo(() => {
-    let l = raw.slice();
-    if (f.when) l = l.filter((e) => inWhen(e.starts_at, f.when));
-    if (f.country) l = l.filter((e) => e.country === f.country);
-    if (f.sort === "rating") l.sort((a, b) => (b.mxs ?? -1) - (a.mxs ?? -1));
-    else if (f.sort === "price") l.sort((a, b) => (a.price_from_amount ?? 9e9) - (b.price_from_amount ?? 9e9));
-    else l.sort((a, b) => {
-      const ta = a.starts_at ? new Date(a.starts_at).getTime() : Infinity;
-      const tb = b.starts_at ? new Date(b.starts_at).getTime() : Infinity;
-      return ta - tb;
-    });
-    return l;
-  }, [raw, f]);
+  /** Why this act is listed, in counted facts only.
+   *
+   *  Both counts zero says NOTHING rather than "0 concerts": we hold no date for them,
+   *  which is not the same claim as none existing. A Deezer-only act falls back to its
+   *  follower count, the one thing we do know about it.
+   */
+  function personLine(p: Person): string | null {
+    if (p.via === "deezer") return audienceLine({ fans: p.fans });
+    const bits: string[] = [];
+    if (p.upcoming_events) bits.push(`${p.upcoming_events} concert${p.upcoming_events === 1 ? "" : "s"}`);
+    if (p.upcoming_festivals) bits.push(`${p.upcoming_festivals} festival${p.upcoming_festivals === 1 ? "" : "s"}`);
+    const counts = bits.join(" · ");
+    if (p.via === "lineup") return counts ? `On the bill · ${counts}` : "On the bill";
+    return counts || audienceLine({ deezer_fans: p.fans });
+  }
 
-  // Festivals browse list — same filters (date on start date, country), soonest first.
-  const festivalsBrowse = useMemo(() => {
-    let l = festAll.slice();
-    if (f.when) l = l.filter((x) => inWhen(x.starts_on, f.when));
-    if (f.country) l = l.filter((x) => x.country === f.country);
-    l.sort((a, b) => {
-      const ta = a.starts_on ? new Date(a.starts_on).getTime() : Infinity;
-      const tb = b.starts_on ? new Date(b.starts_on).getTime() : Infinity;
-      return ta - tb;
-    });
-    return l;
-  }, [festAll, f]);
-
-  const activeCount = (f.when ? 1 : 0) + (f.country ? 1 : 0) + (f.sort !== "soonest" ? 1 : 0);
-  // Judged against the kind this toggle actually shows. It used to require all three to
-  // be empty, so "No results" never appeared on Concerts while an unrelated artist matched.
-  const nothing = !loading && !browsing && (
-    mode === "artists" ? artists.length === 0
-      : mode === "festivals" ? festResults.length === 0
-      : concerts.length === 0
-  );
+  const nothing = !loading && !browsing
+    && !people.length && !res.events.length && !res.festivals.length;
 
   function FestivalRow({ fest }: { fest: Festival }) {
     return (
@@ -476,8 +486,6 @@ export default function SearchScreen() {
             {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
           </Text>
         </View>
-        {/* The score, as EventRow has always shown it. Without this the "sort by rating"
-            filter above ranked festivals by a number the row never displayed. */}
         {fest.mxs != null ? <Text style={styles.rowMxs}>{fest.mxs.toFixed(1)}</Text> : null}
       </Pressable>
     );
@@ -504,18 +512,52 @@ export default function SearchScreen() {
     );
   }
 
+  function PersonRow({ p }: { p: Person }) {
+    const following = !!followed[p.name.toLowerCase()];
+    const line = personLine(p);
+    return (
+      <View style={styles.row}>
+        <Pressable style={styles.artistTap} onPress={() => setSelectedArtist(p.name)}>
+          {p.image_url ? (
+            <Image source={{ uri: p.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback]}>
+              <Text style={styles.avatarInitial}>{p.name[0]?.toUpperCase()}</Text>
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowTitle} numberOfLines={1}>{p.name}</Text>
+            {line ? <Text style={styles.rowSub} numberOfLines={1}>{line}</Text> : null}
+          </View>
+        </Pressable>
+        {/* A heart sits beside an ARTIST, never beside an event — the whole point of the
+            two controls being different. Wanting to see someone and subscribing to their
+            alerts stayed deliberately separate, so both are offered here. */}
+        <WishlistHeart artistName={p.name} imageUrl={p.image_url} variant="panel" />
+        <Pressable
+          style={[styles.followBtn, following && styles.followingBtn]}
+          hitSlop={6}
+          onPress={() => toggleFollow(p)}>
+          <Text style={following ? styles.followingText : styles.followText}>
+            {following ? "Following" : "Follow"}
+          </Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       {/* header */}
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Pressable onPress={() => router.back()} hitSlop={10}>
-            <Ionicons name="chevron-back" size={26} color="#f4f4f6" />
+            <Ionicons name="chevron-back" size={26} color={th.text} />
           </Pressable>
           <Text style={styles.title}>Search</Text>
         </View>
         <View style={styles.searchbar}>
-          <Ionicons name="search" size={18} color={MUTED} />
+          <Ionicons name="search" size={18} color={th.muted} />
           <TextInput
             style={styles.input}
             value={q}
@@ -524,28 +566,103 @@ export default function SearchScreen() {
             returnKeyType="search"
             autoFocus={params.focus === "1" || !params.feed}
             placeholder="Artists, concerts, festivals, cities…"
-            placeholderTextColor={MUTED}
+            placeholderTextColor={th.muted}
             autoCapitalize="none"
             autoCorrect={false}
           />
           {q ? (
             <Pressable onPress={() => { setQ(""); loadBrowse(); }} hitSlop={8}>
-              <Ionicons name="close-circle" size={18} color={MUTED} />
+              <Ionicons name="close-circle" size={18} color={th.muted} />
             </Pressable>
           ) : null}
         </View>
 
-        <View style={styles.segment}>
-          <Pressable style={[styles.segBtn, mode === "concerts" && styles.segBtnOn]} onPress={() => setMode("concerts")}>
-            <Text style={[styles.segText, mode === "concerts" && styles.segTextOn]}>Concerts</Text>
-          </Pressable>
-          <Pressable style={[styles.segBtn, mode === "festivals" && styles.segBtnOn]} onPress={() => setMode("festivals")}>
-            <Text style={[styles.segText, mode === "festivals" && styles.segTextOn]}>Festivals</Text>
-          </Pressable>
-          <Pressable style={[styles.segBtn, mode === "artists" && styles.segBtnOn]} onPress={() => setMode("artists")}>
-            <Text style={[styles.segText, mode === "artists" && styles.segTextOn]}>Artists</Text>
-          </Pressable>
-        </View>
+        {/* Three dropdowns, under the box. No chip row underneath: each pill already wears
+            its own answer, and a chip repeating "Today" says the same thing twice. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          style={styles.pillScroll}
+          contentContainerStyle={styles.pillRow}
+          onScroll={(e) => setPillScroll(e.nativeEvent.contentOffset.x)}
+          scrollEventThrottle={16}
+        >
+          {GROUPS.map((g) => {
+            const value = g.valueOf(filters);
+            const open = menu === g.key;
+            return (
+              <Pressable
+                key={g.key}
+                style={[styles.pill, value ? styles.pillOn : null, open ? styles.pillOpen : null]}
+                onLayout={(e) => { pillX.current[g.key] = e.nativeEvent.layout.x; }}
+                onPress={() => setMenu(open ? null : g.key)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+              >
+                <Text style={[styles.pillText, value ? styles.pillTextOn : null]} numberOfLines={1}>
+                  {pillLabel(g, filters)}
+                </Text>
+                {value ? (
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => { setFilters((f) => ({ ...f, ...CLEARED[g.key] })); setMenu(null); }}
+                    accessibilityLabel={`Clear ${g.label}`}
+                  >
+                    <Ionicons name="close" size={12} color={th.accentInk} />
+                  </Pressable>
+                ) : (
+                  <Ionicons name={open ? "chevron-up" : "chevron-down"} size={12} color={th.muted} />
+                )}
+              </Pressable>
+            );
+          })}
+          {GROUPS.some((g) => g.valueOf(filters)) ? (
+            <Pressable onPress={() => { setFilters({}); setMenu(null); }} hitSlop={6}
+                       style={styles.clearAll}>
+              <Text style={styles.clearAllT}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </ScrollView>
+
+        {/* The open dropdown, anchored under its own pill. Absolute so it floats over the
+            results rather than shoving them down the screen every time you open it. */}
+        {menu ? (
+          <View style={styles.menuLayer} pointerEvents="box-none">
+            <View style={[styles.menu, { left: menuLeft }]}>
+              {(GROUPS.find((g) => g.key === menu) as Group).opts.map((o) => {
+                const g = GROUPS.find((x) => x.key === menu) as Group;
+                const on = g.valueOf(filters) === o.value;
+                const n = counts && o.count ? counts[o.count] : undefined;
+                return (
+                  <Pressable
+                    key={o.value}
+                    style={styles.menuItem}
+                    onPress={() => {
+                      if (o.value === "custom") { setMenu(null); setRangeOpen(true); return; }
+                      setFilters((f) => g.pick(f, o.value));
+                      setMenu(null);
+                    }}
+                  >
+                    <Text style={[styles.menuText, on ? styles.menuTextOn : null]} numberOfLines={1}>
+                      {o.label}
+                    </Text>
+                    {/* A real count or nothing at all. A zero here would read as
+                        "there are none", which is a different claim from "not counted". */}
+                    {n !== undefined ? (
+                      <Text style={[styles.menuCount, on ? styles.menuCountOn : null]}>{n}</Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+              {(GROUPS.find((g) => g.key === menu) as Group).note ? (
+                <Text style={styles.menuNote}>
+                  {(GROUPS.find((g) => g.key === menu) as Group).note}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
       </View>
 
       {/* what the user tapped to get here — clearing it browses everything */}
@@ -554,192 +671,119 @@ export default function SearchScreen() {
           <View style={styles.feedChip}>
             <Text style={styles.feedChipText}>{feedLabel}</Text>
             <Pressable onPress={clearFeed} hitSlop={8}>
-              <Ionicons name="close" size={14} color="#0b0b0f" />
+              <Ionicons name="close" size={14} color={th.accentInk} />
             </Pressable>
           </View>
           <Text style={styles.feedCount}>
-            {concerts.length} concert{concerts.length === 1 ? "" : "s"}
+            {raw.length} concert{raw.length === 1 ? "" : "s"}
           </Text>
         </View>
-      ) : null}
-
-      {/* Concert filters. Hidden in Artists mode: sorting people by "soonest first" or
-          "lowest price" means nothing, and a date filter on an artist is nonsense. */}
-      {mode !== "artists" ? (
-      <View style={styles.filterBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow} keyboardShouldPersistTaps="handled">
-          <FilterDropdown icon="swap-vertical" title="Sort by" placeholder="Sort" defaultValue="soonest"
-            options={SORT_OPTS} value={f.sort} onChange={(v) => setF((p) => ({ ...p, sort: v }))} />
-          <FilterDropdown icon="calendar-outline" title="Date" placeholder="Date"
-            options={DATE_OPTS} value={f.when} onChange={(v) => setF((p) => ({ ...p, when: v }))} />
-          <FilterDropdown icon="earth-outline" title="Country" placeholder="Country"
-            options={COUNTRY_OPTS} value={f.country} onChange={(v) => setF((p) => ({ ...p, country: v }))} />
-          {activeCount > 0 ? (
-            <Pressable style={styles.clearPill} onPress={() => setF(EMPTY)} hitSlop={6}>
-              <Text style={styles.clearText}>Clear</Text>
-            </Pressable>
-          ) : null}
-        </ScrollView>
-      </View>
       ) : null}
 
       {/* body */}
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {error ? (
           <View style={styles.centerBox}>
-            <Ionicons name="cloud-offline-outline" size={40} color={MUTED} />
+            <Ionicons name="cloud-offline-outline" size={40} color={th.muted} />
             <Text style={styles.errText}>Couldn’t load:{"\n"}{error}</Text>
           </View>
-        ) : mode === "artists" ? (
-          /* ARTISTS MODE — your follows, or search results once you type */
-          <View>
-            {q.trim().length < 2 ? (
-              myArtists.length ? (
-                <>
-                  <Text style={styles.groupHead}>Following · {myArtists.length}</Text>
-                  {myArtists.map((a) => (
-                    <View key={a.id} style={styles.row}>
-                      <Pressable style={styles.artistTap} onPress={() => setSelectedArtist(a.name)}>
-                        {a.image_url ? (
-                          <Image source={{ uri: a.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
-                        ) : (
-                          <View style={[styles.avatar, styles.avatarFallback]}>
-                            <Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text>
-                          </View>
-                        )}
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
-                          {audienceLine(a) ? (
-                            <Text style={styles.rowSub} numberOfLines={1}>{audienceLine(a)}</Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.followBtn, styles.followingBtn]}
-                        hitSlop={6}
-                        onPress={() =>
-                          toggleFollow({ name: a.name, image_url: a.image_url, deezer_id: null, fans: null })
-                        }>
-                        <Text style={styles.followingText}>Following</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </>
-              ) : (
-                <View style={styles.centerBox}>
-                  <Ionicons name="musical-notes-outline" size={40} color={MUTED} />
-                  <Text style={styles.dim}>
-                    You&rsquo;re not following anyone yet — search above and we&rsquo;ll track their shows worldwide.
-                  </Text>
-                </View>
-              )
-            ) : loading ? (
-              <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
-            ) : artists.length ? (
-              <>
-                <Text style={styles.groupHead}>Results</Text>
-                {artists.map((a) => {
-                  const following = !!followed[a.name.toLowerCase()];
-                  return (
-                    <View key={`${a.name}-${a.deezer_id}`} style={styles.row}>
-                      <Pressable style={styles.artistTap} onPress={() => setSelectedArtist(a.name)}>
-                        {a.image_url ? (
-                          <Image source={{ uri: a.image_url }} style={styles.avatar} contentFit="cover" transition={120} />
-                        ) : (
-                          <View style={[styles.avatar, styles.avatarFallback]}>
-                            <Text style={styles.avatarInitial}>{a.name[0]?.toUpperCase()}</Text>
-                          </View>
-                        )}
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.rowTitle} numberOfLines={1}>{a.name}</Text>
-                          {audienceLine(a) ? (
-                            <Text style={styles.rowSub} numberOfLines={1}>{audienceLine(a)}</Text>
-                          ) : null}
-                        </View>
-                      </Pressable>
-                      <Pressable style={[styles.followBtn, following && styles.followingBtn]} onPress={() => toggleFollow(a)} hitSlop={6}>
-                        <Text style={following ? styles.followingText : styles.followText}>
-                          {following ? "Following" : "Follow"}
-                        </Text>
-                      </Pressable>
-                    </View>
-                  );
-                })}
-              </>
-            ) : (
-              <View style={styles.centerBox}>
-                <Ionicons name="sad-outline" size={40} color={MUTED} />
-                <Text style={styles.dim}>No artist matches “{q.trim()}”.</Text>
-              </View>
-            )}
-          </View>
         ) : browsing ? (
-          mode === "festivals" ? (
-            festivalsBrowse.length ? (
-              <View>{festivalsBrowse.map((fest) => <FestivalRow key={fest.id} fest={fest} />)}</View>
+          /* Nothing typed: the feed or the list the Home row asked for. This path carries
+             every link into this screen, so it answers with the kind that was tapped. */
+          loading ? (
+            <View style={styles.centerBox}>
+              <ActivityIndicator color={th.accent} size="large" />
+              <Text style={styles.dim}>Loading…</Text>
+            </View>
+          ) : browseKind === "festivals" ? (
+            festBrowse.length ? (
+              <View>{festBrowse.map((fest) => <FestivalRow key={fest.id} fest={fest} />)}</View>
             ) : (
-              <View style={styles.centerBox}><Ionicons name="sad-outline" size={40} color={MUTED} /><Text style={styles.dim}>No festivals match those filters</Text></View>
-            )
-          ) : loading ? (
-            <View style={styles.centerBox}><ActivityIndicator color={ACCENT} size="large" /><Text style={styles.dim}>Loading concerts…</Text></View>
-          ) : concerts.length ? (
-            <View>{concerts.map((e) => <EventRow key={e.id} e={e} />)}</View>
-          ) : (
-            <View style={styles.centerBox}><Ionicons name="sad-outline" size={40} color={MUTED} /><Text style={styles.dim}>No concerts match those filters</Text></View>
-          )
-        ) : (
-          <View>
-            {/* One toggle, one kind. A search on Concerts used to render Artists, then
-                Concerts, then Festivals — three answers to a question that named one of
-                them. The toggles exist precisely to say which you meant, so honouring them
-                is what makes the choice mean anything. Nothing is lost: the same term is
-                still one tap away under the other two. */}
-            {mode === "festivals" ? (
-              festResults.length ? (
-                <>
-                  <Text style={styles.groupHead}>Festivals</Text>
-                  {festResults.slice(0, 8).map((fest) => (
-                    <Pressable key={fest.id} style={styles.row} onPress={() => setSelectedFest(fest.id)}>
-                      <View style={styles.thumb}>
-                        {fest.image_url ? (
-                          <Image source={{ uri: fest.image_url }} style={styles.tileFill} contentFit="cover" transition={150} />
-                        ) : (
-                          <View style={[styles.tileFill, { backgroundColor: tileColor(fest.id) }]} />
-                        )}
-                      </View>
-                      <View style={styles.rowText}>
-                        <Text style={styles.rowTitle} numberOfLines={1}>{fest.name}</Text>
-                        <Text style={styles.rowSub} numberOfLines={1}>
-                          {fmtRange(fest.starts_on, fest.ends_on)} · {countryFlag(fest.country)} {fest.city ?? ""}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  ))}
-                </>
-              ) : null
-            ) : (
-              <>
-                {/* No header over an empty list: the "No results" box below already says it,
-                    and a lone CONCERTS heading above nothing reads like a failed load. */}
-                {loading || concerts.length ? <Text style={styles.groupHead}>Concerts</Text> : null}
-                {loading ? (
-                  <ActivityIndicator color={ACCENT} style={{ marginVertical: 16 }} />
-                ) : (
-                  concerts.map((e) => <EventRow key={e.id} e={e} />)
-                )}
-              </>
-            )}
-
-            {nothing ? (
               <View style={styles.centerBox}>
-                <Ionicons name="sad-outline" size={40} color={MUTED} />
-                <Text style={styles.dim}>No results for “{q.trim()}”</Text>
-                <Text style={styles.hint}>Try another artist, concert, festival or city.</Text>
+                <Ionicons name="sad-outline" size={40} color={th.muted} />
+                <Text style={styles.dim}>No upcoming festivals</Text>
               </View>
+            )
+          ) : browseKind === "artists" ? (
+            myArtists.length ? (
+              <>
+                <Text style={styles.groupHead}>Following · {myArtists.length}</Text>
+                {myArtists.map((a) => (
+                  <PersonRow key={a.id} p={{
+                    key: a.id, name: a.name, image_url: a.image_url, deezer_id: null,
+                    fans: a.deezer_fans, upcoming_events: 0, upcoming_festivals: 0, via: "name",
+                  }} />
+                ))}
+              </>
+            ) : (
+              <View style={styles.centerBox}>
+                <Ionicons name="musical-notes-outline" size={40} color={th.muted} />
+                <Text style={styles.dim}>You&rsquo;re not following anyone yet</Text>
+                <Text style={styles.hint}>
+                  Search above and we&rsquo;ll track their shows worldwide.
+                </Text>
+              </View>
+            )
+          ) : raw.length ? (
+            <View>{raw.map((e) => <EventRow key={e.id} e={e} />)}</View>
+          ) : (
+            <View style={styles.centerBox}>
+              <Ionicons name="search-outline" size={40} color={th.muted} />
+              <Text style={styles.dim}>Search for anything</Text>
+              <Text style={styles.hint}>
+                An artist, a concert, a festival or a city — one box, and the answer comes
+                back with all three.
+              </Text>
+            </View>
+          )
+        ) : nothing ? (
+          <View style={styles.centerBox}>
+            <Ionicons name="sad-outline" size={40} color={th.muted} />
+            <Text style={styles.dim}>No results for “{q.trim()}”</Text>
+            <Text style={styles.hint}>Try another artist, concert, festival or city.</Text>
+          </View>
+        ) : (
+          /* ONE answer, three kinds, always in this order: who, then what, then where you
+             could see them. No toggle to get it wrong, and no section header over an empty
+             list — a lone heading above nothing reads like a failed load. */
+          <View>
+            {people.length ? (
+              <>
+                <Text style={styles.groupHead}>Artists</Text>
+                {people.map((p) => <PersonRow key={p.key} p={p} />)}
+              </>
             ) : null}
+
+            {res.events.length ? (
+              <>
+                <Text style={styles.groupHead}>Concerts</Text>
+                {res.events.map((e) => <EventRow key={e.id} e={e} />)}
+              </>
+            ) : null}
+
+            {res.festivals.length ? (
+              <>
+                <Text style={styles.groupHead}>Festivals</Text>
+                {res.festivals.map((fest) => <FestivalRow key={fest.id} fest={fest} />)}
+              </>
+            ) : null}
+
+            {loading ? <ActivityIndicator color={th.accent} style={{ marginVertical: 16 }} /> : null}
           </View>
         )}
       </ScrollView>
+
+      <DateRangePicker
+        visible={rangeOpen}
+        start={filters.from ?? iso(new Date())}
+        end={filters.to ?? iso(new Date())}
+        minDate={iso(new Date())}
+        onClose={() => setRangeOpen(false)}
+        onChange={(start, end) => {
+          setFilters((f) => ({ ...f, when: "custom", from: start, to: end }));
+          setRangeOpen(false);
+        }}
+      />
 
       <Modal visible={!!selectedId} animationType="slide" onRequestClose={() => setSelectedId(null)}>
         {selectedId ? <EventDetailView id={selectedId} onClose={() => setSelectedId(null)} /> : null}
@@ -761,79 +805,89 @@ export default function SearchScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: th.bg },
+
+  pillScroll: { marginTop: 12, flexGrow: 0 },
+  // paddingRight so the last pill — or Clear — is not flush against the screen edge once
+  // the row has been slid all the way over.
+  pillRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingRight: 16 },
+  pill: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line, borderRadius: 999,
+    paddingLeft: 13, paddingRight: 11, paddingVertical: 8,
+  },
+  pillOpen: { backgroundColor: th.panel2, borderColor: th.outline2 },
+  pillOn: { backgroundColor: th.accentFill, borderColor: th.accentFill },
+  pillText: { color: th.text2, fontSize: 13, fontWeight: "700", flexShrink: 1 },
+  pillTextOn: { color: th.accentInk },
+  clearAll: { paddingHorizontal: 4, paddingVertical: 6 },
+  clearAllT: { color: th.muted, fontSize: 12.5, fontWeight: "700" },
+
+  // Zero-height, so the dropdown floats over the results instead of pushing them down the
+  // screen each time one opens. box-none lets taps through to whatever is underneath.
+  menuLayer: { height: 0, zIndex: 30 },
+  menu: {
+    position: "absolute", top: 6, width: MENU_WIDTH,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.outline, borderRadius: 15,
+    padding: 5,
+    // Android draws shadows from elevation only; iOS and web need the four shadow props.
+    elevation: 12,
+    shadowColor: th.shadow, shadowOpacity: 0.55, shadowRadius: 18, shadowOffset: { width: 0, height: 12 },
+  },
+  menuItem: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12,
+    paddingVertical: 10, paddingHorizontal: 11, borderRadius: 11,
+  },
+  menuText: { color: th.text2, fontSize: 14.5, fontWeight: "600", flexShrink: 1 },
+  menuTextOn: { color: th.accent, fontWeight: "800" },
+  menuCount: { color: th.muted, fontSize: 12.5, fontVariant: ["tabular-nums"] },
+  menuCountOn: { color: alpha(th.accent, 0.7) },
+  menuNote: {
+    color: th.muted, fontSize: 11, lineHeight: 16,
+    paddingHorizontal: 11, paddingTop: 7, paddingBottom: 5,
+    borderTopWidth: 1, borderTopColor: th.line, marginTop: 4,
+  },
+
   header: { paddingHorizontal: 16, paddingTop: 4 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
-  title: { color: "#f4f4f6", fontSize: 24, fontWeight: "800" },
+  title: { color: th.text, fontSize: 24, fontWeight: "800" },
   searchbar: {
-    flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: "#14141b",
-    borderWidth: 1, borderColor: "#26262f", borderRadius: 14, paddingHorizontal: 14, height: 46,
+    flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: th.panel,
+    borderWidth: 1, borderColor: th.line, borderRadius: 14, paddingHorizontal: 14, height: 46,
   },
-  input: { flex: 1, color: "#f4f4f6", fontSize: 15, padding: 0 },
-
-  segment: { flexDirection: "row", gap: 8, marginTop: 12 },
-  segBtn: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 10, backgroundColor: "#14141b", borderWidth: 1, borderColor: "#26262f" },
-  segBtnOn: { backgroundColor: ACCENT, borderColor: ACCENT },
-  segText: { color: "#d6d6de", fontSize: 14, fontWeight: "800" },
-  segTextOn: { color: "#0b0b0f" },
+  input: { flex: 1, color: th.text, fontSize: 15, padding: 0 },
 
   feedRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingTop: 10 },
   feedChip: {
     flexDirection: "row", alignItems: "center", gap: 7,
-    backgroundColor: ACCENT, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
+    backgroundColor: th.accentFill, borderRadius: 999, paddingVertical: 6, paddingHorizontal: 12,
   },
-  feedChipText: { color: "#0b0b0f", fontSize: 12.5, fontWeight: "800" },
-  feedCount: { color: MUTED, fontSize: 12.5 },
-  filterBar: { paddingTop: 10, borderBottomWidth: 1, borderBottomColor: "#1c1c24" },
-  pillRow: { alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 10 },
-  pill: {
-    flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "#14141b",
-    borderWidth: 1, borderColor: "#26262f", borderRadius: 999, paddingLeft: 12, paddingRight: 10, paddingVertical: 8,
-  },
-  pillOn: { backgroundColor: ACCENT, borderColor: ACCENT },
-  pillText: { color: "#d6d6de", fontSize: 13, fontWeight: "700", maxWidth: 130 },
-  pillTextOn: { color: "#0b0b0f" },
-  clearPill: { paddingHorizontal: 10, paddingVertical: 8 },
-  clearText: { color: ACCENT, fontSize: 13, fontWeight: "700" },
-
-  modalRoot: { flex: 1, justifyContent: "flex-end" },
-  backdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.55)" },
-  sheet: {
-    backgroundColor: "#14141b", borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    paddingHorizontal: 20, paddingTop: 10, paddingBottom: 34, borderTopWidth: 1, borderColor: "#26262f",
-  },
-  sheetHandle: { alignSelf: "center", width: 40, height: 4, borderRadius: 2, backgroundColor: "#3a3a46", marginBottom: 12 },
-  sheetTitle: { color: "#f4f4f6", fontSize: 18, fontWeight: "800", marginBottom: 6 },
-  optRow: {
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#1c1c24",
-  },
-  optText: { color: "#d6d6de", fontSize: 16, fontWeight: "600" },
-  optTextOn: { color: ACCENT, fontWeight: "800" },
+  feedChipText: { color: th.accentInk, fontSize: 12.5, fontWeight: "800" },
+  feedCount: { color: th.muted, fontSize: 12.5 },
 
   body: { padding: 16, paddingBottom: 40, flexGrow: 1 },
   centerBox: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8, paddingTop: 70 },
-  dim: { color: "#f4f4f6", fontSize: 16, fontWeight: "700", marginTop: 6 },
-  hint: { color: MUTED, fontSize: 13, textAlign: "center", lineHeight: 19 },
-  errText: { color: "#ff6b6b", fontSize: 13, textAlign: "center", marginTop: 6 },
+  dim: { color: th.text, fontSize: 16, fontWeight: "700", marginTop: 6 },
+  hint: { color: th.muted, fontSize: 13, textAlign: "center", lineHeight: 19, maxWidth: 300 },
+  errText: { color: th.danger, fontSize: 13, textAlign: "center", marginTop: 6 },
 
-  groupHead: { color: MUTED, fontSize: 12, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 18, marginBottom: 6 },
+  groupHead: { color: th.muted, fontSize: 12, fontWeight: "800", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 18, marginBottom: 6 },
 
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
   artistTap: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, minWidth: 0 },
-  thumb: { width: 56, height: 56, borderRadius: 8, overflow: "hidden", backgroundColor: "#14141b" },
+  thumb: { width: 56, height: 56, borderRadius: 8, overflow: "hidden", backgroundColor: th.panel },
   tileFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
   rowText: { flex: 1, minWidth: 0 },
-  rowTitle: { color: "#f4f4f6", fontSize: 15, fontWeight: "700" },
-  rowSub: { color: MUTED, fontSize: 13, marginTop: 2 },
-  rowMxs: { color: ACCENT, fontSize: 15, fontWeight: "800", marginLeft: 8 },
+  rowTitle: { color: th.text, fontSize: 15, fontWeight: "700" },
+  rowSub: { color: th.muted, fontSize: 13, marginTop: 2 },
+  rowMxs: { color: th.accent, fontSize: 15, fontWeight: "800", marginLeft: 8 },
 
-  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: "#1b1b24" },
+  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: th.panel2 },
   avatarFallback: { alignItems: "center", justifyContent: "center" },
-  avatarInitial: { color: MUTED, fontSize: 20, fontWeight: "800" },
-  followBtn: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7, backgroundColor: ACCENT },
-  followingBtn: { backgroundColor: "transparent", borderWidth: 1, borderColor: "#3a3a46" },
-  followText: { color: "#0b0b0f", fontSize: 13, fontWeight: "800" },
-  followingText: { color: MUTED, fontSize: 13, fontWeight: "700" },
+  avatarInitial: { color: th.muted, fontSize: 20, fontWeight: "800" },
+  followBtn: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 7, backgroundColor: th.accentFill },
+  followingBtn: { backgroundColor: "transparent", borderWidth: 1, borderColor: th.outline },
+  followText: { color: th.accentInk, fontSize: 13, fontWeight: "800" },
+  followingText: { color: th.muted, fontSize: 13, fontWeight: "700" },
 });

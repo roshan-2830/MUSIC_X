@@ -1,14 +1,13 @@
 import { ReactNode, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
   FadeIn, FadeOut, LinearTransition, useAnimatedStyle, useSharedValue, withTiming,
 } from "react-native-reanimated";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const CARD = "#14141b";
 
 /**
  * A section that opens and closes.
@@ -38,6 +37,8 @@ export default function CollapsibleCard({
   defaultOpen?: boolean;
   children: ReactNode;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [open, setOpen] = useState(defaultOpen);
   const turn = useSharedValue(defaultOpen ? 1 : 0);
 
@@ -61,7 +62,7 @@ export default function CollapsibleCard({
       >
         {icon ? (
           <View style={styles.headIcon}>
-            <Ionicons name={icon as any} size={15} color={ACCENT} />
+            <Ionicons name={icon as any} size={15} color={th.accent} />
           </View>
         ) : null}
 
@@ -82,7 +83,7 @@ export default function CollapsibleCard({
         </View>
 
         <Animated.View style={chevron}>
-          <Ionicons name="chevron-down" size={18} color={MUTED} />
+          <Ionicons name="chevron-down" size={18} color={th.muted} />
         </Animated.View>
       </Pressable>
 
@@ -99,24 +100,24 @@ export default function CollapsibleCard({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   card: {
-    backgroundColor: CARD, borderColor: LINE, borderWidth: 1, borderRadius: 16,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 16,
     marginTop: 18, overflow: "hidden",
   },
   head: { flexDirection: "row", alignItems: "center", gap: 11, padding: 16 },
   headIcon: {
     width: 30, height: 30, borderRadius: 9, alignItems: "center", justifyContent: "center",
-    backgroundColor: "rgba(232,255,71,0.12)",
+    backgroundColor: th.accentTint12,
   },
   headText: { flex: 1 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  title: { color: "#f4f4f6", fontSize: 16, fontWeight: "800", flexShrink: 1 },
+  title: { color: th.text, fontSize: 16, fontWeight: "800", flexShrink: 1 },
   countPill: {
-    backgroundColor: "#22222c", borderRadius: 20, paddingHorizontal: 7, paddingVertical: 1.5,
+    backgroundColor: th.panel3, borderRadius: 20, paddingHorizontal: 7, paddingVertical: 1.5,
     minWidth: 22, alignItems: "center",
   },
-  countText: { color: MUTED, fontSize: 11, fontWeight: "800" },
-  sub: { color: MUTED, fontSize: 12.5, marginTop: 4, lineHeight: 17 },
+  countText: { color: th.muted, fontSize: 11, fontWeight: "800" },
+  sub: { color: th.muted, fontSize: 12.5, marginTop: 4, lineHeight: 17 },
   body: { paddingHorizontal: 16, paddingBottom: 16 },
 });

@@ -1,13 +1,12 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Going } from "../lib/api";
 import { Avatar } from "./invite-sheet";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const CARD = "#14141b";
-const LINE = "#26262f";
 
 /**
  * "Rahul, Priya and 3 others you follow are going."
@@ -30,6 +29,8 @@ const LINE = "#26262f";
  * who else is.
  */
 export function InvitedBanner({ going }: { going: Going | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const invites = going?.invited_by ?? [];
   if (!invites.length) return null;
   const first = invites[0];
@@ -49,7 +50,7 @@ export function InvitedBanner({ going }: { going: Going | null }) {
           <Text style={styles.invitedNote} numberOfLines={2}>“{first.note}”</Text>
         ) : null}
       </View>
-      <Ionicons name="mail-open-outline" size={16} color={ACCENT} />
+      <Ionicons name="mail-open-outline" size={16} color={th.accent} />
     </View>
   );
 }
@@ -62,6 +63,8 @@ export default function GoingRow({
   /** Opens the sheet that splits them into ticket-holders and interested. */
   onPress?: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   if (!going || !going.total || !going.summary) return null;
   const withTickets = going.going_count;
   const interested = going.interested_count;
@@ -81,7 +84,7 @@ export default function GoingRow({
             <Avatar name={p.display_name} size={28} />
             {p.booked ? (
               <View style={styles.ticket}>
-                <Ionicons name="ticket" size={8} color="#101204" />
+                <Ionicons name="ticket" size={8} color={th.accentInk} />
               </View>
             ) : null}
           </View>
@@ -98,15 +101,15 @@ export default function GoingRow({
           ].filter(Boolean).join(" · ")}
         </Text>
       </View>
-      {onPress ? <Ionicons name="chevron-forward" size={16} color={MUTED} /> : null}
+      {onPress ? <Ionicons name="chevron-forward" size={16} color={th.muted} /> : null}
     </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   wrap: {
     flexDirection: "row", alignItems: "center", gap: 11,
-    backgroundColor: CARD, borderColor: LINE, borderWidth: 1, borderRadius: 14,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14,
     paddingVertical: 11, paddingHorizontal: 13, marginTop: 12,
   },
   faces: { flexDirection: "row", alignItems: "center" },
@@ -114,19 +117,19 @@ const styles = StyleSheet.create({
   overlap: { marginLeft: -10 },
   ticket: {
     position: "absolute", right: -2, bottom: -2, width: 14, height: 14, borderRadius: 7,
-    backgroundColor: ACCENT, alignItems: "center", justifyContent: "center",
-    borderWidth: 1.5, borderColor: CARD,
+    backgroundColor: th.accentFill, alignItems: "center", justifyContent: "center",
+    borderWidth: 1.5, borderColor: th.panel,
   },
-  text: { color: "#f4f4f6", fontSize: 13.5, fontWeight: "600", lineHeight: 18 },
+  text: { color: th.text, fontSize: 13.5, fontWeight: "600", lineHeight: 18 },
 
   // Accent-bordered rather than accent-filled: it is a fact worth noticing, not a button.
   invited: {
     flexDirection: "row", alignItems: "center", gap: 11,
-    backgroundColor: "rgba(232,255,71,0.07)", borderColor: "rgba(232,255,71,0.35)",
+    backgroundColor: alpha(th.accent, 0.07), borderColor: th.accentTint35,
     borderWidth: 1, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 13, marginTop: 12,
   },
-  invitedText: { color: "#f4f4f6", fontSize: 13.5, lineHeight: 18 },
+  invitedText: { color: th.text, fontSize: 13.5, lineHeight: 18 },
   invitedWho: { fontWeight: "800" },
-  invitedNote: { color: MUTED, fontSize: 12.5, marginTop: 3, fontStyle: "italic" },
-  sub: { color: MUTED, fontSize: 12, marginTop: 2 },
+  invitedNote: { color: th.muted, fontSize: 12.5, marginTop: 3, fontStyle: "italic" },
+  sub: { color: th.muted, fontSize: 12, marginTop: 2 },
 });

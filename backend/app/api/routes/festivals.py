@@ -5,10 +5,10 @@ from datetime import date as date_cls
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import case, func, nulls_last, or_
+from sqlalchemy import case, func, nulls_last, or_, text
 from sqlalchemy.orm import Session, aliased
 
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user_id, get_current_user_id_optional
 from app.db.session import get_db
 from app.models.artist import Artist
 from app.models.city import City
@@ -19,9 +19,25 @@ from app.schemas.festival import FestivalArtist, FestivalDetail, FestivalOut
 from app.services.deezer import _norm
 from app.services.ingestion import festival_search_and_ingest
 from app.services.trust import confidence_for
+from app.services import search_filters as sf
 from app.services import text_search as ts
 
 router = APIRouter(prefix="/festivals", tags=["festivals"])
+
+# Ordering, mirroring the concert search: relevance bands first unless a score was asked
+# for by name. Takes the ranked column because it is only known inside the query.
+_ORDER_FEST = {
+    "soonest": lambda best: (best, nulls_last(Festival.starts_on.asc())),
+    "rating": lambda best: (nulls_last(Festival.mxs.desc()), best,
+                            nulls_last(Festival.starts_on.asc())),
+}
+
+
+def _apply(query, clauses: list[str], params: dict):
+    """Hang the shared filter fragments off an ORM query."""
+    for c in clauses:
+        query = query.filter(text(c))
+    return query.params(**params) if params else query
 
 
 def _to_out(f: Festival, c: City | None, match_count=None, matched=None) -> FestivalOut:
@@ -58,13 +74,36 @@ def _upcoming(today: date):
 
 
 @router.get("", response_model=list[FestivalOut])
-def list_festivals(limit: int = Query(100, le=300), db: Session = Depends(get_db)):
+def list_festivals(
+    limit: int = Query(100, le=300),
+    when: str | None = Query(None, pattern="^(today|tomorrow|weekend|d7|month|m3|custom)$"),
+    date_from: date_cls | None = Query(None, alias="from"),
+    date_to: date_cls | None = Query(None, alias="to"),
+    country: str | None = Query(None, min_length=2, max_length=2),
+    city_id: uuid.UUID | None = Query(None),
+    onsale: str | None = Query(None, pattern="^(now|coming)$"),
+    rating: float | None = Query(None, ge=0, le=10),
+    following: bool = Query(False),
+    tz: str = Query("UTC"),
+    user_id: str | None = Depends(get_current_user_id_optional),
+    db: Session = Depends(get_db),
+):
     """All upcoming/ongoing festivals, soonest first — the open browse list (everyone
-    sees the same, regardless of who they follow)."""
+    sees the same, regardless of who they follow), narrowed by the shared filters."""
+    flt = sf.Filters(when=when, date_from=date_from, date_to=date_to, country=country,
+                     city_id=city_id, onsale=onsale, rating=rating,
+                     following=bool(following and user_id), tz=tz,
+                     user_id=uuid.UUID(user_id) if (following and user_id) else None)
+    # No festival source publishes an on-sale date, so rather than answer a question
+    # nobody told us the answer to, we return none.
+    if flt.excludes_festivals:
+        return []
+    clauses, params = sf.festival_clauses(flt, "festivals")
     today = date.today()
     fests = (
-        db.query(Festival)
-        .filter(Festival.merged_into.is_(None), _upcoming(today))
+        _apply(db.query(Festival)
+                 .filter(Festival.merged_into.is_(None), _upcoming(today)),
+               clauses, params)
         .order_by(nulls_last(Festival.starts_on.asc()))
         .limit(limit)
         .all()
@@ -119,12 +158,8 @@ def festivals_for_you(
     ]
 
 
-@router.get("/search", response_model=list[FestivalOut])
-def search_festivals_local(
-    q: str = Query(..., min_length=1),
-    limit: int = Query(60, le=200),
-    db: Session = Depends(get_db),
-):
+def festivals_matching(db: Session, q: str, limit: int,
+                       flt: sf.Filters | None = None) -> list[FestivalOut]:
     """Search festivals we hold, ranked by how well the term matches.
 
     Server-side because the screen was filtering the first 100 festivals it had fetched —
@@ -137,7 +172,13 @@ def search_festivals_local(
     outranks a prefix, which outranks a substring, which outranks a city match. Nothing is
     hidden — the weak matches still come, just underneath.
     """
-    raw = q.strip()
+    flt = flt or sf.Filters()
+    # A festival source tells us nothing about on-sale dates, so asked for "on sale now"
+    # we return no festivals rather than imply we checked.
+    if flt.excludes_festivals:
+        return []
+    fclauses, fparams = sf.festival_clauses(flt, "festivals")
+    raw = (q or "").strip()
     safe = ts.escape_like(raw)
 
     # Also matched on the BILL, the way the concert search matches its line-up. Without it,
@@ -172,15 +213,16 @@ def search_festivals_local(
     # what DISTINCT preserves. min(rank) collapses them to one row at its STRONGEST reason
     # for matching, which is also the rank it should be ranked by.
     best = func.min(rank).label("match_rank")
+    sq = (joined(db.query(Festival, best))
+          .filter(or_(ts.contains(Festival.name, safe),
+                      ts.contains(City.name, safe),
+                      ts.contains(BillArtist.name, safe))))
+    sq = _apply(sq, fclauses, fparams)
     rows = (
-        joined(db.query(Festival, best))
-        .filter(or_(ts.contains(Festival.name, safe),
-                    ts.contains(City.name, safe),
-                    ts.contains(BillArtist.name, safe)))
-        .group_by(Festival.id)
-        .order_by(best, nulls_last(Festival.starts_on.asc()))
-        .limit(limit)
-        .all()
+        sq.group_by(Festival.id)
+          .order_by(*(_ORDER_FEST[flt.sort](best)))
+          .limit(limit)
+          .all()
     )
 
     # Misspelling fallback, same rule as the concert search: only on an otherwise empty
@@ -195,18 +237,28 @@ def search_festivals_local(
         ).label("sim")
         fuzzy_rank = case((ts.is_close(Festival.name, raw), 0), else_=1)
         best_rank, best_sim = func.min(fuzzy_rank).label("fr"), func.max(score).label("sim")
+        fq = _apply(joined(db.query(Festival, best_rank, best_sim)).filter(close),
+                    fclauses, fparams)
         rows = (
-            joined(db.query(Festival, best_rank, best_sim))
-            .filter(close)
-            .group_by(Festival.id)
-            .order_by(best_rank, best_sim.desc(), nulls_last(Festival.starts_on.asc()))
-            .limit(limit)
-            .all()
+            fq.group_by(Festival.id)
+              .order_by(best_rank, best_sim.desc(), nulls_last(Festival.starts_on.asc()))
+              .limit(limit)
+              .all()
         )
 
     fests = [r[0] for r in rows]
     cities = _cities_for(db, fests)
     return [_to_out(f, cities.get(f.city_id) if f.city_id else None) for f in fests]
+
+
+@router.get("/search", response_model=list[FestivalOut])
+def search_festivals_local(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(60, le=200),
+    db: Session = Depends(get_db),
+):
+    """The unfiltered form, kept for anything calling it directly. /search adds filters."""
+    return festivals_matching(db, q, limit)
 
 
 @router.get("/search-live", response_model=list[FestivalOut])

@@ -6,15 +6,15 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import {
   ArtistSearchResult, bulkFollow, GenreArtist, GenreOption, getGenreArtists, getGenres,
   searchArtists,
 } from "../lib/api";
 import { audienceLine, coverColor } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const ACCENT_INK = "#0b0b0f";
-const MUTED = "#8a8a95";
 
 /** Enough picks to give the artist step something to work with, few enough that the
  *  screen is not a chore. Below two, "Rock" alone returns a wall of stadium acts. */
@@ -65,6 +65,8 @@ function initials(name: string): string {
  * asking people to choose was an implementation detail leaking into the product.
  */
 export default function PickGenres({ onDone }: { onDone: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [step, setStep] = useState<"genres" | "artists">("genres");
   const [genres, setGenres] = useState<GenreOption[]>([]);
   const [picked, setPicked] = useState<Record<string, boolean>>({});
@@ -164,10 +166,10 @@ export default function PickGenres({ onDone }: { onDone: () => void }) {
           </Text>
 
           {loading ? (
-            <ActivityIndicator color={ACCENT} style={{ marginTop: 34 }} />
+            <ActivityIndicator color={th.accent} style={{ marginTop: 34 }} />
           ) : error ? (
             <View style={styles.errBox}>
-              <Ionicons name="cloud-offline-outline" size={32} color={MUTED} />
+              <Ionicons name="cloud-offline-outline" size={32} color={th.muted} />
               <Text style={styles.errText}>{error}</Text>
             </View>
           ) : (
@@ -218,7 +220,7 @@ export default function PickGenres({ onDone }: { onDone: () => void }) {
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Pressable style={styles.back} onPress={() => setStep("genres")} hitSlop={8}>
-          <Ionicons name="chevron-back" size={18} color={MUTED} />
+          <Ionicons name="chevron-back" size={18} color={th.muted} />
           <Text style={styles.backText}>Genres</Text>
         </Pressable>
 
@@ -229,34 +231,34 @@ export default function PickGenres({ onDone }: { onDone: () => void }) {
         </Text>
 
         <View style={styles.searchBox}>
-          <Ionicons name="search" size={16} color={MUTED} />
+          <Ionicons name="search" size={16} color={th.muted} />
           <TextInput
             style={styles.searchInput}
             value={q}
             onChangeText={setQ}
             placeholder="Search any artist by name"
-            placeholderTextColor={MUTED}
+            placeholderTextColor={th.muted}
             autoCapitalize="words"
             autoCorrect={false}
             returnKeyType="search"
           />
           {q.length > 0 ? (
             <Pressable onPress={() => setQ("")} hitSlop={10} accessibilityLabel="Clear search">
-              <Ionicons name="close-circle" size={17} color={MUTED} />
+              <Ionicons name="close-circle" size={17} color={th.muted} />
             </Pressable>
           ) : null}
         </View>
 
         {loading || searching ? (
-          <ActivityIndicator color={ACCENT} style={{ marginTop: 34 }} />
+          <ActivityIndicator color={th.accent} style={{ marginTop: 34 }} />
         ) : error ? (
           <View style={styles.errBox}>
-            <Ionicons name="cloud-offline-outline" size={32} color={MUTED} />
+            <Ionicons name="cloud-offline-outline" size={32} color={th.muted} />
             <Text style={styles.errText}>{error}</Text>
           </View>
         ) : shown.length === 0 ? (
           <View style={styles.errBox}>
-            <Ionicons name="search-outline" size={32} color={MUTED} />
+            <Ionicons name="search-outline" size={32} color={th.muted} />
             <Text style={styles.errText}>
               {q.trim()
                 ? `No artist called “${q.trim()}”. Check the spelling, or pick from your genres.`
@@ -299,7 +301,7 @@ export default function PickGenres({ onDone }: { onDone: () => void }) {
                   ) : null}
                 </View>
                 <View style={[styles.tick, on && styles.tickOn]}>
-                  {on ? <Ionicons name="checkmark" size={15} color={ACCENT_INK} /> : null}
+                  {on ? <Ionicons name="checkmark" size={15} color={th.accentInk} /> : null}
                 </View>
               </Pressable>
             );
@@ -322,63 +324,63 @@ export default function PickGenres({ onDone }: { onDone: () => void }) {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   searchBox: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1,
     borderRadius: 12, paddingHorizontal: 12, height: 44, marginBottom: 14,
   },
-  searchInput: { flex: 1, color: "#f4f4f6", fontSize: 14.5, padding: 0 },
+  searchInput: { flex: 1, color: th.text, fontSize: 14.5, padding: 0 },
   body: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 26 },
 
-  logo: { color: "#f4f4f6", fontSize: 15, fontWeight: "900", letterSpacing: 2, marginBottom: 26 },
-  accent: { color: ACCENT },
-  h1: { color: "#f4f4f6", fontSize: 27, fontWeight: "900", letterSpacing: -0.5, marginBottom: 8 },
-  sub: { color: MUTED, fontSize: 14.5, lineHeight: 21, marginBottom: 22 },
+  logo: { color: th.text, fontSize: 15, fontWeight: "900", letterSpacing: 2, marginBottom: 26 },
+  accent: { color: th.accent },
+  h1: { color: th.text, fontSize: 27, fontWeight: "900", letterSpacing: -0.5, marginBottom: 8 },
+  sub: { color: th.muted, fontSize: 14.5, lineHeight: 21, marginBottom: 22 },
 
   back: { flexDirection: "row", alignItems: "center", gap: 3, marginBottom: 16, alignSelf: "flex-start" },
-  backText: { color: MUTED, fontSize: 14, fontWeight: "700" },
+  backText: { color: th.muted, fontSize: 14, fontWeight: "700" },
 
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
   chip: {
     flexDirection: "row", alignItems: "center", gap: 8,
-    backgroundColor: "#15151c", borderColor: "#26262f", borderWidth: 1,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1,
     borderRadius: 999, paddingHorizontal: 15, paddingVertical: 10,
   },
-  chipOn: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipText: { color: "#f4f4f6", fontSize: 14.5, fontWeight: "700" },
-  chipTextOn: { color: ACCENT_INK },
-  chipCount: { color: MUTED, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  chipCountOn: { color: "rgba(11,11,15,0.55)" },
+  chipOn: { backgroundColor: th.accentFill, borderColor: th.accentFill },
+  chipText: { color: th.text, fontSize: 14.5, fontWeight: "700" },
+  chipTextOn: { color: th.accentInk },
+  chipCount: { color: th.muted, fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  chipCountOn: { color: alpha(th.bg, 0.55) },
 
   row: {
     flexDirection: "row", alignItems: "center", gap: 13, paddingVertical: 11,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.06)",
+    borderBottomWidth: 1, borderBottomColor: alpha(th.text, 0.06),
   },
   avatar: { width: 50, height: 50, borderRadius: 25 },
-  avatarText: { color: ACCENT_INK, fontWeight: "900", fontSize: 17 },
-  name: { color: "#f4f4f6", fontSize: 16, fontWeight: "700" },
-  meta: { color: MUTED, fontSize: 12.5, marginTop: 2, textTransform: "capitalize" },
-  audience: { color: MUTED, fontSize: 11.5, marginTop: 1 },
+  avatarText: { color: th.accentInk, fontWeight: "900", fontSize: 17 },
+  name: { color: th.text, fontSize: 16, fontWeight: "700" },
+  meta: { color: th.muted, fontSize: 12.5, marginTop: 2, textTransform: "capitalize" },
+  audience: { color: th.muted, fontSize: 11.5, marginTop: 1 },
   tick: {
-    width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: "#33333e",
+    width: 26, height: 26, borderRadius: 13, borderWidth: 1.5, borderColor: th.outline,
     alignItems: "center", justifyContent: "center",
   },
-  tickOn: { backgroundColor: ACCENT, borderColor: ACCENT },
+  tickOn: { backgroundColor: th.accentFill, borderColor: th.accentFill },
 
   errBox: { alignItems: "center", gap: 11, paddingVertical: 40, paddingHorizontal: 16 },
-  errText: { color: MUTED, fontSize: 14.5, textAlign: "center", lineHeight: 21 },
+  errText: { color: th.muted, fontSize: 14.5, textAlign: "center", lineHeight: 21 },
 
   foot: {
     paddingHorizontal: 20, paddingTop: 14, paddingBottom: 8, gap: 14,
-    borderTopWidth: 1, borderTopColor: "#1a1a22", alignItems: "center",
+    borderTopWidth: 1, borderTopColor: th.panel2, alignItems: "center",
   },
   cta: {
-    width: "100%", backgroundColor: ACCENT, borderRadius: 14,
+    width: "100%", backgroundColor: th.accentFill, borderRadius: 14,
     paddingVertical: 15, alignItems: "center",
   },
   ctaOff: { opacity: 0.35 },
-  ctaText: { color: ACCENT_INK, fontSize: 15.5, fontWeight: "900" },
-  skip: { color: MUTED, fontSize: 14, fontWeight: "700" },
+  ctaText: { color: th.accentInk, fontSize: 15.5, fontWeight: "900" },
+  skip: { color: th.muted, fontSize: 14, fontWeight: "700" },
 });

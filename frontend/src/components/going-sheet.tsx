@@ -1,23 +1,23 @@
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
 import { Goer, Going } from "../lib/api";
 import { Avatar } from "./invite-sheet";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
-const SHEET = "#101014";
-const GOOD = "#7ef0b2";
 
 function Person({ person, ticket }: { person: Goer; ticket: boolean }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.row}>
       <Avatar name={person.display_name} />
       <Text style={styles.name} numberOfLines={1}>{person.display_name || "Someone"}</Text>
       {ticket ? (
         <View style={styles.badge}>
-          <Ionicons name="ticket" size={11} color="#101204" />
+          <Ionicons name="ticket" size={11} color={th.accentInk} />
           <Text style={styles.badgeText}>Ticket</Text>
         </View>
       ) : null}
@@ -44,6 +44,8 @@ export default function GoingSheet({
   going: Going | null;
   eventTitle: string | null;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const withTicket = (going?.people ?? []).filter((p) => p.booked);
   const interested = (going?.people ?? []).filter((p) => !p.booked);
 
@@ -59,7 +61,7 @@ export default function GoingSheet({
               ) : null}
             </View>
             <Pressable onPress={onClose} hitSlop={12}>
-              <Ionicons name="close" size={22} color={MUTED} />
+              <Ionicons name="close" size={22} color={th.muted} />
             </Pressable>
           </View>
 
@@ -67,8 +69,8 @@ export default function GoingSheet({
             {withTicket.length ? (
               <>
                 <View style={styles.groupHead}>
-                  <Ionicons name="checkmark-circle" size={14} color={GOOD} />
-                  <Text style={[styles.groupTitle, { color: GOOD }]}>
+                  <Ionicons name="checkmark-circle" size={14} color={th.success} />
+                  <Text style={[styles.groupTitle, { color: th.success }]}>
                     Going · {withTicket.length}
                   </Text>
                 </View>
@@ -80,8 +82,8 @@ export default function GoingSheet({
             {interested.length ? (
               <>
                 <View style={[styles.groupHead, withTicket.length ? { marginTop: 20 } : null]}>
-                  <Ionicons name="bookmark" size={14} color={ACCENT} />
-                  <Text style={[styles.groupTitle, { color: ACCENT }]}>
+                  <Ionicons name="bookmark" size={14} color={th.accent} />
+                  <Text style={[styles.groupTitle, { color: th.accent }]}>
                     Interested · {interested.length}
                   </Text>
                 </View>
@@ -92,7 +94,7 @@ export default function GoingSheet({
 
             {!withTicket.length && !interested.length ? (
               <View style={styles.empty}>
-                <Ionicons name="people-outline" size={18} color={MUTED} />
+                <Ionicons name="people-outline" size={18} color={th.muted} />
                 <Text style={styles.emptyText}>
                   Nobody you follow has saved this one yet.
                 </Text>
@@ -103,7 +105,7 @@ export default function GoingSheet({
           {/* Said plainly, because the difference between the two groups is a limit of what we
               can know rather than a design choice. */}
           <View style={styles.note}>
-            <Ionicons name="information-circle-outline" size={13} color={MUTED} />
+            <Ionicons name="information-circle-outline" size={13} color={th.muted} />
             <Text style={styles.noteText}>
               Only people you follow. We can't see ticket purchases — a ticket shows here
               because the person told us.
@@ -115,36 +117,36 @@ export default function GoingSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: th.scrim, justifyContent: "flex-end" },
   sheet: {
-    backgroundColor: SHEET, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    backgroundColor: th.bg, borderTopLeftRadius: 20, borderTopRightRadius: 20,
     paddingHorizontal: 16, paddingTop: 16, paddingBottom: 22, maxHeight: "78%",
-    borderWidth: 1, borderColor: LINE,
+    borderWidth: 1, borderColor: th.line,
   },
   head: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 8 },
-  title: { color: "#f4f4f6", fontSize: 18, fontWeight: "800" },
-  subtitle: { color: MUTED, fontSize: 13, marginTop: 2 },
+  title: { color: th.text, fontSize: 18, fontWeight: "800" },
+  subtitle: { color: th.muted, fontSize: 13, marginTop: 2 },
 
   list: { marginTop: 4 },
   groupHead: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 },
   groupTitle: { fontSize: 12, fontWeight: "800", letterSpacing: 0.4 },
-  groupNote: { color: MUTED, fontSize: 11.5, marginTop: 3, marginBottom: 4 },
+  groupNote: { color: th.muted, fontSize: 11.5, marginTop: 3, marginBottom: 4 },
 
   row: {
     flexDirection: "row", alignItems: "center", gap: 11, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: LINE,
+    borderBottomWidth: 1, borderBottomColor: th.line,
   },
-  name: { color: "#f4f4f6", fontSize: 14.5, fontWeight: "700", flex: 1 },
+  name: { color: th.text, fontSize: 14.5, fontWeight: "700", flex: 1 },
   badge: {
-    flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: ACCENT,
+    flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: th.accentFill,
     borderRadius: 20, paddingVertical: 3, paddingHorizontal: 8,
   },
-  badgeText: { color: "#101204", fontSize: 10.5, fontWeight: "800" },
+  badgeText: { color: th.accentInk, fontSize: 10.5, fontWeight: "800" },
 
   empty: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 24 },
-  emptyText: { color: MUTED, fontSize: 13, flex: 1 },
+  emptyText: { color: th.muted, fontSize: 13, flex: 1 },
 
   note: { flexDirection: "row", gap: 7, marginTop: 12, alignItems: "flex-start" },
-  noteText: { color: MUTED, fontSize: 11, lineHeight: 15.5, flex: 1 },
+  noteText: { color: th.muted, fontSize: 11, lineHeight: 15.5, flex: 1 },
 });

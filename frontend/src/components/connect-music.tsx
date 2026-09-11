@@ -6,11 +6,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import { bulkFollow, connectLastfm } from "../lib/api";
 import { coverColor } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 
 type Found = { name: string; image_url: string | null; playcount: number };
 
@@ -37,6 +38,8 @@ export default function ConnectMusic({
   onDone: () => void;
   onSkip: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [step, setStep] = useState<"sources" | "username" | "confirm">("sources");
   const [username, setUsername] = useState("");
   const [busy, setBusy] = useState(false);
@@ -111,7 +114,7 @@ export default function ConnectMusic({
                     {s.note ? <Text style={styles.srcNote}>{s.note}</Text> : null}
                   </View>
                   {s.live ? (
-                    <Ionicons name="chevron-forward" size={18} color={ACCENT} />
+                    <Ionicons name="chevron-forward" size={18} color={th.accent} />
                   ) : (
                     <Text style={styles.soon}>Soon</Text>
                   )}
@@ -120,7 +123,7 @@ export default function ConnectMusic({
             </View>
 
             <View style={styles.privacy}>
-              <Ionicons name="lock-closed-outline" size={14} color={MUTED} />
+              <Ionicons name="lock-closed-outline" size={14} color={th.muted} />
               <Text style={styles.privacyText}>
                 Read-only. We never post to your account, and we never sell what we learn.
               </Text>
@@ -139,14 +142,14 @@ export default function ConnectMusic({
             <Text style={styles.h1}>What&rsquo;s your Last.fm username?</Text>
             <Text style={styles.sub}>
               The name in your profile address — last.fm/user/
-              <Text style={{ color: ACCENT }}>yourname</Text>
+              <Text style={{ color: th.accent }}>yourname</Text>
             </Text>
             <TextInput
               style={styles.input}
               value={username}
               onChangeText={(t) => { setUsername(t); setError(null); }}
               placeholder="yourname"
-              placeholderTextColor={MUTED}
+              placeholderTextColor={th.muted}
               autoCapitalize="none"
               autoCorrect={false}
               autoFocus
@@ -162,13 +165,13 @@ export default function ConnectMusic({
           <Pressable style={[styles.cta, busy && { opacity: 0.6 }]} onPress={scan} disabled={busy}>
             {busy ? (
               <>
-                <ActivityIndicator color="#0b0b0f" size="small" />
+                <ActivityIndicator color={th.accentInk} size="small" />
                 <Text style={styles.ctaText}>Reading your listening…</Text>
               </>
             ) : (
               <>
                 <Text style={styles.ctaText}>Scan my listening</Text>
-                <Ionicons name="arrow-forward" size={17} color="#0b0b0f" />
+                <Ionicons name="arrow-forward" size={17} color={th.accentInk} />
               </>
             )}
           </Pressable>
@@ -200,10 +203,10 @@ export default function ConnectMusic({
                         <View style={[styles.avatar, { backgroundColor: coverColor(a.name) }, !on && styles.avatarOff]} />
                       )}
                       <View style={[styles.tick, on && styles.tickOn]}>
-                        {on ? <Ionicons name="checkmark" size={13} color="#0b0b0f" /> : null}
+                        {on ? <Ionicons name="checkmark" size={13} color={th.accentInk} /> : null}
                       </View>
                     </View>
-                    <Text style={[styles.gridName, !on && { color: MUTED }]} numberOfLines={2}>
+                    <Text style={[styles.gridName, !on && { color: th.muted }]} numberOfLines={2}>
                       {a.name}
                     </Text>
                   </Pressable>
@@ -213,13 +216,13 @@ export default function ConnectMusic({
           </ScrollView>
           <Pressable style={[styles.cta, busy && { opacity: 0.6 }]} onPress={finish} disabled={busy}>
             {busy ? (
-              <ActivityIndicator color="#0b0b0f" size="small" />
+              <ActivityIndicator color={th.accentInk} size="small" />
             ) : (
               <>
                 <Text style={styles.ctaText}>
                   {chosen.length ? `Follow ${chosen.length} artist${chosen.length === 1 ? "" : "s"}` : "Continue without following"}
                 </Text>
-                <Ionicons name="arrow-forward" size={17} color="#0b0b0f" />
+                <Ionicons name="arrow-forward" size={17} color={th.accentInk} />
               </>
             )}
           </Pressable>
@@ -230,33 +233,33 @@ export default function ConnectMusic({
 }
 
 const COL = 3;
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   progress: { flexDirection: "row", gap: 6, paddingHorizontal: 20, paddingTop: 10 },
-  seg: { flex: 1, height: 3, borderRadius: 2, backgroundColor: "#26262f" },
-  segOn: { backgroundColor: ACCENT },
+  seg: { flex: 1, height: 3, borderRadius: 2, backgroundColor: th.line },
+  segOn: { backgroundColor: th.accentFill },
   body: { paddingHorizontal: 20, paddingTop: 26, paddingBottom: 20 },
-  h1: { color: "#f4f4f6", fontSize: 26, fontWeight: "900", letterSpacing: -0.6, lineHeight: 32 },
-  sub: { color: MUTED, fontSize: 14, lineHeight: 21, marginTop: 10 },
+  h1: { color: th.text, fontSize: 26, fontWeight: "900", letterSpacing: -0.6, lineHeight: 32 },
+  sub: { color: th.muted, fontSize: 14, lineHeight: 21, marginTop: 10 },
 
   srcRow: {
     flexDirection: "row", alignItems: "center", gap: 14,
-    paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: "#1c1c24",
+    paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: th.line2,
   },
   srcOff: { opacity: 0.45 },
   srcLogo: { width: 42, height: 42, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-  srcName: { color: "#f4f4f6", fontSize: 16, fontWeight: "700" },
-  srcNote: { color: MUTED, fontSize: 12, marginTop: 2 },
-  soon: { color: MUTED, fontSize: 12, fontWeight: "700" },
+  srcName: { color: th.text, fontSize: 16, fontWeight: "700" },
+  srcNote: { color: th.muted, fontSize: 12, marginTop: 2 },
+  soon: { color: th.muted, fontSize: 12, fontWeight: "700" },
 
   privacy: { flexDirection: "row", gap: 8, marginTop: 26, alignItems: "flex-start" },
-  privacyText: { color: MUTED, fontSize: 12, lineHeight: 17.5, flex: 1, marginTop: 14 },
+  privacyText: { color: th.muted, fontSize: 12, lineHeight: 17.5, flex: 1, marginTop: 14 },
 
   input: {
-    backgroundColor: "#14141b", borderColor: "#2a2a38", borderWidth: 1, borderRadius: 12,
-    color: "#f4f4f6", fontSize: 17, paddingHorizontal: 15, paddingVertical: 13, marginTop: 18,
+    backgroundColor: th.panel, borderColor: th.line3, borderWidth: 1, borderRadius: 12,
+    color: th.text, fontSize: 17, paddingHorizontal: 15, paddingVertical: 13, marginTop: 18,
   },
-  error: { color: "#ff6b6b", fontSize: 13, marginTop: 10, lineHeight: 19 },
+  error: { color: th.danger, fontSize: 13, marginTop: 10, lineHeight: 19 },
 
   grid: { flexDirection: "row", flexWrap: "wrap", marginTop: 20, marginHorizontal: -6 },
   gridItem: { width: `${100 / COL}%`, paddingHorizontal: 6, marginBottom: 18, alignItems: "center" },
@@ -265,17 +268,17 @@ const styles = StyleSheet.create({
   avatarOff: { opacity: 0.3 },
   tick: {
     position: "absolute", right: -2, bottom: -2, width: 24, height: 24, borderRadius: 12,
-    borderWidth: 2, borderColor: "#0b0b0f", backgroundColor: "#2a2a38",
+    borderWidth: 2, borderColor: th.bg, backgroundColor: th.line3,
     alignItems: "center", justifyContent: "center",
   },
-  tickOn: { backgroundColor: ACCENT },
-  gridName: { color: "#e2e2e8", fontSize: 12, fontWeight: "600", textAlign: "center", marginTop: 7, lineHeight: 15 },
+  tickOn: { backgroundColor: th.accentFill },
+  gridName: { color: th.text2, fontSize: 12, fontWeight: "600", textAlign: "center", marginTop: 7, lineHeight: 15 },
 
   cta: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
-    backgroundColor: ACCENT, borderRadius: 14, paddingVertical: 15, marginHorizontal: 20,
+    backgroundColor: th.accentFill, borderRadius: 14, paddingVertical: 15, marginHorizontal: 20,
   },
-  ctaText: { color: "#0b0b0f", fontSize: 15.5, fontWeight: "800" },
+  ctaText: { color: th.accentInk, fontSize: 15.5, fontWeight: "800" },
   skip: { alignItems: "center", paddingVertical: 16 },
-  skipText: { color: MUTED, fontSize: 13.5, fontWeight: "600" },
+  skipText: { color: th.muted, fontSize: 13.5, fontWeight: "600" },
 });

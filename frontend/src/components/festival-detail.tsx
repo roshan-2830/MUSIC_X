@@ -10,8 +10,10 @@ import { FestivalArtist, FestivalDetail as FestivalDetailT, getFestival, MxsComp
 import { coverColor, flagEmoji } from "../lib/format";
 import { useSaves } from "../lib/saves";
 import ArtistDetail from "./artist-detail";
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+import { ToastHost } from "../lib/toast";
 
-const ACCENT = "#e8ff47";
 const COMPONENT_LABEL: Record<string, string> = {
   artist: "Line-up strength",
   context: "Size of the festival",
@@ -21,7 +23,6 @@ const COMPONENT_LABEL: Record<string, string> = {
   reviews: "Reviews",
 };
 
-const MUTED = "#8a8a95";
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
@@ -77,6 +78,8 @@ function dayHeading(iso: string): string {
 }
 
 function Avatar({ name, size = 44, imageUrl }: { name: string; size?: number; imageUrl?: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const box = { width: size, height: size, borderRadius: size / 2 };
   if (imageUrl) {
     return <Image source={{ uri: imageUrl }} style={[styles.avatar, box]} contentFit="cover" transition={120} />;
@@ -89,6 +92,8 @@ function Avatar({ name, size = 44, imageUrl }: { name: string; size?: number; im
 }
 
 export default function FestivalDetailView({ id, onClose }: { id: string; onClose: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [showWhy, setShowWhy] = useState(false);
   const [f, setF] = useState<FestivalDetailT | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,13 +115,13 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
 
   if (loading) {
     return (
-      <View style={styles.center}><ActivityIndicator color={ACCENT} size="large" /></View>
+      <View style={styles.center}><ActivityIndicator color={th.accent} size="large" /></View>
     );
   }
   if (error || !f) {
     return (
       <View style={styles.center}>
-        <Ionicons name="cloud-offline-outline" size={40} color={MUTED} />
+        <Ionicons name="cloud-offline-outline" size={40} color={th.muted} />
         <Text style={styles.errText}>Couldn’t load this festival.</Text>
         <Pressable style={styles.btn} onPress={onClose}><Text style={styles.btnText}>Back</Text></Pressable>
       </View>
@@ -139,7 +144,7 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
             <View style={[styles.fill, { backgroundColor: coverColor(f.id) }]} />
           )}
           <LinearGradient
-            colors={["transparent", "rgba(11,11,15,0.35)", "rgba(11,11,15,0.92)"]}
+            colors={["transparent", alpha(th.bg, 0.35), alpha(th.bg, 0.92)]}
             style={styles.heroScrim}
             pointerEvents="none"
           />
@@ -148,7 +153,7 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
           </Pressable>
           {f.days ? (
             <View style={styles.dayBadge}>
-              <Ionicons name="calendar-outline" size={12} color="#0b0b0f" />
+              <Ionicons name="calendar-outline" size={12} color={th.accentInk} />
               <Text style={styles.dayBadgeText}>{f.days}-day festival</Text>
             </View>
           ) : null}
@@ -159,12 +164,12 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
           <Text style={styles.title}>{f.name}</Text>
 
           <View style={styles.metaRow}>
-            <Ionicons name="calendar-outline" size={15} color={MUTED} />
+            <Ionicons name="calendar-outline" size={15} color={th.muted} />
             <Text style={styles.meta}>{dateRange(f.starts_on, f.ends_on)}</Text>
           </View>
           {f.city ? (
             <View style={styles.metaRow}>
-              <Ionicons name="location-outline" size={15} color={MUTED} />
+              <Ionicons name="location-outline" size={15} color={th.muted} />
               <Text style={styles.meta}>
                 {flagEmoji(f.country)} {f.city}
               </Text>
@@ -178,14 +183,14 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
               <View style={styles.segTopRow}>
                 <Text style={styles.segTop}>{f.mxs != null ? f.mxs.toFixed(1) : "–"}</Text>
                 {f.mxs != null ? (
-                  <Ionicons name={showWhy ? "chevron-up" : "chevron-forward"} size={14} color={MUTED} />
+                  <Ionicons name={showWhy ? "chevron-up" : "chevron-forward"} size={14} color={th.muted} />
                 ) : null}
               </View>
               <Text style={styles.segLbl}>{f.mxs != null ? "Rating" : "No rating yet"}</Text>
             </Pressable>
             <Pressable style={[styles.segCell, styles.segBorder]} onPress={() => toggleFestival(f)}>
-              <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={19} color={saved ? ACCENT : "#f4f4f6"} />
-              <Text style={[styles.segLbl, saved && { color: ACCENT }]}>{saved ? "Saved" : "Save"}</Text>
+              <Ionicons name={saved ? "bookmark" : "bookmark-outline"} size={19} color={saved ? th.accent : th.text} />
+              <Text style={[styles.segLbl, saved && { color: th.accent }]}>{saved ? "Saved" : "Save"}</Text>
             </Pressable>
             <View style={[styles.segCell, styles.segBorder]}>
               <Text style={styles.segTop}>{billed || "–"}</Text>
@@ -263,14 +268,14 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
                         : `${f.lineup.length} artists · tap for the full bill`}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                <Ionicons name="chevron-forward" size={18} color={th.muted} />
               </Pressable>
               {/* The seller has not published day splits for a single festival in this
                   catalogue — day_label is null on all 2,380 line-up rows — so the bill is
                   shown flat and we say why, rather than inventing days. */}
               {!f.lineup_complete ? (
                 <View style={styles.noteRow}>
-                  <Ionicons name="checkmark-circle-outline" size={14} color={MUTED} />
+                  <Ionicons name="checkmark-circle-outline" size={14} color={th.muted} />
                   <Text style={styles.note}>
                     Line-up still growing — we add acts as they’re confirmed, never guessed.
                   </Text>
@@ -291,13 +296,13 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
               <Text style={styles.about} numberOfLines={5}>{f.about}</Text>
               <Pressable style={styles.readMore} onPress={() => setAboutOpen(true)}>
                 <Text style={styles.readMoreText}>Read more</Text>
-                <Ionicons name="chevron-forward" size={14} color={ACCENT} />
+                <Ionicons name="chevron-forward" size={14} color={th.accent} />
               </Pressable>
             </>
           ) : null}
 
           <View style={styles.footRow}>
-            <Ionicons name="shield-checkmark-outline" size={14} color={MUTED} />
+            <Ionicons name="shield-checkmark-outline" size={14} color={th.muted} />
             <Text style={styles.foot}>
               Line-up and dates come from the seller’s published listing. We show what they
               state and nothing we cannot point at.
@@ -334,7 +339,7 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
                     >
                       <Avatar name={a.name} size={40} imageUrl={a.image_url} />
                       <Text style={styles.artistName} numberOfLines={1}>{a.name}</Text>
-                      <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                      <Ionicons name="chevron-forward" size={16} color={th.muted} />
                     </Pressable>
                   ))}
                 </View>
@@ -363,77 +368,90 @@ export default function FestivalDetailView({ id, onClose }: { id: string; onClos
       <Modal visible={!!artistName} animationType="slide" onRequestClose={() => setArtistName(null)}>
         {artistName ? <ArtistDetail name={artistName} onClose={() => setArtistName(null)} /> : null}
       </Modal>
+      {/* This screen is a Modal, which renders above the root host — so it draws its
+          own. Several mounted at once is fine: only the topmost is on screen. */}
+      <ToastHost />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0b0b0f" },
-  center: { flex: 1, backgroundColor: "#0b0b0f", alignItems: "center", justifyContent: "center", padding: 40, gap: 12 },
-  errText: { color: "#f4f4f6", fontSize: 15, textAlign: "center" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: th.bg },
+  center: { flex: 1, backgroundColor: th.bg, alignItems: "center", justifyContent: "center", padding: 40, gap: 12 },
+  errText: { color: th.text, fontSize: 15, textAlign: "center" },
   fill: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
 
   hero: { width: "100%", height: 260 },
   heroScrim: { position: "absolute", left: 0, right: 0, bottom: 0, height: 130 },
-  heroBtn: { position: "absolute", top: 44, width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center" },
-  dayBadge: { position: "absolute", bottom: 14, left: 16, flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: ACCENT, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
-  dayBadgeText: { color: "#0b0b0f", fontWeight: "800", fontSize: 12 },
+  heroBtn: {
+    position: "absolute", top: 44, width: 38, height: 38, borderRadius: 19,
+    // Fixed dark, not th.scrim2. These sit over a cover photo whose brightness we cannot
+    // know, and the light theme's 25% black left a white chevron at 2.22:1 over a bright
+    // image — the back button was effectively invisible, which is what prompted this.
+    // 55% black holds 4.5:1 or better against anything, and a hairline separates it from a
+    // dark photo where the scrim alone would vanish into the image.
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(255,255,255,0.35)",
+    alignItems: "center", justifyContent: "center",
+  },
+  dayBadge: { position: "absolute", bottom: 14, left: 16, flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: th.accentFill, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  dayBadgeText: { color: th.accentInk, fontWeight: "800", fontSize: 12 },
 
   body: { paddingHorizontal: 16, paddingTop: 12 },
-  cdPill: { alignSelf: "flex-start", backgroundColor: "rgba(232,255,71,0.12)", borderColor: "rgba(232,255,71,0.35)", borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 8 },
-  cdText: { color: ACCENT, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
-  title: { color: "#f4f4f6", fontSize: 24, fontWeight: "900", letterSpacing: -0.4, marginBottom: 10 },
+  cdPill: { alignSelf: "flex-start", backgroundColor: th.accentTint12, borderColor: th.accentTint35, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 8 },
+  cdText: { color: th.accent, fontSize: 11, fontWeight: "900", letterSpacing: 1 },
+  title: { color: th.text, fontSize: 24, fontWeight: "900", letterSpacing: -0.4, marginBottom: 10 },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 3 },
-  meta: { color: MUTED, fontSize: 14, fontWeight: "600" },
+  meta: { color: th.muted, fontSize: 14, fontWeight: "600" },
 
   segTopRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  whyBox: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
+  whyBox: { backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 14, marginTop: 12 },
   barRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  barLabel: { color: "#c8c8d0", fontSize: 13, fontWeight: "600" },
-  barVal: { color: ACCENT, fontSize: 13, fontWeight: "800" },
-  barTrack: { height: 7, borderRadius: 4, backgroundColor: "#26262f", overflow: "hidden" },
-  barFill: { height: 7, borderRadius: 4, backgroundColor: ACCENT },
-  whyReason: { color: MUTED, fontSize: 12, marginTop: 6, lineHeight: 17 },
-  whyMissing: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 2, fontStyle: "italic" },
-  whyText: { color: "#c8c8d0", fontSize: 13, lineHeight: 19, marginTop: 10 },
-  segRow: { flexDirection: "row", borderColor: "#1e1e26", borderWidth: 1, borderRadius: 16, marginTop: 18, overflow: "hidden" },
+  barLabel: { color: th.text3, fontSize: 13, fontWeight: "600" },
+  barVal: { color: th.accent, fontSize: 13, fontWeight: "800" },
+  barTrack: { height: 7, borderRadius: 4, backgroundColor: th.line, overflow: "hidden" },
+  barFill: { height: 7, borderRadius: 4, backgroundColor: th.accentFill },
+  whyReason: { color: th.muted, fontSize: 12, marginTop: 6, lineHeight: 17 },
+  whyMissing: { color: th.muted, fontSize: 11, lineHeight: 16, marginTop: 2, fontStyle: "italic" },
+  whyText: { color: th.text3, fontSize: 13, lineHeight: 19, marginTop: 10 },
+  segRow: { flexDirection: "row", borderColor: th.line2, borderWidth: 1, borderRadius: 16, marginTop: 18, overflow: "hidden" },
   segCell: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 14, gap: 3 },
-  segBorder: { borderLeftWidth: 1, borderLeftColor: "#1e1e26" },
-  segTop: { color: "#f4f4f6", fontSize: 20, fontWeight: "900", letterSpacing: -0.5 },
-  segLbl: { color: MUTED, fontSize: 11, fontWeight: "700" },
+  segBorder: { borderLeftWidth: 1, borderLeftColor: th.line2 },
+  segTop: { color: th.text, fontSize: 20, fontWeight: "900", letterSpacing: -0.5 },
+  segLbl: { color: th.muted, fontSize: 11, fontWeight: "700" },
 
   secHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 24 },
-  section: { color: "#f4f4f6", fontSize: 17, fontWeight: "800", marginTop: 24, marginBottom: 8 },
-  seeAll: { color: ACCENT, fontSize: 13, fontWeight: "800" },
-  lineupCard: { flexDirection: "row", alignItems: "center", gap: 13, backgroundColor: "#131319", borderColor: "#1e1e26", borderWidth: 1, borderRadius: 16, padding: 13, marginTop: 2 },
+  section: { color: th.text, fontSize: 17, fontWeight: "800", marginTop: 24, marginBottom: 8 },
+  seeAll: { color: th.accent, fontSize: 13, fontWeight: "800" },
+  lineupCard: { flexDirection: "row", alignItems: "center", gap: 13, backgroundColor: th.panel, borderColor: th.line2, borderWidth: 1, borderRadius: 16, padding: 13, marginTop: 2 },
   avStack: { flexDirection: "row", alignItems: "center" },
-  avatar: { alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: "#131319" },
-  avatarText: { color: "#0b0b0f", fontWeight: "900" },
-  lineupTitle: { color: "#f4f4f6", fontSize: 16, fontWeight: "800" },
-  lineupSub: { color: MUTED, fontSize: 13, marginTop: 2 },
+  avatar: { alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: th.panel },
+  avatarText: { color: th.accentInk, fontWeight: "900" },
+  lineupTitle: { color: th.text, fontSize: 16, fontWeight: "800" },
+  lineupSub: { color: th.muted, fontSize: 13, marginTop: 2 },
   noteRow: { flexDirection: "row", gap: 7, alignItems: "flex-start", marginTop: 10 },
-  note: { color: MUTED, fontSize: 12, flex: 1, lineHeight: 17 },
-  empty: { color: MUTED, fontSize: 14 },
+  note: { color: th.muted, fontSize: 12, flex: 1, lineHeight: 17 },
+  empty: { color: th.muted, fontSize: 14 },
 
-  about: { color: "#c8c8d0", fontSize: 14, lineHeight: 21 },
+  about: { color: th.text3, fontSize: 14, lineHeight: 21 },
   readMore: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 10 },
-  readMoreText: { color: ACCENT, fontSize: 14, fontWeight: "800" },
+  readMoreText: { color: th.accent, fontSize: 14, fontWeight: "800" },
 
-  footRow: { flexDirection: "row", gap: 8, alignItems: "flex-start", marginTop: 26, paddingTop: 16, borderTopWidth: 1, borderTopColor: "#1a1a22" },
-  foot: { color: MUTED, fontSize: 12, flex: 1, lineHeight: 17 },
+  footRow: { flexDirection: "row", gap: 8, alignItems: "flex-start", marginTop: 26, paddingTop: 16, borderTopWidth: 1, borderTopColor: th.panel2 },
+  foot: { color: th.muted, fontSize: 12, flex: 1, lineHeight: 17 },
 
   sheetRoot: { flex: 1, justifyContent: "flex-end" },
-  sheetBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.6)" },
-  sheet: { backgroundColor: "#131319", borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 34 },
-  sheetHandle: { alignSelf: "center", width: 38, height: 4, borderRadius: 2, backgroundColor: "#2a2a34", marginBottom: 14 },
-  sheetTitle: { color: "#f4f4f6", fontSize: 20, fontWeight: "900" },
-  sheetSub: { color: MUTED, fontSize: 13, marginTop: 2, marginBottom: 10 },
-  sheetAbout: { color: "#e2e2e8", fontSize: 15, lineHeight: 23 },
-  artistRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.05)" },
-  artistName: { color: "#f4f4f6", fontSize: 15, fontWeight: "700", flex: 1 },
-  dayHead: { color: ACCENT, fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase", marginTop: 16, marginBottom: 2 },
-  dayCount: { color: MUTED, fontWeight: "700", letterSpacing: 0 },
+  sheetBackdrop: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: th.scrim },
+  sheet: { backgroundColor: th.panel, borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 34 },
+  sheetHandle: { alignSelf: "center", width: 38, height: 4, borderRadius: 2, backgroundColor: th.line3, marginBottom: 14 },
+  sheetTitle: { color: th.text, fontSize: 20, fontWeight: "900" },
+  sheetSub: { color: th.muted, fontSize: 13, marginTop: 2, marginBottom: 10 },
+  sheetAbout: { color: th.text2, fontSize: 15, lineHeight: 23 },
+  artistRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: alpha(th.text, 0.05) },
+  artistName: { color: th.text, fontSize: 15, fontWeight: "700", flex: 1 },
+  dayHead: { color: th.accent, fontSize: 12, fontWeight: "900", letterSpacing: 0.6, textTransform: "uppercase", marginTop: 16, marginBottom: 2 },
+  dayCount: { color: th.muted, fontWeight: "700", letterSpacing: 0 },
 
-  btn: { backgroundColor: ACCENT, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 10 },
-  btnText: { color: "#0b0b0f", fontWeight: "800" },
+  btn: { backgroundColor: th.accentFill, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 10 },
+  btnText: { color: th.accentInk, fontWeight: "800" },
 });

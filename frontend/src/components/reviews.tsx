@@ -25,14 +25,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import {
   getReviews, LiveFacts, postReview, ReviewItem, ReviewsPage, setReviewHelpful,
 } from "../lib/api";
 import { coverColor } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const STAR_OFF = "#3a3a46";
 const MAX_BODY = 1500;
 
 function initials(name: string | null): string {
@@ -55,16 +55,20 @@ function ago(iso: string): string {
 }
 
 function Stars({ n, size = 13 }: { n: number; size?: number }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={styles.starRow}>
       {[1, 2, 3, 4, 5].map((i) => (
-        <Ionicons key={i} name="star" size={size} color={i <= n ? ACCENT : STAR_OFF} />
+        <Ionicons key={i} name="star" size={size} color={i <= n ? th.accent : th.outline} />
       ))}
     </View>
   );
 }
 
 function Avatar({ name, uri, size = 38 }: { name: string | null; uri?: string | null; size?: number }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const s = { width: size, height: size, borderRadius: size / 2 };
   if (uri) return <Image source={{ uri }} style={s} contentFit="cover" transition={120} />;
   return (
@@ -76,6 +80,8 @@ function Avatar({ name, uri, size = 38 }: { name: string | null; uri?: string | 
 
 /** What the artist played last time. Not a review — evidence, clearly sourced. */
 function LiveFactsCard({ facts, artist }: { facts: LiveFacts; artist: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const where = [facts.venue_name, facts.city].filter(Boolean).join(", ");
   const when = facts.seen_on
     ? new Date(facts.seen_on + "T12:00:00").toLocaleDateString("en-GB",
@@ -95,11 +101,11 @@ function LiveFactsCard({ facts, artist }: { facts: LiveFacts; artist: string | n
       accessibilityLabel={facts.url ? "Open the full setlist on setlist.fm" : undefined}
     >
       <View style={styles.factsHead}>
-        <Ionicons name="musical-notes" size={15} color={ACCENT} />
+        <Ionicons name="musical-notes" size={15} color={th.accent} />
         <Text style={styles.factsTitle}>
           What {artist ?? "they"} played last time
         </Text>
-        {facts.url ? <Ionicons name="open-outline" size={15} color={MUTED} /> : null}
+        {facts.url ? <Ionicons name="open-outline" size={15} color={th.muted} /> : null}
       </View>
       <Text style={styles.factsBig}>
         {facts.songs} songs
@@ -134,6 +140,8 @@ function WriteSheet({
   onClose: () => void;
   onSubmit: (rating: number, body: string) => Promise<void>;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -161,7 +169,7 @@ function WriteSheet({
       <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
         <View style={styles.head}>
           <Pressable onPress={onClose} hitSlop={12} accessibilityLabel="Close">
-            <Ionicons name="close" size={24} color="#f4f4f6" />
+            <Ionicons name="close" size={24} color={th.text} />
           </Pressable>
           <Text style={styles.headTitle}>Your review</Text>
           <View style={{ width: 24 }} />
@@ -173,7 +181,7 @@ function WriteSheet({
             {[1, 2, 3, 4, 5].map((i) => (
               <Pressable key={i} onPress={() => setRating(i)} hitSlop={6}
                          accessibilityLabel={`${i} star${i > 1 ? "s" : ""}`}>
-                <Ionicons name="star" size={38} color={i <= rating ? ACCENT : STAR_OFF} />
+                <Ionicons name="star" size={38} color={i <= rating ? th.accent : th.outline} />
               </Pressable>
             ))}
           </View>
@@ -184,7 +192,7 @@ function WriteSheet({
             value={body}
             onChangeText={(t) => setBody(t.slice(0, MAX_BODY))}
             placeholder="The sound, the crowd, whether it started on time…"
-            placeholderTextColor={MUTED}
+            placeholderTextColor={th.muted}
             multiline
             textAlignVertical="top"
             editable={!busy}
@@ -199,7 +207,7 @@ function WriteSheet({
             disabled={!rating || busy}
             onPress={send}
           >
-            {busy ? <ActivityIndicator color="#0b0b0f" />
+            {busy ? <ActivityIndicator color={th.accentInk} />
                   : <Text style={styles.ctaText}>{rating ? "Post review" : "Pick a rating"}</Text>}
           </Pressable>
         </View>
@@ -209,6 +217,8 @@ function WriteSheet({
 }
 
 export default function Reviews({ eventId, onClose }: { eventId: string; onClose: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [page, setPage] = useState<ReviewsPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -243,17 +253,17 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.head}>
         <Pressable onPress={onClose} hitSlop={12} accessibilityLabel="Back">
-          <Ionicons name="chevron-back" size={24} color="#f4f4f6" />
+          <Ionicons name="chevron-back" size={24} color={th.text} />
         </Pressable>
         <Text style={styles.headTitle}>Reviews</Text>
         <View style={{ width: 24 }} />
       </View>
 
       {loading ? (
-        <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} />
+        <ActivityIndicator color={th.accent} style={{ marginTop: 40 }} />
       ) : error ? (
         <View style={styles.empty}>
-          <Ionicons name="cloud-offline-outline" size={30} color={MUTED} />
+          <Ionicons name="cloud-offline-outline" size={30} color={th.muted} />
           <Text style={styles.emptyText}>{error}</Text>
         </View>
       ) : (
@@ -270,7 +280,7 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
               so a review is possible. */}
           {(page?.seen_by ?? 0) > 0 ? (
             <View style={styles.seenRow}>
-              <Ionicons name="people-outline" size={15} color={ACCENT} />
+              <Ionicons name="people-outline" size={15} color={th.accent} />
               <Text style={styles.seenT}>
                 {page?.seen_by === 1
                   ? `1 person here has seen ${page?.artist_name ?? "them"} live`
@@ -292,7 +302,7 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
                   return (
                     <View key={n} style={styles.histRow}>
                       <Text style={styles.histN}>{n}</Text>
-                      <Ionicons name="star" size={9} color={MUTED} />
+                      <Ionicons name="star" size={9} color={th.muted} />
                       <View style={styles.histTrack}>
                         <View style={[styles.histFill,
                           { width: `${total ? (c / total) * 100 : 0}%` }]} />
@@ -319,13 +329,13 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
                   Share your take on {page?.artist_name ?? "this show"}
                 </Text>
               </View>
-              <Ionicons name="chatbubble-ellipses-outline" size={19} color={ACCENT} />
+              <Ionicons name="chatbubble-ellipses-outline" size={19} color={th.accent} />
             </Pressable>
           ) : (
             /* The reason, not a hidden control — otherwise nobody learns where reviews
                come from, and the rule looks like a bug. */
             <View style={styles.lockedRow}>
-              <Ionicons name="lock-closed-outline" size={16} color={MUTED} />
+              <Ionicons name="lock-closed-outline" size={16} color={th.muted} />
               <Text style={styles.lockedText}>
                 {page?.cannot_review_reason ?? "You can’t review this show."}
               </Text>
@@ -357,7 +367,7 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
                 onPress={() => helpful(r)}
               >
                 <Ionicons name={r.liked_by_me ? "heart" : "heart-outline"} size={13}
-                          color={r.liked_by_me ? ACCENT : MUTED} />
+                          color={r.liked_by_me ? th.accent : th.muted} />
                 <Text style={[styles.helpfulT, r.liked_by_me && styles.helpfulTOn]}>
                   Helpful{r.likes_count ? ` (${r.likes_count})` : ""}
                 </Text>
@@ -367,7 +377,7 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
 
           {total === 0 ? (
             <View style={styles.empty}>
-              <Ionicons name="chatbubble-outline" size={30} color={MUTED} />
+              <Ionicons name="chatbubble-outline" size={30} color={th.muted} />
               {/* Says where reviews come FROM, not just that there are none. A review
                   written about any of this artist's shows lands here, which is the part
                   that is not obvious from an empty box. */}
@@ -380,7 +390,7 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
           ) : null}
 
           <View style={styles.promise}>
-            <Ionicons name="checkmark" size={14} color={MUTED} />
+            <Ionicons name="checkmark" size={14} color={th.muted} />
             <Text style={styles.promiseT}>
               Reviews come from real fans who attended — we never edit, buy or import them.
             </Text>
@@ -401,84 +411,84 @@ export default function Reviews({ eventId, onClose }: { eventId: string; onClose
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between",
           paddingHorizontal: 16, paddingVertical: 12 },
-  headTitle: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
+  headTitle: { color: th.text, fontSize: 17, fontWeight: "800" },
 
   body: { paddingHorizontal: 16, paddingBottom: 40 },
-  sub: { color: MUTED, fontSize: 13.5, lineHeight: 19, marginBottom: 16 },
+  sub: { color: th.muted, fontSize: 13.5, lineHeight: 19, marginBottom: 16 },
 
-  seenRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#14141b",
-             borderColor: "#26262f", borderWidth: 1, borderRadius: 12, paddingVertical: 11,
+  seenRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: th.panel,
+             borderColor: th.line, borderWidth: 1, borderRadius: 12, paddingVertical: 11,
              paddingHorizontal: 13, marginBottom: 14 },
-  seenT: { color: "#d6d6de", fontSize: 13, fontWeight: "600", flex: 1 },
-  summary: { flexDirection: "row", gap: 18, backgroundColor: "#14141b", borderColor: "#26262f",
+  seenT: { color: th.text2, fontSize: 13, fontWeight: "600", flex: 1 },
+  summary: { flexDirection: "row", gap: 18, backgroundColor: th.panel, borderColor: th.line,
              borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 14 },
   summaryLeft: { alignItems: "center", justifyContent: "center", gap: 5, minWidth: 92 },
-  big: { color: "#f4f4f6", fontSize: 40, fontWeight: "800", lineHeight: 44 },
+  big: { color: th.text, fontSize: 40, fontWeight: "800", lineHeight: 44 },
   starRow: { flexDirection: "row", gap: 1.5 },
-  count: { color: MUTED, fontSize: 12 },
+  count: { color: th.muted, fontSize: 12 },
 
   hist: { flex: 1, justifyContent: "center", gap: 5 },
   histRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  histN: { color: MUTED, fontSize: 10.5, width: 8, textAlign: "right" },
-  histTrack: { flex: 1, height: 5, borderRadius: 3, backgroundColor: "#26262f", overflow: "hidden" },
-  histFill: { height: 5, borderRadius: 3, backgroundColor: ACCENT },
-  histC: { color: MUTED, fontSize: 10.5, width: 14, textAlign: "right" },
+  histN: { color: th.muted, fontSize: 10.5, width: 8, textAlign: "right" },
+  histTrack: { flex: 1, height: 5, borderRadius: 3, backgroundColor: th.line, overflow: "hidden" },
+  histFill: { height: 5, borderRadius: 3, backgroundColor: th.accentFill },
+  histC: { color: th.muted, fontSize: 10.5, width: 14, textAlign: "right" },
 
-  factsCard: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+  factsCard: { backgroundColor: th.panel, borderColor: th.line, borderWidth: 1,
                borderRadius: 14, padding: 14, marginBottom: 14, gap: 4 },
   factsHead: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 2 },
-  factsTitle: { color: "#f4f4f6", fontSize: 14, fontWeight: "800", flex: 1 },
-  factsBig: { color: ACCENT, fontSize: 17, fontWeight: "800" },
-  factsWhere: { color: "#c8c8d0", fontSize: 12.5 },
-  factsSongs: { color: MUTED, fontSize: 12.5, lineHeight: 18, marginTop: 2 },
-  factsSource: { color: MUTED, fontSize: 11, fontStyle: "italic", marginTop: 4 },
+  factsTitle: { color: th.text, fontSize: 14, fontWeight: "800", flex: 1 },
+  factsBig: { color: th.accent, fontSize: 17, fontWeight: "800" },
+  factsWhere: { color: th.text3, fontSize: 12.5 },
+  factsSongs: { color: th.muted, fontSize: 12.5, lineHeight: 18, marginTop: 2 },
+  factsSource: { color: th.muted, fontSize: 11, fontStyle: "italic", marginTop: 4 },
 
-  writeRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#14141b",
-              borderColor: "#26262f", borderWidth: 1, borderRadius: 14, padding: 13,
+  writeRow: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: th.panel,
+              borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 13,
               marginBottom: 18 },
-  writeTitle: { color: "#f4f4f6", fontSize: 14.5, fontWeight: "800" },
-  writeSub: { color: MUTED, fontSize: 12, marginTop: 2 },
+  writeTitle: { color: th.text, fontSize: 14.5, fontWeight: "800" },
+  writeSub: { color: th.muted, fontSize: 12, marginTop: 2 },
 
-  lockedRow: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: "#121218",
-               borderColor: "#22222b", borderWidth: 1, borderRadius: 14, padding: 13,
+  lockedRow: { flexDirection: "row", alignItems: "center", gap: 9, backgroundColor: th.panel,
+               borderColor: th.panel3, borderWidth: 1, borderRadius: 14, padding: 13,
                marginBottom: 18 },
-  lockedText: { color: MUTED, fontSize: 12.5, flex: 1, lineHeight: 18 },
+  lockedText: { color: th.muted, fontSize: 12.5, flex: 1, lineHeight: 18 },
 
-  section: { color: "#f4f4f6", fontSize: 16, fontWeight: "800", marginBottom: 10 },
+  section: { color: th.text, fontSize: 16, fontWeight: "800", marginBottom: 10 },
 
-  card: { backgroundColor: "#14141b", borderColor: "#26262f", borderWidth: 1,
+  card: { backgroundColor: th.panel, borderColor: th.line, borderWidth: 1,
           borderRadius: 14, padding: 13, marginBottom: 10, gap: 9 },
   cardHead: { flexDirection: "row", alignItems: "center", gap: 10 },
-  name: { color: "#f4f4f6", fontSize: 14, fontWeight: "800" },
-  when: { color: MUTED, fontSize: 11.5, marginTop: 1 },
-  cardBody: { color: "#d6d6de", fontSize: 13.5, lineHeight: 20 },
+  name: { color: th.text, fontSize: 14, fontWeight: "800" },
+  when: { color: th.muted, fontSize: 11.5, marginTop: 1 },
+  cardBody: { color: th.text2, fontSize: 13.5, lineHeight: 20 },
   helpful: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
-             backgroundColor: "#1b1b24", borderRadius: 999, paddingVertical: 6,
+             backgroundColor: th.panel2, borderRadius: 999, paddingVertical: 6,
              paddingHorizontal: 11 },
-  helpfulOn: { backgroundColor: "#1e2410" },
-  helpfulT: { color: MUTED, fontSize: 12, fontWeight: "700" },
-  helpfulTOn: { color: ACCENT },
+  helpfulOn: { backgroundColor: alpha(th.accent, 0.14) },
+  helpfulT: { color: th.muted, fontSize: 12, fontWeight: "700" },
+  helpfulTOn: { color: th.accent },
 
   empty: { alignItems: "center", gap: 10, paddingVertical: 30, paddingHorizontal: 20 },
-  emptyText: { color: MUTED, fontSize: 13, textAlign: "center", lineHeight: 19 },
+  emptyText: { color: th.muted, fontSize: 13, textAlign: "center", lineHeight: 19 },
 
   promise: { flexDirection: "row", alignItems: "flex-start", gap: 7, marginTop: 18 },
-  promiseT: { color: MUTED, fontSize: 11.5, lineHeight: 17, flex: 1 },
+  promiseT: { color: th.muted, fontSize: 11.5, lineHeight: 17, flex: 1 },
 
   sheetBody: { padding: 20, gap: 10 },
-  sheetQ: { color: "#f4f4f6", fontSize: 19, fontWeight: "800", textAlign: "center" },
+  sheetQ: { color: th.text, fontSize: 19, fontWeight: "800", textAlign: "center" },
   starPick: { flexDirection: "row", gap: 10, justifyContent: "center", marginVertical: 14 },
-  sheetLabel: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
-  sheetInput: { minHeight: 130, backgroundColor: "#14141b", borderColor: "#26262f",
-                borderWidth: 1, borderRadius: 12, padding: 13, color: "#f4f4f6",
+  sheetLabel: { color: th.muted, fontSize: 12.5, fontWeight: "700" },
+  sheetInput: { minHeight: 130, backgroundColor: th.panel, borderColor: th.line,
+                borderWidth: 1, borderRadius: 12, padding: 13, color: th.text,
                 fontSize: 14.5, lineHeight: 21 },
-  error: { color: "#ff8b8b", fontSize: 12.5, marginTop: 4 },
-  sheetFoot: { padding: 16, borderTopWidth: 1, borderTopColor: "#1c1c24" },
-  cta: { backgroundColor: ACCENT, paddingVertical: 15, borderRadius: 12, alignItems: "center" },
-  ctaOff: { backgroundColor: "#1b1b24" },
-  ctaText: { color: "#0b0b0f", fontSize: 15, fontWeight: "800" },
+  error: { color: th.dangerSoft, fontSize: 12.5, marginTop: 4 },
+  sheetFoot: { padding: 16, borderTopWidth: 1, borderTopColor: th.line2 },
+  cta: { backgroundColor: th.accentFill, paddingVertical: 15, borderRadius: 12, alignItems: "center" },
+  ctaOff: { backgroundColor: th.panel2 },
+  ctaText: { color: th.accentInk, fontSize: 15, fontWeight: "800" },
 });

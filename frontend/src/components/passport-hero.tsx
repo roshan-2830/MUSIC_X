@@ -16,13 +16,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useEffect } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import Animated, {
   Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming,
 } from "react-native-reanimated";
 
 import { flagEmoji } from "../lib/format";
 
-const ACCENT = "#e8ff47";
 
 // A real passport's name line is a serif; the machine strip is a monospace. Android has no
 // Georgia, so the generic family is the fallback rather than a silent substitution.
@@ -40,6 +42,8 @@ function seeded(s: string, salt: number): number {
 const BAR_COUNT = 22;
 
 function Bar({ index }: { index: number }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const t = useSharedValue(0);
   // Heights chosen from the index, not at random: a skyline should keep its shape, and only
   // the levels should move.
@@ -60,6 +64,8 @@ function Bar({ index }: { index: number }) {
 function Bloom({ color, size, from, to, duration, style }: {
   color: string; size: number; from: number; to: number; duration: number; style: any;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = withRepeat(
@@ -85,6 +91,8 @@ const SLOTS = [
 
 export default function PassportHero({ stamps, onBack }:
   { stamps: { country: string; shows: number }[]; onBack: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const shown = stamps.slice(0, SLOTS.length);
 
   return (
@@ -95,7 +103,7 @@ export default function PassportHero({ stamps, onBack }:
         style={StyleSheet.absoluteFill}
       />
 
-      <Bloom color={ACCENT} size={240} from={-60} to={80} duration={9000}
+      <Bloom color={th.accent} size={240} from={-60} to={80} duration={9000}
              style={{ top: -90, left: 0 }} />
       <Bloom color="#7b5cff" size={260} from={60} to={-70} duration={11000}
              style={{ top: -40, right: 0 }} />
@@ -129,7 +137,7 @@ export default function PassportHero({ stamps, onBack }:
 
       <View style={styles.middle} pointerEvents="none">
         <View style={styles.crest}>
-          <Ionicons name="musical-notes" size={24} color={ACCENT} />
+          <Ionicons name="musical-notes" size={24} color={th.accent} />
         </View>
         <Text style={styles.title}>Concert Passport</Text>
         <Text style={styles.sub}>Every stage. Every city. All yours.</Text>
@@ -138,7 +146,7 @@ export default function PassportHero({ stamps, onBack }:
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   hero: { height: 230, overflow: "hidden", justifyContent: "center", alignItems: "center" },
   middle: { alignItems: "center", paddingBottom: 26 },
   back: { position: "absolute", top: 14, left: 16, width: 36, height: 36, borderRadius: 18,
@@ -153,7 +161,7 @@ const styles = StyleSheet.create({
   bars: { position: "absolute", left: 0, right: 0, bottom: 0, height: 120,
           flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between",
           paddingHorizontal: 8, gap: 3 },
-  bar: { flex: 1, borderTopLeftRadius: 3, borderTopRightRadius: 3, backgroundColor: ACCENT },
+  bar: { flex: 1, borderTopLeftRadius: 3, borderTopRightRadius: 3, backgroundColor: th.accentFill },
   barFade: { position: "absolute", left: 0, right: 0, bottom: 0, height: 120 },
 
   stamp: { position: "absolute", alignItems: "center", justifyContent: "center",

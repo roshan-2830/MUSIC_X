@@ -13,6 +13,19 @@ db_url = settings.database_url.replace("postgresql://", "postgresql+psycopg://",
 # Supabase's connection pooler, which otherwise raises "another command is already in progress".
 engine = create_engine(
     db_url,
+    # These numbers assume the TRANSACTION pooler (port 6543 — see DATABASE_URL). The
+    # session pooler capped this project at fifteen dedicated client connections, which one
+    # API process could consume alone; on 2026-09-09 and again on 2026-09-10 that refused a
+    # migration and then broke the whole app when uvicorn --reload left a second worker
+    # alive. Two pools against a limit of fifteen fails at random, which is the worst way
+    # for it to fail.
+    #
+    # A transaction pooler multiplexes, so the wall is gone and these are ordinary numbers
+    # rather than a rationed share. pool_timeout still bounds the wait: better a clear
+    # failure in ten seconds than a request hanging for thirty.
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=10,
     pool_pre_ping=True,
     # DISCARD CONNECTIONS OLDER THAN FIVE MINUTES. This was -1 — keep forever — and that is
     # what turned a WiFi reconnect into a 500. A connection parked in the pool across a network

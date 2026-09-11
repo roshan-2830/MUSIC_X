@@ -16,20 +16,23 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import PassportHero, { MONO, SERIF } from "./passport-hero";
 import { getPassport, Passport, PassportShow } from "../lib/api";
 import { flagEmoji } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
 const SETLISTFM = "https://www.setlist.fm/";
 
 function Stat({ icon, value, label, big }: {
   icon: keyof typeof Ionicons.glyphMap; value: string | number; label: string; big?: boolean;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={[styles.stat, big && styles.statBig]}>
-      <Ionicons name={icon} size={15} color={big ? "#101204" : ACCENT} />
+      <Ionicons name={icon} size={15} color={big ? th.accentInk : th.accent} />
       <Text style={[styles.statV, big && styles.statVBig]}>{value}</Text>
       <Text style={[styles.statL, big && styles.statLBig]}>{label}</Text>
     </View>
@@ -48,6 +51,8 @@ function byYear(shows: PassportShow[]) {
 
 export default function PassportView({ onClose, onImport }:
   { onClose: () => void; onImport?: () => void }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [data, setData] = useState<Passport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,10 +75,10 @@ export default function PassportView({ onClose, onImport }:
         <PassportHero stamps={data?.stamps ?? []} onBack={onClose} />
 
         {loading ? (
-          <View style={styles.center}><ActivityIndicator color={ACCENT} /></View>
+          <View style={styles.center}><ActivityIndicator color={th.accent} /></View>
         ) : error ? (
           <View style={styles.center}>
-            <Ionicons name="cloud-offline-outline" size={40} color={MUTED} />
+            <Ionicons name="cloud-offline-outline" size={40} color={th.muted} />
             <Text style={styles.emptyT}>Couldn’t load your passport</Text>
             <Text style={styles.emptyS}>{error}</Text>
           </View>
@@ -86,7 +91,7 @@ export default function PassportView({ onClose, onImport }:
               style={styles.doc}>
               <View style={styles.docBand}>
                 <Text style={styles.docBrand}>
-                  MUSIC<Text style={{ color: ACCENT }}>X</Text> · CONCERT PASSPORT
+                  MUSIC<Text style={{ color: th.accent }}>X</Text> · CONCERT PASSPORT
                 </Text>
                 <Text style={styles.docNo}>MX·{String(data.shows).padStart(4, "0")}</Text>
               </View>
@@ -94,7 +99,7 @@ export default function PassportView({ onClose, onImport }:
                 <View style={styles.photo}>
                   <Text style={styles.photoInitial}>{initial}</Text>
                   <View style={styles.verified}>
-                    <Ionicons name="checkmark" size={11} color="#101204" />
+                    <Ionicons name="checkmark" size={11} color={th.accentInk} />
                   </View>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -125,7 +130,7 @@ export default function PassportView({ onClose, onImport }:
             <View style={styles.ms}>
               <View style={styles.msHead}>
                 <View style={styles.msTitleRow}>
-                  <Ionicons name="ribbon" size={14} color={ACCENT} />
+                  <Ionicons name="ribbon" size={14} color={th.accent} />
                   <Text style={styles.msTitle}>
                     {data.milestones.next_label
                       ? `${data.milestones.next_label} · ${data.milestones.next_at} shows`
@@ -219,7 +224,7 @@ export default function PassportView({ onClose, onImport }:
             {onImport ? (
               <Pressable style={styles.import} onPress={onImport}>
                 <View style={styles.importIcon}>
-                  <Ionicons name="cloud-download-outline" size={20} color={ACCENT} />
+                  <Ionicons name="cloud-download-outline" size={20} color={th.accent} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.importT}>Been to shows before Music X?</Text>
@@ -228,13 +233,13 @@ export default function PassportView({ onClose, onImport }:
                     passport. We mark them as imported, never as verified.
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={MUTED} />
+                <Ionicons name="chevron-forward" size={18} color={th.muted} />
               </Pressable>
             ) : null}
 
             {data.shows === 0 ? (
               <View style={styles.empty}>
-                <Ionicons name="airplane-outline" size={40} color={MUTED} />
+                <Ionicons name="airplane-outline" size={40} color={th.muted} />
                 <Text style={styles.emptyT}>No stamps yet</Text>
                 <Text style={styles.emptyS}>
                   Tell a show you saved that you had a ticket, and once it’s over it lands here
@@ -308,7 +313,7 @@ export default function PassportView({ onClose, onImport }:
             ) : null}
 
             <Text style={styles.promise}>
-              <Ionicons name="shield-checkmark" size={11} color={MUTED} /> Every show here points
+              <Ionicons name="shield-checkmark" size={11} color={th.muted} /> Every show here points
               to something real — a ticket, a confirmation, or an imported record. We don’t take
               anyone’s word for it, including yours.
             </Text>
@@ -319,8 +324,8 @@ export default function PassportView({ onClose, onImport }:
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   hero: { height: 210, alignItems: "center", justifyContent: "center", paddingHorizontal: 30,
           paddingBottom: 30 },
   heroBack: { position: "absolute", top: 14, left: 16, width: 36, height: 36, borderRadius: 18,
@@ -344,7 +349,7 @@ const styles = StyleSheet.create({
            borderWidth: 2, borderColor: "rgba(255,255,255,0.18)" },
   photoInitial: { color: "#fff", fontSize: 32, fontWeight: "900" },
   verified: { position: "absolute", bottom: -6, right: -6, width: 22, height: 22,
-              borderRadius: 11, backgroundColor: ACCENT, alignItems: "center",
+              borderRadius: 11, backgroundColor: th.accentFill, alignItems: "center",
               justifyContent: "center", borderWidth: 2, borderColor: "#20204a" },
   // Georgia italic, as the mockup has it — a real passport's name line is a serif, and that one
   // detail does more than any amount of styling to make this read as a document.
@@ -359,87 +364,87 @@ const styles = StyleSheet.create({
          backgroundColor: "rgba(0,0,0,0.28)",
          fontFamily: MONO, fontVariant: ["tabular-nums"] },
 
-  ms: { backgroundColor: "#14141b", borderRadius: 14, padding: 14, marginTop: 14,
-        borderWidth: 1, borderColor: "#23232c" },
+  ms: { backgroundColor: th.panel, borderRadius: 14, padding: 14, marginTop: 14,
+        borderWidth: 1, borderColor: th.panel3 },
   msHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   msTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  msTitle: { color: "#f4f4f6", fontSize: 13, fontWeight: "800" },
-  msSub: { color: MUTED, fontSize: 11 },
-  msTrack: { height: 6, borderRadius: 3, backgroundColor: "#23232c", marginTop: 12,
+  msTitle: { color: th.text, fontSize: 13, fontWeight: "800" },
+  msSub: { color: th.muted, fontSize: 11 },
+  msTrack: { height: 6, borderRadius: 3, backgroundColor: th.panel3, marginTop: 12,
              overflow: "hidden" },
-  msFill: { height: 6, borderRadius: 3, backgroundColor: ACCENT },
+  msFill: { height: 6, borderRadius: 3, backgroundColor: th.accentFill },
   msLabels: { flexDirection: "row", justifyContent: "space-between", marginTop: 6 },
-  msLabel: { color: "#4a4a55", fontSize: 10, fontWeight: "700" },
-  msLabelOn: { color: ACCENT },
+  msLabel: { color: th.outline2, fontSize: 10, fontWeight: "700" },
+  msLabelOn: { color: th.accent },
 
   statGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 14 },
-  stat: { flexBasis: "31%", flexGrow: 1, backgroundColor: "#14141b", borderRadius: 14,
-          padding: 12, borderWidth: 1, borderColor: "#23232c", gap: 4 },
-  statBig: { flexBasis: "100%", backgroundColor: ACCENT, borderColor: ACCENT },
-  statV: { color: "#f4f4f6", fontSize: 22, fontWeight: "900" },
-  statVBig: { color: "#101204", fontSize: 30 },
-  statL: { color: MUTED, fontSize: 11 },
+  stat: { flexBasis: "31%", flexGrow: 1, backgroundColor: th.panel, borderRadius: 14,
+          padding: 12, borderWidth: 1, borderColor: th.panel3, gap: 4 },
+  statBig: { flexBasis: "100%", backgroundColor: th.accentFill, borderColor: th.accentFill },
+  statV: { color: th.text, fontSize: 22, fontWeight: "900" },
+  statVBig: { color: th.accentInk, fontSize: 30 },
+  statL: { color: th.muted, fontSize: 11 },
   statLBig: { color: "rgba(16,18,4,0.72)", fontWeight: "700" },
-  estimate: { color: "#5a5a66", fontSize: 11, marginTop: 8 },
+  estimate: { color: th.faint, fontSize: 11, marginTop: 8 },
 
   tiles: { flexDirection: "row", gap: 10, marginTop: 14 },
-  tile: { flex: 1, backgroundColor: "#14141b", borderRadius: 14, padding: 14,
-          borderWidth: 1, borderColor: "#23232c" },
-  tileL: { color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8,
+  tile: { flex: 1, backgroundColor: th.panel, borderRadius: 14, padding: 14,
+          borderWidth: 1, borderColor: th.panel3 },
+  tileL: { color: th.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.8,
            textTransform: "uppercase" },
-  tileV: { color: "#f4f4f6", fontSize: 16, fontWeight: "800", marginTop: 4 },
-  tileS: { color: MUTED, fontSize: 11, marginTop: 2 },
+  tileV: { color: th.text, fontSize: 16, fontWeight: "800", marginTop: 4 },
+  tileS: { color: th.muted, fontSize: 11, marginTop: 2 },
   gbar: { flexDirection: "row", alignItems: "center", gap: 6 },
-  gbarL: { color: MUTED, fontSize: 10, width: 74 },
-  gbarTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: "#23232c" },
-  gbarFill: { height: 4, borderRadius: 2, backgroundColor: ACCENT },
+  gbarL: { color: th.muted, fontSize: 10, width: 74 },
+  gbarTrack: { flex: 1, height: 4, borderRadius: 2, backgroundColor: th.panel3 },
+  gbarFill: { height: 4, borderRadius: 2, backgroundColor: th.accentFill },
 
   secHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end",
              marginTop: 26 },
-  section: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
-  secCount: { color: MUTED, fontSize: 12 },
-  sectionS: { color: MUTED, fontSize: 12, marginTop: 4, marginBottom: 12 },
+  section: { color: th.text, fontSize: 17, fontWeight: "800" },
+  secCount: { color: th.muted, fontSize: 12 },
+  sectionS: { color: th.muted, fontSize: 12, marginTop: 4, marginBottom: 12 },
   wall: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   stamp: { width: 92, alignItems: "center", paddingVertical: 12, borderRadius: 14,
-           backgroundColor: "#14141b", borderWidth: 1, borderColor: "#2b2b36",
+           backgroundColor: th.panel, borderWidth: 1, borderColor: th.line3,
            borderStyle: "dashed" },
   stampFlag: { fontSize: 28, lineHeight: 32 },
-  stampCC: { color: "#f4f4f6", fontSize: 12, fontWeight: "800", letterSpacing: 0.6, marginTop: 2 },
-  stampX: { color: ACCENT, fontSize: 10, fontWeight: "800", marginTop: 1 },
-  stampYr: { color: MUTED, fontSize: 9, marginTop: 2 },
+  stampCC: { color: th.text, fontSize: 12, fontWeight: "800", letterSpacing: 0.6, marginTop: 2 },
+  stampX: { color: th.accent, fontSize: 10, fontWeight: "800", marginTop: 1 },
+  stampYr: { color: th.muted, fontSize: 9, marginTop: 2 },
 
   import: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 20, padding: 14,
-            borderRadius: 14, backgroundColor: "#14141b", borderWidth: 1, borderColor: "#2b2b36" },
-  importIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: "#1b1b24",
+            borderRadius: 14, backgroundColor: th.panel, borderWidth: 1, borderColor: th.line3 },
+  importIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: th.panel2,
                 alignItems: "center", justifyContent: "center" },
-  importT: { color: "#f4f4f6", fontSize: 14, fontWeight: "800" },
-  importS: { color: MUTED, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  importT: { color: th.text, fontSize: 14, fontWeight: "800" },
+  importS: { color: th.muted, fontSize: 11, lineHeight: 16, marginTop: 3 },
 
   yearHead: { flexDirection: "row", alignItems: "baseline", gap: 10, marginBottom: 8 },
-  yearNum: { color: ACCENT, fontSize: 30, fontWeight: "900", fontFamily: SERIF,
+  yearNum: { color: th.accent, fontSize: 30, fontWeight: "900", fontFamily: SERIF,
              letterSpacing: -1 },
-  yearMeta: { color: MUTED, fontSize: 12 },
+  yearMeta: { color: th.muted, fontSize: 12 },
   tl: { flexDirection: "row", gap: 12 },
   tlNode: { alignItems: "center", width: 12 },
-  tlDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: ACCENT, marginTop: 6 },
-  tlDotImported: { backgroundColor: "#5a5a66" },
-  tlStem: { flex: 1, width: 2, backgroundColor: "#23232c", marginTop: 2 },
+  tlDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: th.accentFill, marginTop: 6 },
+  tlDotImported: { backgroundColor: th.faint },
+  tlStem: { flex: 1, width: 2, backgroundColor: th.panel3, marginTop: 2 },
   tlCard: { flex: 1, paddingBottom: 16 },
-  tlDate: { color: MUTED, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
-  tlArtist: { color: "#f4f4f6", fontSize: 15, fontWeight: "700", marginTop: 2 },
-  tlLoc: { color: MUTED, fontSize: 12, marginTop: 2 },
+  tlDate: { color: th.muted, fontSize: 10, fontWeight: "800", letterSpacing: 0.8 },
+  tlArtist: { color: th.text, fontSize: 15, fontWeight: "700", marginTop: 2 },
+  tlLoc: { color: th.muted, fontSize: 12, marginTop: 2 },
   tag: { fontSize: 10, fontWeight: "700", marginTop: 6, alignSelf: "flex-start",
          paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, overflow: "hidden" },
-  tagOn: { color: "#101204", backgroundColor: ACCENT },
-  tagImported: { color: "#c9c9d2", backgroundColor: "#23232c" },
+  tagOn: { color: th.accentInk, backgroundColor: th.accentFill },
+  tagImported: { color: th.text3, backgroundColor: th.panel3 },
 
   attr: { alignItems: "center", marginTop: 18 },
-  attrT: { color: MUTED, fontSize: 12 },
-  attrLink: { color: ACCENT, fontWeight: "700", textDecorationLine: "underline" },
-  promise: { color: MUTED, fontSize: 11, lineHeight: 17, textAlign: "center", marginTop: 20 },
+  attrT: { color: th.muted, fontSize: 12 },
+  attrLink: { color: th.accent, fontWeight: "700", textDecorationLine: "underline" },
+  promise: { color: th.muted, fontSize: 11, lineHeight: 17, textAlign: "center", marginTop: 20 },
 
   center: { alignItems: "center", justifyContent: "center", padding: 40, gap: 8 },
   empty: { alignItems: "center", padding: 30, gap: 10 },
-  emptyT: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
-  emptyS: { color: MUTED, fontSize: 13, textAlign: "center", lineHeight: 19 },
+  emptyT: { color: th.text, fontSize: 17, fontWeight: "800" },
+  emptyS: { color: th.muted, fontSize: 13, textAlign: "center", lineHeight: 19 },
 });

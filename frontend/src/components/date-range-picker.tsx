@@ -21,8 +21,9 @@ import { useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 const DOW = ["M", "T", "W", "T", "F", "S", "S"];
 const MONTHS_AHEAD = 12;
 
@@ -52,6 +53,8 @@ export default function DateRangePicker({
   onClose: () => void; onChange: (start: string, end: string) => void;
   minDate?: string;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   // Held locally until Done, so a half-made range never leaks to the screen behind.
   const [a, setA] = useState<string>(start);
   const [b, setB] = useState<string | null>(end);
@@ -91,7 +94,7 @@ export default function DateRangePicker({
       <SafeAreaView style={styles.root} edges={["top"]}>
         <View style={styles.head}>
           <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close">
-            <Ionicons name="close" size={24} color="#f4f4f6" />
+            <Ionicons name="close" size={24} color={th.text} />
           </Pressable>
           <Text style={styles.title}>When are you free?</Text>
           <View style={{ width: 24 }} />
@@ -176,43 +179,43 @@ export default function DateRangePicker({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   head: { flexDirection: "row", alignItems: "center", justifyContent: "space-between",
           paddingHorizontal: 16, paddingVertical: 12 },
-  title: { color: "#f4f4f6", fontSize: 17, fontWeight: "800" },
+  title: { color: th.text, fontSize: 17, fontWeight: "800" },
 
   ends: { flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingBottom: 14 },
-  endBox: { flex: 1, backgroundColor: "#14141b", borderWidth: 1, borderColor: "#26262f",
+  endBox: { flex: 1, backgroundColor: th.panel, borderWidth: 1, borderColor: th.line,
             borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  endBoxOn: { borderColor: ACCENT },
-  endLabel: { color: MUTED, fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
-  endLabelOn: { color: ACCENT },
-  endValue: { color: "#f4f4f6", fontSize: 15, fontWeight: "700", marginTop: 3 },
-  endValueOff: { color: MUTED, fontWeight: "600" },
+  endBoxOn: { borderColor: th.accentFill },
+  endLabel: { color: th.muted, fontSize: 11, fontWeight: "800", letterSpacing: 0.4 },
+  endLabelOn: { color: th.accent },
+  endValue: { color: th.text, fontSize: 15, fontWeight: "700", marginTop: 3 },
+  endValueOff: { color: th.muted, fontWeight: "600" },
 
   dow: { flexDirection: "row", paddingHorizontal: 12, paddingBottom: 6,
-         borderBottomWidth: 1, borderBottomColor: "#1c1c24" },
-  dowT: { width: `${100 / 7}%`, textAlign: "center", color: MUTED, fontSize: 11, fontWeight: "800" },
+         borderBottomWidth: 1, borderBottomColor: th.line2 },
+  dowT: { width: `${100 / 7}%`, textAlign: "center", color: th.muted, fontSize: 11, fontWeight: "800" },
 
   scroll: { paddingBottom: 8 },
   month: { paddingTop: 14 },
-  monthName: { color: "#f4f4f6", fontSize: 15, fontWeight: "800", paddingHorizontal: 16,
+  monthName: { color: th.text, fontSize: 15, fontWeight: "800", paddingHorizontal: 16,
                paddingBottom: 6 },
   grid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12 },
   cell: { width: `${100 / 7}%`, padding: 2, alignItems: "center" },
   day: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  dayIn: { backgroundColor: "#1e2410" },
-  dayEnd: { backgroundColor: ACCENT },
-  dayT: { color: "#e6e6ee", fontSize: 14, fontWeight: "600" },
-  dayPast: { color: "#3a3a44" },
-  dayInT: { color: ACCENT },
-  dayEndT: { color: "#101204", fontWeight: "900" },
+  dayIn: { backgroundColor: alpha(th.accent, 0.14) },
+  dayEnd: { backgroundColor: th.accentFill },
+  dayT: { color: th.text2, fontSize: 14, fontWeight: "600" },
+  dayPast: { color: th.outline },
+  dayInT: { color: th.accent },
+  dayEndT: { color: th.accentInk, fontWeight: "900" },
 
-  foot: { padding: 16, gap: 12, borderTopWidth: 1, borderTopColor: "#1c1c24" },
-  summary: { color: MUTED, fontSize: 13, textAlign: "center" },
-  done: { backgroundColor: ACCENT, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
-  doneOff: { backgroundColor: "#1b1b24" },
-  doneT: { color: "#101204", fontSize: 15, fontWeight: "800" },
-  doneTOff: { color: "#5a5a66" },
+  foot: { padding: 16, gap: 12, borderTopWidth: 1, borderTopColor: th.line2 },
+  summary: { color: th.muted, fontSize: 13, textAlign: "center" },
+  done: { backgroundColor: th.accentFill, paddingVertical: 14, borderRadius: 12, alignItems: "center" },
+  doneOff: { backgroundColor: th.panel2 },
+  doneT: { color: th.accentInk, fontSize: 15, fontWeight: "800" },
+  doneTOff: { color: th.faint },
 });

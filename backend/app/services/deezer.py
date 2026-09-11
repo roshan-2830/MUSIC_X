@@ -4,10 +4,26 @@ import unicodedata
 import httpx
 
 
+# Letters NFKD cannot decompose, because they are distinct characters rather than a base plus
+# a combining mark. Without this the ASCII encode DELETES them: 'NØFX' became 'nfx' and so
+# never matched a user following 'NOFX', and Turkish 'Yıldız Tilbe' became 'yldztilbe'.
+# Measured 2026-09-11: 81 of 13,545 artist names lost a letter this way.
+#
+# The same map as venue_lookup._LETTERS, which fixed this exact bug for venue names — where
+# 'Alaçatı' was becoming 'alacat'. Two copies of it is one too many, but venue_lookup's key()
+# also strips a trailing state code and keeps parentheses, so merging them would change venue
+# matching as a side effect of fixing artists.
+_LETTERS = str.maketrans({
+    "ı": "i", "İ": "i", "ø": "o", "Ø": "o", "ł": "l", "Ł": "l",
+    "đ": "d", "Đ": "d", "ð": "d", "Ð": "d", "þ": "th", "Þ": "th",
+    "ß": "ss", "æ": "ae", "Æ": "ae", "œ": "oe", "Œ": "oe",
+})
+
+
 def _norm(s: str) -> str:
     """Lowercase, strip accents + punctuation — so 'Beyoncé' == 'Beyonce' but
     'Coldplace' != 'Coldplay'."""
-    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    s = unicodedata.normalize("NFKD", (s or "").translate(_LETTERS)).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "", s.lower())
 
 

@@ -38,18 +38,12 @@ class PlanOut(BaseModel):
     # which one did it — and which are still available.
     has_base: bool = False
     has_invited: bool = False
-    has_note: bool = False
     reminder_level: str = "normal"
-    note: str | None = None
     ticket: TicketOut | None = None
 
 
 class ReminderIn(BaseModel):
     level: str
-
-
-class NoteIn(BaseModel):
-    note: str | None = None
 
 
 class PasteIn(BaseModel):

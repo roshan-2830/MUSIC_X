@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { Image, LayoutChangeEvent, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 
-import { TILE, tileGrid } from "../lib/slippy";
+import { TILE } from "../lib/slippy";
+import { useMapPan } from "../lib/use-map-pan";
 
-const ACCENT = "#e8ff47";
+import MapControls from "./map-controls";
+
 const INK = "#1a1a20";
-const LINE = "#26262f";
 /** The ground colour of the tiles, so the frame matches while they load instead of
  *  flashing a black box on a light map. */
 const TILE_BG = "#e8e2d9";
@@ -34,14 +38,17 @@ type Props = {
 };
 
 export default function VenueMap({ lat, lng, venue, city, imageUrl }: Props) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   // The grid has to be laid out in real pixels, and only the parent knows how wide the
   // card is. Until it reports, draw the frame and no tiles — never a half-placed map.
   const [width, setWidth] = useState(0);
   const onLayout = (e: LayoutChangeEvent) => setWidth(Math.round(e.nativeEvent.layout.width));
 
-  // The grid comes from lib/slippy, shared with the Stay map. Two copies of Web Mercator
-  // would drift, and a projection that disagrees with its own tiles misplaces every marker.
-  const grid = width > 0 ? tileGrid(lat, lng, ZOOM, width, HEIGHT) : null;
+  // Draggable, via the shared hook. It owns the grid — which still comes from lib/slippy, so
+  // the projection stays the one every map uses — plus the pan gesture and the zoom buttons.
+  const map = useMapPan({ lat, lng, zoom: ZOOM, width, height: HEIGHT });
+  const grid = map.grid;
 
   const directions = () =>
     Linking.openURL(
@@ -52,9 +59,20 @@ export default function VenueMap({ lat, lng, venue, city, imageUrl }: Props) {
 
   return (
     <>
-      <View style={styles.frame} onLayout={onLayout}>
+      <View
+        style={styles.frame}
+        onLayout={onLayout}
+        // The FRAME, not the tile grid: the grid is absolutely positioned and slides as you
+        // pan, so its bounding box is wrong for the wheel-zoom maths and it stops being the
+        // surface under the cursor. The frame is fixed and covers the whole map.
+        {...map.panHandlers}
+        ref={map.webRef}
+      >
+        {/* The handlers go on the tile layer, not the frame, so the Directions row below and
+            the zoom buttons above stay tappable. */}
         {grid ? (
-          <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}>
+          <View style={[styles.grid, { left: grid.gridLeft, top: grid.gridTop }]}
+                >
             {grid.tiles.map((t) => (
               <Image key={t.key} source={{ uri: t.url }}
                      style={[styles.tile, { left: t.left, top: t.top }]} />
@@ -62,10 +80,13 @@ export default function VenueMap({ lat, lng, venue, city, imageUrl }: Props) {
           </View>
         ) : null}
 
-        {/* Centred by a full-bleed flex layer rather than a percentage transform —
-            percentage translate is a recent React Native addition, and getting it wrong
-            would misplace the pin silently while the map underneath looked fine. */}
-        <View style={styles.pinLayer} pointerEvents="none">
+        {/* PROJECTED, not flex-centred. It used to sit in the middle of a full-bleed layer,
+            which is right only while the venue IS the centre — the moment the map can be
+            dragged, a centred pin follows the finger and claims the venue moved. */}
+        {grid ? (() => {
+          const pt = grid.project(lat, lng);
+          return (
+        <View style={[styles.pinLayer, { left: pt.x, top: pt.y }]} pointerEvents="none">
           <View style={styles.pinCol}>
             <View style={styles.photoRing}>
               {imageUrl ? (
@@ -83,57 +104,62 @@ export default function VenueMap({ lat, lng, venue, city, imageUrl }: Props) {
             </View>
           </View>
         </View>
+          );
+        })() : null}
 
+        <MapControls map={map} label="venue" />
         <Text style={styles.attr}>© OpenStreetMap · CARTO</Text>
       </View>
 
       <Pressable style={styles.dirRow} onPress={directions}>
-        <Ionicons name="location-outline" size={18} color="#f4f4f6" />
+        <Ionicons name="location-outline" size={18} color={th.text} />
         <Text style={styles.dirText}>Directions</Text>
-        <Ionicons name="open-outline" size={16} color="#9a9aa6" />
+        <Ionicons name="open-outline" size={16} color={th.muted} />
       </Pressable>
     </>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   frame: {
     position: "relative", height: HEIGHT, borderRadius: 14, overflow: "hidden",
-    borderWidth: 1, borderColor: LINE, backgroundColor: TILE_BG,
+    borderWidth: 1, borderColor: th.line, backgroundColor: TILE_BG,
   },
   grid: { position: "absolute" },
   // Full opacity: this is a light basemap shown as it was designed. The dark theme is
   // carried by the frame around it, not by dimming the map into illegibility.
   tile: { position: "absolute", width: TILE, height: TILE },
 
+  // Anchored at the projected point; the column below is shifted so the pin's TIP lands on
+  // it rather than its middle.
   pinLayer: {
-    position: "absolute", left: 0, right: 0, top: 0, bottom: 0, zIndex: 3,
+    position: "absolute", width: 0, height: 0, zIndex: 3,
     alignItems: "center", justifyContent: "center",
   },
-  // Lift the pin so the POINT lands on the map centre, not the photo's middle.
+  // Lift the pin so the POINT lands on its projected spot, not the photo's middle.
   pinCol: { alignItems: "center", transform: [{ translateY: -(PHOTO + POINTER) / 2 }] },
   photoRing: {
     width: PHOTO, height: PHOTO, borderRadius: PHOTO / 2, borderWidth: 3,
-    borderColor: ACCENT, backgroundColor: ACCENT, overflow: "hidden", zIndex: 2,
+    borderColor: th.accentFill, backgroundColor: th.accentFill, overflow: "hidden", zIndex: 2,
     shadowColor: "#000", shadowOpacity: 0.4, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
   photo: { width: "100%", height: "100%" },
-  photoBlank: { alignItems: "center", justifyContent: "center", backgroundColor: ACCENT },
+  photoBlank: { alignItems: "center", justifyContent: "center", backgroundColor: th.accentFill },
   // Clips the rotated square to just its lower point, so no corners show past the ring.
   pointerWrap: { width: PHOTO, height: POINTER, alignItems: "center", overflow: "hidden", marginTop: -2 },
   pointer: {
-    width: 14, height: 14, backgroundColor: ACCENT, transform: [{ rotate: "45deg" }],
+    width: 14, height: 14, backgroundColor: th.accentFill, transform: [{ rotate: "45deg" }],
     marginTop: -8,
   },
   attr: {
     position: "absolute", right: 6, bottom: 5, zIndex: 5, fontSize: 9,
-    color: "rgba(0,0,0,0.6)", backgroundColor: "rgba(255,255,255,0.7)",
+    color: th.scrim, backgroundColor: "rgba(255,255,255,0.7)",
     paddingVertical: 2, paddingHorizontal: 5, borderRadius: 6, overflow: "hidden",
   },
   dirRow: {
     flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10,
-    backgroundColor: "#14141b", borderColor: LINE, borderWidth: 1, borderRadius: 14, padding: 14,
+    backgroundColor: th.panel, borderColor: th.line, borderWidth: 1, borderRadius: 14, padding: 14,
   },
-  dirText: { color: "#f4f4f6", fontSize: 15, fontWeight: "700", flex: 1 },
+  dirText: { color: th.text, fontSize: 15, fontWeight: "700", flex: 1 },
 });

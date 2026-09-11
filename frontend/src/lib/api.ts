@@ -69,15 +69,71 @@ export type EventDetail = MusicEvent & {
   missing_facts: MissingFact[];
 };
 
+// ---- search & browse filters ----
+// One shape, one serialiser, four endpoints. The server holds the matching definition in
+// services/search_filters.py; if these two ever disagree the funnel means different things
+// on different screens, which is the bug this arrangement exists to prevent.
+export type SearchFilters = {
+  when?: "today" | "tomorrow" | "weekend" | "d7" | "month" | "m3" | "custom" | null;
+  from?: string | null;          // YYYY-MM-DD, only with when: "custom"
+  to?: string | null;
+  country?: string | null;
+  cityId?: string | null;
+  onsale?: "now" | "coming" | null;
+  rating?: number | null;        // 8 or 7
+  following?: boolean;
+  hideOff?: boolean;             // hide cancelled & postponed
+  sort?: "soonest" | "rating";
+  kinds?: ("concerts" | "festivals" | "artists")[] | null;
+};
+
+export const NO_FILTERS: SearchFilters = {};
+
+// How many the user actually set — the number on the funnel badge. Sort is excluded: it is
+// always set to something, so counting it would leave the badge permanently on.
+export function countFilters(f: SearchFilters): number {
+  return [f.when, f.country, f.cityId, f.onsale, f.rating, f.following || null,
+          f.hideOff || null, f.kinds && f.kinds.length ? true : null]
+    .filter(Boolean).length;
+}
+
+// The device's own zone, so "today" means the user's today rather than the server's.
+// Wrapped because Intl can throw in odd runtimes, and a search must not die over a label.
+function deviceTz(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function applyFilters(params: URLSearchParams, f: SearchFilters = {}) {
+  if (f.when) params.set("when", f.when);
+  if (f.from) params.set("from", f.from);
+  if (f.to) params.set("to", f.to);
+  if (f.country) params.set("country", f.country);
+  if (f.cityId) params.set("city_id", f.cityId);
+  if (f.onsale) params.set("onsale", f.onsale);
+  if (f.rating) params.set("rating", String(f.rating));
+  if (f.following) params.set("following", "true");
+  if (f.hideOff) params.set("hide_off", "true");
+  if (f.sort) params.set("sort", f.sort);
+  (f.kinds ?? []).forEach((k) => params.append("kind", k));
+  params.set("tz", deviceTz());
+  return params;
+}
+
 export async function fetchEvents(
   sort: "date" | "mxs" = "date",
   limit = 50,
   cityId?: string,
-  country?: string
+  country?: string,
+  filters: SearchFilters = {}
 ): Promise<MusicEvent[]> {
   const params = new URLSearchParams({ sort, limit: String(limit) });
   if (cityId) params.set("city_id", cityId);
   if (country) params.set("country", country);
+  applyFilters(params, { ...filters, sort: undefined });   // browse has its own sort param
   const res = await fetch(`${API_BASE_URL}/events?${params.toString()}`);
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
@@ -380,10 +436,14 @@ export async function unfollowArtist(artistId: string): Promise<void> {
 }
 
 // Events matching the artists you follow, soonest first, each with a reason line.
-export async function getRecommended(limit?: number): Promise<RecommendedEvent[]> {
+export async function getRecommended(limit?: number,
+                                    filters: SearchFilters = {}): Promise<RecommendedEvent[]> {
   // The home row shows twelve. Asking for everything cost 1.87 MB an app launch and put the
   // database over its monthly allowance three times over; the browse screen asks for more.
-  const q = limit ? `?limit=${limit}` : "";
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", String(limit));
+  applyFilters(params, { ...filters, sort: undefined, following: false });
+  const q = params.toString() ? `?${params.toString()}` : "";
   const res = await fetch(`${API_BASE_URL}/me/recommended${q}`, { headers: await authHeaders() });
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json();
@@ -478,8 +538,11 @@ export async function getFestival(id: string): Promise<FestivalDetail> {
 }
 
 // All upcoming festivals (open browse — everyone sees the same).
-export async function getFestivals(limit = 100): Promise<Festival[]> {
-  const res = await fetch(`${API_BASE_URL}/festivals?limit=${limit}`);
+export async function getFestivals(limit = 100,
+                                  filters: SearchFilters = {}): Promise<Festival[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  applyFilters(params, { ...filters, sort: undefined });
+  const res = await fetch(`${API_BASE_URL}/festivals?${params.toString()}`);
   if (!res.ok) return [];
   return res.json();
 }
@@ -743,7 +806,7 @@ export async function getStays(eventId: string, nights = 1): Promise<TravelOptio
   return res.json();
 }
 
-/** Getting there. `origin` is a city name or an IATA code. */
+/** Flights. `origin` is a city name or an IATA code. */
 export async function getFlights(eventId: string, origin: string): Promise<TravelOptions> {
   const res = await fetch(
     `${API_BASE_URL}/events/${eventId}/flights?origin=${encodeURIComponent(origin)}`,
@@ -894,8 +957,10 @@ export type Inviter = {
   id: string;
   display_name: string | null;
   avatar_url: string | null;
-  note: string | null;
   when: string | null;
+  // The message they sent with the invitation — a different thing entirely from the private
+  // plan note, which was removed on 2026-09-10.
+  note: string | null;
 };
 
 export type Going = {
@@ -923,6 +988,7 @@ export type ReceivedInvite = {
   image_url: string | null;
   from_name: string | null;
   from_avatar: string | null;
+  // What they wrote with the invitation — the invite's own message, not the plan note.
   note: string | null;
   created_at: string | null;
 };
@@ -1028,9 +1094,7 @@ export type Plan = {
   past: boolean;
   has_base: boolean;
   has_invited: boolean;
-  has_note: boolean;
   reminder_level: "minimal" | "normal" | "high";
-  note: string | null;
   ticket: PlanTicket | null;
 };
 
@@ -1067,8 +1131,6 @@ async function planWrite(path: string, method: string, body?: unknown): Promise<
 export const setPlanReminder = (eventId: string, level: string) =>
   planWrite(`/events/${eventId}/plan/reminder`, "PUT", { level });
 
-export const setPlanNote = (eventId: string, note: string | null) =>
-  planWrite(`/events/${eventId}/plan/note`, "PUT", { note });
 
 export const markMissed = (eventId: string) =>
   planWrite(`/events/${eventId}/plan/missed`, "POST");
@@ -1362,7 +1424,6 @@ export async function setReviewHelpful(reviewId: string, on: boolean): Promise<v
 export type MyShow = MusicEvent & {
   state: "interested" | "planning" | "confirmed" | "attended" | "missed";
   booked: boolean;
-  has_note: boolean;
   is_suggestion: boolean;
 };
 
@@ -1521,4 +1582,126 @@ export async function setTicketCost(
   });
   if (!res.ok) throw new Error(await detailOf(res, `Ticket cost ${res.status}`));
   return res.json();
+}
+
+// ---- one search box, three kinds of answer ----
+// Artists here come from OUR catalogue, not Deezer, which is what lets a result carry
+// "3 concerts · 1 festival". `via` says why the act is listed: "name" = the term matched
+// their name; "lineup" = they were found on a bill the term matched, so searching a venue
+// or a festival returns the acts actually playing it.
+export type SearchArtistResult = {
+  id: string;
+  name: string;
+  image_url: string | null;
+  deezer_fans: number | null;
+  lastfm_listeners: number | null;
+  upcoming_events: number;
+  upcoming_festivals: number;
+  via: "name" | "lineup";
+};
+// How many matching CONCERTS each option would leave. Concerts only — festival dates are a
+// range rather than a moment and two filters have no festival answer at all, so one merged
+// number would be true of neither.
+export type SearchCounts = {
+  total: number; today: number; tomorrow: number; weekend: number;
+  d7: number; month: number; m3: number;
+  onsale_now: number; onsale_coming: number;
+  rating_8: number; rating_7: number; not_scheduled: number;
+};
+export type SearchAllResults = {
+  artists: SearchArtistResult[];
+  events: MusicEvent[];
+  festivals: Festival[];
+  counts?: SearchCounts | null;
+  // What the server actually applied. "Only acts I follow" does nothing when signed out,
+  // and the chip row shows the truth rather than what it thinks it asked for.
+  applied?: string[];
+};
+const EMPTY_RESULTS: SearchAllResults = { artists: [], events: [], festivals: [], applied: [] };
+
+export async function searchAll(q: string,
+                                filters: SearchFilters = {}): Promise<SearchAllResults> {
+  const params = applyFilters(new URLSearchParams({ q }), filters);
+  // Signed when there is a session: /search is public, but "only acts I follow" cannot be
+  // answered without knowing who is asking. Signed out, the server drops that one filter
+  // and says so in `applied`.
+  const res = await fetch(`${API_BASE_URL}/search?${params.toString()}`,
+                          { headers: await authHeaders() });
+  if (!res.ok) return EMPTY_RESULTS;
+  return res.json();
+}
+
+// The countries we actually hold upcoming shows in, biggest first. Fetched rather than
+// hardcoded: the old filter offered a fixed list of fifteen including four we have almost
+// nothing in, so tapping them looked like a broken filter.
+export type CountryCount = { code: string; n: number };
+export async function getEventCountries(): Promise<CountryCount[]> {
+  const res = await fetch(`${API_BASE_URL}/events/countries`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+// ---- wishlist ----
+// Acts you have not seen and mean to. NOT the same as a save (an event on a date) and NOT
+// the same as a follow (a notification subscription) — the one list of the three that can
+// be finished, which is why every line carries whether it has been crossed off and how.
+// The table behind it is still called `bucket_list`; only the word changed.
+export type WishlistLine = {
+  artist_id: string;
+  name: string;
+  image_url: string | null;
+  deezer_fans: number | null;
+  lastfm_listeners: number | null;
+  added_on: string;
+  seen: boolean;
+  // "passport" = we hold evidence you were there. "manual" = you told us about a gig from
+  // before the app existed. The screen says which, because they are different claims.
+  seen_via: "passport" | "manual" | null;
+  seen_on: string | null;
+  next_event_id: string | null;
+  next_event_title: string | null;
+  next_event_starts_at: string | null;
+  next_event_city: string | null;
+  next_event_country: string | null;
+};
+export type Wishlist = {
+  still_to_see: WishlistLine[];
+  seen: WishlistLine[];
+  total: number;
+  seen_count: number;
+  playing_count: number;
+};
+
+const EMPTY_WISHLIST: Wishlist = {
+  still_to_see: [], seen: [], total: 0, seen_count: 0, playing_count: 0,
+};
+
+export async function getWishlist(): Promise<Wishlist> {
+  const res = await fetch(`${API_BASE_URL}/me/wishlist`, { headers: await authHeaders() });
+  if (!res.ok) return EMPTY_WISHLIST;
+  return res.json();
+}
+
+export async function addToWishlist(a: { name: string; deezer_id?: number | null; image_url?: string | null }) {
+  const res = await fetch(`${API_BASE_URL}/me/wishlist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(await authHeaders()) },
+    body: JSON.stringify({ name: a.name, deezer_id: a.deezer_id ?? null, image_url: a.image_url ?? null }),
+  });
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json() as Promise<WishlistLine>;
+}
+
+export async function removeFromWishlist(artistId: string): Promise<void> {
+  await fetch(`${API_BASE_URL}/me/wishlist/${artistId}`, {
+    method: "DELETE", headers: await authHeaders(),
+  });
+}
+
+// The manual "I've seen them". Cannot undo a Passport tick — that one is evidence, and the
+// server ignores an attempt to clear it.
+export async function markWishlistSeen(artistId: string, seen: boolean): Promise<void> {
+  await fetch(`${API_BASE_URL}/me/wishlist/${artistId}/seen`, {
+    method: seen ? "POST" : "DELETE", headers: await authHeaders(),
+  });
 }

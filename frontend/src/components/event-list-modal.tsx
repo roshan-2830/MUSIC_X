@@ -2,10 +2,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import EventCard from "./event-card";
 import { MusicEvent } from "../lib/api";
+import { ToastHost } from "../lib/toast";
 
-const MUTED = "#9a9aa6";
 
 // Accepts plain events or recommended events (which carry a reason to show as a pill).
 type ListEvent = MusicEvent & { reason_label?: string; reason_kind?: "artist" | "genre" };
@@ -24,11 +27,13 @@ export default function EventListModal({
   onClose: () => void;
   onSelect: (id: string) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.header}>
         <Pressable onPress={onClose} hitSlop={10}>
-          <Ionicons name="chevron-back" size={26} color="#f4f4f6" />
+          <Ionicons name="chevron-back" size={26} color={th.text} />
         </Pressable>
         <Text style={styles.title} numberOfLines={1}>{title}</Text>
         <View style={{ width: 26 }} />
@@ -51,12 +56,15 @@ export default function EventListModal({
           />
         )}
       />
+      {/* This screen is a Modal, which renders above the root host — so it draws its
+          own. Several mounted at once is fine: only the topmost is on screen. */}
+      <ToastHost />
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -65,6 +73,6 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 2,
   },
-  title: { color: "#f4f4f6", fontSize: 18, fontWeight: "800", flex: 1, textAlign: "center" },
-  sub: { color: MUTED, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 8 },
+  title: { color: th.text, fontSize: 18, fontWeight: "800", flex: 1, textAlign: "center" },
+  sub: { color: th.muted, fontSize: 13, paddingHorizontal: 16, marginTop: 2, marginBottom: 8 },
 });

@@ -27,6 +27,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { alpha, Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
+
 import DayPicker, { shortDay, todayISO } from "./day-picker";
 import EventDetailView from "./event-detail";
 import {
@@ -36,12 +39,6 @@ import {
 } from "../lib/api";
 import { coverColor, flagEmoji, formatDay, zonedDay } from "../lib/format";
 
-const ACCENT = "#e8ff47";
-const INK = "#101204";
-const MUTED = "#9a9aa6";
-const PANEL = "#14141b";
-const LINE = "#23232c";
-const WARN = "#ffb200";
 
 /** The codes on the quick-pick row. Not a validated list of world currencies — just the ones
  *  worth one tap. Anything else is typed in, and the server takes any three letters. */
@@ -79,6 +76,8 @@ function countdown(days: number | null): string {
 /* ------------------------------------------------------------------ small pieces */
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <View style={{ marginTop: 12 }}>
       <Text style={styles.fld}>{label}</Text>
@@ -90,12 +89,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function DateField({ value, placeholder, onPress }: {
   value: string | null; placeholder: string; onPress: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable style={styles.input} onPress={onPress}>
       <Text style={value ? styles.inputT : styles.inputPh}>
         {value ? shortDay(value) : placeholder}
       </Text>
-      <Ionicons name="calendar-outline" size={16} color={MUTED} />
+      <Ionicons name="calendar-outline" size={16} color={th.muted} />
     </Pressable>
   );
 }
@@ -106,6 +107,8 @@ function MoneyField({ currency, amount, onCurrency, onAmount }: {
   currency: string; amount: string;
   onCurrency: (c: string) => void; onAmount: (a: string) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
@@ -126,13 +129,13 @@ function MoneyField({ currency, amount, onCurrency, onAmount }: {
           style={[styles.input, { width: 88 }]}
           value={currency}
           onChangeText={(t) => onCurrency(t.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3))}
-          placeholder="CUR" placeholderTextColor={MUTED}
+          placeholder="CUR" placeholderTextColor={th.muted}
           autoCapitalize="characters" maxLength={3}
         />
         <TextInput
           style={[styles.input, { flex: 1 }]}
           value={amount} onChangeText={(t) => onAmount(t.replace(/[^0-9.]/g, ""))}
-          placeholder="Total cost (optional)" placeholderTextColor={MUTED}
+          placeholder="Total cost (optional)" placeholderTextColor={th.muted}
           keyboardType="decimal-pad" inputMode="decimal"
         />
       </View>
@@ -145,6 +148,8 @@ function Sheet({ visible, title, note, saving, error, cta, onClose, onSave, chil
   visible: boolean; title: string; note?: string; saving: boolean; error: string | null;
   cta: string; onClose: () => void; onSave: () => void; children: React.ReactNode;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.root} edges={["top"]}>
@@ -152,7 +157,7 @@ function Sheet({ visible, title, note, saving, error, cta, onClose, onSave, chil
                               behavior={Platform.OS === "ios" ? "padding" : undefined}>
           <View style={styles.head}>
             <Pressable onPress={onClose} hitSlop={10} style={{ width: 40 }}>
-              <Ionicons name="close" size={22} color="#f4f4f6" />
+              <Ionicons name="close" size={22} color={th.text} />
             </Pressable>
             <Text style={styles.headT}>{title}</Text>
             <View style={{ width: 40 }} />
@@ -166,7 +171,7 @@ function Sheet({ visible, title, note, saving, error, cta, onClose, onSave, chil
           <View style={styles.foot}>
             <Pressable style={[styles.btn, saving && styles.btnOff]} disabled={saving}
                        onPress={onSave}>
-              {saving ? <ActivityIndicator color={INK} />
+              {saving ? <ActivityIndicator color={th.accentInk} />
                 : <Text style={styles.btnT}>{cta}</Text>}
             </Pressable>
           </View>
@@ -183,6 +188,8 @@ type DateTarget = "in" | "out" | "when" | "cancel" | null;
 function StaySheet({ trip, onClose, onSaved }: {
   trip: Trip; onClose: () => void; onSaved: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const s = trip.stay;
   // A stay defaults to the night OF the show and out the morning after — the shape of nearly
   // every one of these, and the two taps most people would otherwise make.
@@ -232,7 +239,7 @@ function StaySheet({ trip, onClose, onSaved }: {
              onClose={onClose} onSave={save}>
         <Field label="Hotel or place">
           <TextInput style={styles.input} value={name} onChangeText={setName}
-                     placeholder="e.g. Michelberger Hotel" placeholderTextColor={MUTED} />
+                     placeholder="e.g. Michelberger Hotel" placeholderTextColor={th.muted} />
         </Field>
         <View style={{ flexDirection: "row", gap: 10 }}>
           <View style={{ flex: 1 }}>
@@ -251,14 +258,14 @@ function StaySheet({ trip, onClose, onSaved }: {
         </Field>
         <Field label="Booking reference (optional)">
           <TextInput style={styles.input} value={ref} onChangeText={setRef}
-                     placeholder="e.g. Booking.com #12345" placeholderTextColor={MUTED} />
+                     placeholder="e.g. Booking.com #12345" placeholderTextColor={th.muted} />
         </Field>
         <Field label="Free-cancel until (optional)">
           <DateField value={cx} placeholder="No free cancellation"
                      onPress={() => setDate("cancel")} />
         </Field>
         <Text style={styles.hint}>
-          <Ionicons name="notifications-outline" size={12} color={MUTED} />
+          <Ionicons name="notifications-outline" size={12} color={th.muted} />
           {"  We’ll flag it here the week your cancellation window closes."}
         </Text>
       </Sheet>
@@ -280,6 +287,8 @@ function StaySheet({ trip, onClose, onSaved }: {
 function TravelSheet({ trip, homeCity, onClose, onSaved }: {
   trip: Trip; homeCity: string | null; onClose: () => void; onSaved: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const showDay = trip.event.starts_at
     ? zonedDay(trip.event.starts_at, trip.event.timezone) : null;   // venue's day, not UTC
   const [mode, setMode] = useState<TravelMode>("plane");
@@ -322,7 +331,7 @@ function TravelSheet({ trip, homeCity, onClose, onSaved }: {
             {MODES.map((m) => (
               <Pressable key={m.key} onPress={() => setMode(m.key)}
                          style={[styles.modeBtn, mode === m.key && styles.modeOn]}>
-                <Ionicons name={m.icon} size={17} color={mode === m.key ? INK : "#d6d6de"} />
+                <Ionicons name={m.icon} size={17} color={mode === m.key ? th.accentInk : th.text2} />
                 <Text style={[styles.modeT, mode === m.key && styles.modeTOn]}>{m.label}</Text>
               </Pressable>
             ))}
@@ -332,13 +341,13 @@ function TravelSheet({ trip, homeCity, onClose, onSaved }: {
           <View style={{ flex: 1 }}>
             <Field label="From">
               <TextInput style={styles.input} value={from} onChangeText={setFrom}
-                         placeholder="Home" placeholderTextColor={MUTED} />
+                         placeholder="Home" placeholderTextColor={th.muted} />
             </Field>
           </View>
           <View style={{ flex: 1 }}>
             <Field label="To">
               <TextInput style={styles.input} value={to} onChangeText={setTo}
-                         placeholder="The show" placeholderTextColor={MUTED} />
+                         placeholder="The show" placeholderTextColor={th.muted} />
             </Field>
           </View>
         </View>
@@ -350,7 +359,7 @@ function TravelSheet({ trip, homeCity, onClose, onSaved }: {
         </Field>
         <Field label="Booking reference (optional)">
           <TextInput style={styles.input} value={ref} onChangeText={setRef}
-                     placeholder="e.g. BA #ABC123" placeholderTextColor={MUTED} />
+                     placeholder="e.g. BA #ABC123" placeholderTextColor={th.muted} />
         </Field>
         <Field label="Free-cancel until (optional)">
           <DateField value={cx} placeholder="No free cancellation"
@@ -369,6 +378,8 @@ function TravelSheet({ trip, homeCity, onClose, onSaved }: {
 function TicketCostSheet({ trip, onClose, onSaved }: {
   trip: Trip; onClose: () => void; onSaved: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const t = trip.ticket;
   const [cur, setCur] = useState(t.currency ?? "GBP");
   const [cost, setCost] = useState(t.cost != null ? String(t.cost) : "");
@@ -409,6 +420,8 @@ function TicketCostSheet({ trip, onClose, onSaved }: {
 function StartTripSheet({ onClose, onPick }: {
   onClose: () => void; onPick: (e: MusicEvent) => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [shows, setShows] = useState<MyShow[] | null>(null);
   useEffect(() => {
     getMyShows()
@@ -422,7 +435,7 @@ function StartTripSheet({ onClose, onPick }: {
       <SafeAreaView style={styles.root} edges={["top"]}>
         <View style={styles.head}>
           <Pressable onPress={onClose} hitSlop={10} style={{ width: 40 }}>
-            <Ionicons name="close" size={22} color="#f4f4f6" />
+            <Ionicons name="close" size={22} color={th.text} />
           </Pressable>
           <Text style={styles.headT}>Start a trip</Text>
           <View style={{ width: 40 }} />
@@ -430,7 +443,7 @@ function StartTripSheet({ onClose, onPick }: {
         <Text style={[styles.note, { paddingHorizontal: 16 }]}>
           Pick one of your saved shows and add the stay or the travel you have booked.
         </Text>
-        {shows === null ? <ActivityIndicator color={ACCENT} style={{ marginTop: 30 }} /> : (
+        {shows === null ? <ActivityIndicator color={th.accent} style={{ marginTop: 30 }} /> : (
           <ScrollView contentContainerStyle={{ paddingBottom: 30 }}>
             {shows.map((s) => (
               <Pressable key={s.id} style={styles.pickRow} onPress={() => onPick(s)}>
@@ -444,7 +457,7 @@ function StartTripSheet({ onClose, onPick }: {
                     {formatDay(s.starts_at, s.timezone)}{s.city ? ` · ${s.city}` : ""}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                <Ionicons name="chevron-forward" size={16} color={th.muted} />
               </Pressable>
             ))}
             {!shows.length ? (
@@ -466,15 +479,17 @@ function LedgerLine({ icon, title, tag, sub, warn, cost, onPress, onRemove }: {
   warn?: string | null; cost?: string | null;
   onPress?: () => void; onRemove?: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable style={styles.lg} onPress={onPress} disabled={!onPress}>
-      <View style={styles.lgIcon}><Ionicons name={icon} size={16} color={ACCENT} /></View>
+      <View style={styles.lgIcon}><Ionicons name={icon} size={16} color={th.accent} /></View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <Text style={styles.lgT} numberOfLines={1}>{title}</Text>
           {tag ? (
             <View style={styles.lgTag}>
-              <Ionicons name="checkmark" size={10} color={ACCENT} />
+              <Ionicons name="checkmark" size={10} color={th.accent} />
               <Text style={styles.lgTagT}>{tag}</Text>
             </View>
           ) : null}
@@ -482,14 +497,14 @@ function LedgerLine({ icon, title, tag, sub, warn, cost, onPress, onRemove }: {
         {sub ? <Text style={styles.lgS} numberOfLines={1}>{sub}</Text> : null}
         {warn ? (
           <Text style={styles.lgWarn}>
-            <Ionicons name="notifications-outline" size={11} color={WARN} />{`  ${warn}`}
+            <Ionicons name="notifications-outline" size={11} color={th.warn} />{`  ${warn}`}
           </Text>
         ) : null}
       </View>
       {cost ? <Text style={styles.lgCost}>{cost}</Text> : null}
       {onRemove ? (
         <Pressable onPress={onRemove} hitSlop={8} style={{ paddingLeft: 6 }}>
-          <Ionicons name="close" size={16} color={MUTED} />
+          <Ionicons name="close" size={16} color={th.muted} />
         </Pressable>
       ) : null}
     </Pressable>
@@ -502,14 +517,16 @@ function AddLine({ icon, title, sub, go, onPress }: {
   go?: boolean;
   onPress: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   return (
     <Pressable style={styles.lg} onPress={onPress}>
-      <View style={styles.lgIconOff}><Ionicons name={icon} size={16} color={MUTED} /></View>
+      <View style={styles.lgIconOff}><Ionicons name={icon} size={16} color={th.muted} /></View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={[styles.lgT, { color: MUTED }]}>{title}</Text>
+        <Text style={[styles.lgT, { color: th.muted }]}>{title}</Text>
         <Text style={styles.lgS}>{sub}</Text>
       </View>
-      <Ionicons name={go ? "chevron-forward" : "add"} size={go ? 16 : 18} color={ACCENT} />
+      <Ionicons name={go ? "chevron-forward" : "add"} size={go ? 16 : 18} color={th.accent} />
     </Pressable>
   );
 }
@@ -539,6 +556,8 @@ function legSub(l: TravelLine): string {
 function TripCard({ trip, homeCity, onOpenEvent, onChanged }: {
   trip: Trip; homeCity: string | null; onOpenEvent: () => void; onChanged: () => void;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [sheet, setSheet] = useState<"stay" | "travel" | "ticket" | null>(null);
   const e = trip.event;
   const spend = trip.spend.length ? moneyList(trip.spend) : null;
@@ -573,7 +592,7 @@ function TripCard({ trip, homeCity, onOpenEvent, onChanged }: {
           two used to print the same date one line apart. */}
       {trip.cancel_soon ? (
         <View style={styles.alert}>
-          <Ionicons name="notifications" size={13} color={WARN} />
+          <Ionicons name="notifications" size={13} color={th.warn} />
           <Text style={styles.alertT}>
             {trip.cancel_soon === 1
               ? "A free-cancellation window closes this week — see below."
@@ -669,6 +688,8 @@ function blankTrip(e: MusicEvent): Trip {
 
 export default function MyBookingsView({ onClose, homeCity }:
   { onClose: () => void; homeCity?: string | null }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [data, setData] = useState<Bookings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -692,13 +713,13 @@ export default function MyBookingsView({ onClose, homeCity }:
     <SafeAreaView style={styles.root} edges={["top"]}>
       <View style={styles.head}>
         <Pressable onPress={onClose} hitSlop={10} style={{ width: 40 }}>
-          <Ionicons name="chevron-back" size={22} color="#f4f4f6" />
+          <Ionicons name="chevron-back" size={22} color={th.text} />
         </Pressable>
         <Text style={styles.headT}>My bookings</Text>
         <View style={{ width: 40 }} />
       </View>
 
-      {loading ? <ActivityIndicator color={ACCENT} style={{ marginTop: 40 }} /> : error ? (
+      {loading ? <ActivityIndicator color={th.accent} style={{ marginTop: 40 }} /> : error ? (
         <View style={{ alignItems: "center", paddingTop: 40, paddingHorizontal: 28 }}>
           <Text style={styles.emptyT}>{error}</Text>
           <Pressable onPress={load} style={styles.retry}>
@@ -710,7 +731,7 @@ export default function MyBookingsView({ onClose, homeCity }:
           {empty ? (
             <View style={styles.emptyBox}>
               <View style={styles.emptyIc}>
-                <Ionicons name="ticket-outline" size={26} color={ACCENT} />
+                <Ionicons name="ticket-outline" size={26} color={th.accent} />
               </View>
               <Text style={styles.emptyH}>No trips booked yet</Text>
               <Text style={styles.emptyT}>
@@ -733,7 +754,7 @@ export default function MyBookingsView({ onClose, homeCity }:
                   <Text style={styles.sumL}>All-in</Text>
                 </View>
                 <View style={[styles.sumCell, !!data!.cancel_windows && styles.sumAlert]}>
-                  <Text style={[styles.sumN, !!data!.cancel_windows && { color: WARN }]}>
+                  <Text style={[styles.sumN, !!data!.cancel_windows && { color: th.warn }]}>
                     {data!.cancel_windows || data!.upcoming.length}
                   </Text>
                   <Text style={styles.sumL}>
@@ -755,14 +776,14 @@ export default function MyBookingsView({ onClose, homeCity }:
               ))}
 
               <Pressable style={styles.startBtn} onPress={() => setStarting(true)}>
-                <Ionicons name="add" size={17} color={ACCENT} />
+                <Ionicons name="add" size={17} color={th.accent} />
                 <Text style={styles.startT}>Start a trip for another show</Text>
               </Pressable>
             </>
           )}
 
           <Text style={styles.foothint}>
-            <Ionicons name="checkmark-circle-outline" size={12} color={MUTED} />
+            <Ionicons name="checkmark-circle-outline" size={12} color={th.muted} />
             {"  Only what you record here. We never read your inbox."}
           </Text>
         </ScrollView>
@@ -785,11 +806,11 @@ export default function MyBookingsView({ onClose, homeCity }:
           <Pressable style={styles.choice} onPress={(e) => e.stopPropagation?.()}>
             <Text style={styles.choiceT} numberOfLines={2}>{newTrip?.title}</Text>
             <Pressable style={styles.choiceBtn} onPress={() => setNewKind("stay")}>
-              <Ionicons name="bed-outline" size={17} color={ACCENT} />
+              <Ionicons name="bed-outline" size={17} color={th.accent} />
               <Text style={styles.choiceBT}>Add your stay</Text>
             </Pressable>
             <Pressable style={styles.choiceBtn} onPress={() => setNewKind("travel")}>
-              <Ionicons name="airplane-outline" size={17} color={ACCENT} />
+              <Ionicons name="airplane-outline" size={17} color={th.accent} />
               <Text style={styles.choiceBT}>Add travel</Text>
             </Pressable>
           </Pressable>
@@ -817,33 +838,33 @@ export default function MyBookingsView({ onClose, homeCity }:
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0b0b0f" },
+const makeStyles = (th: Theme) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: th.bg },
   head: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 14, paddingVertical: 12,
   },
-  headT: { color: "#f4f4f6", fontSize: 17, fontWeight: "900" },
+  headT: { color: th.text, fontSize: 17, fontWeight: "900" },
 
   summary: {
     flexDirection: "row", gap: 8, marginHorizontal: 16, marginTop: 4, marginBottom: 6,
   },
   sumCell: {
-    flex: 1, backgroundColor: PANEL, borderRadius: 14, paddingVertical: 14,
-    alignItems: "center", borderWidth: 1, borderColor: LINE,
+    flex: 1, backgroundColor: th.panel, borderRadius: 14, paddingVertical: 14,
+    alignItems: "center", borderWidth: 1, borderColor: th.line,
   },
-  sumAlert: { borderColor: WARN },
-  sumN: { color: "#f4f4f6", fontSize: 19, fontWeight: "900" },
-  sumL: { color: MUTED, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  sumAlert: { borderColor: th.warn },
+  sumN: { color: th.text, fontSize: 19, fontWeight: "900" },
+  sumL: { color: th.muted, fontSize: 11, fontWeight: "700", marginTop: 3 },
 
   sec: {
-    color: MUTED, fontSize: 11, fontWeight: "800", letterSpacing: 1,
+    color: th.muted, fontSize: 11, fontWeight: "800", letterSpacing: 1,
     textTransform: "uppercase", marginTop: 18, marginBottom: 8, paddingHorizontal: 16,
   },
 
   card: {
     marginHorizontal: 16, marginBottom: 14, borderRadius: 16, overflow: "hidden",
-    backgroundColor: PANEL, borderWidth: 1, borderColor: LINE,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line,
   },
   cardHead: { padding: 14, paddingTop: 16 },
   cardWhen: {
@@ -855,18 +876,18 @@ const styles = StyleSheet.create({
   cardStat: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     paddingHorizontal: 14, paddingVertical: 10,
-    borderBottomWidth: 1, borderBottomColor: "#1c1c24",
+    borderBottomWidth: 1, borderBottomColor: th.line2,
   },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#2e2e3a" },
-  dotOn: { backgroundColor: ACCENT },
-  cardStatT: { color: MUTED, fontSize: 11, fontWeight: "700", marginLeft: 4 },
-  cardSpend: { color: "#f4f4f6", fontSize: 13, fontWeight: "800" },
+  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: th.line3 },
+  dotOn: { backgroundColor: th.accentFill },
+  cardStatT: { color: th.muted, fontSize: 11, fontWeight: "700", marginLeft: 4 },
+  cardSpend: { color: th.text, fontSize: 13, fontWeight: "800" },
 
   alert: {
     flexDirection: "row", alignItems: "center", gap: 7,
-    backgroundColor: "rgba(255,178,0,.10)", paddingHorizontal: 14, paddingVertical: 9,
+    backgroundColor: alpha(th.festival, 0.10), paddingHorizontal: 14, paddingVertical: 9,
   },
-  alertT: { color: WARN, fontSize: 12, fontWeight: "700", flex: 1 },
+  alertT: { color: th.warn, fontSize: 12, fontWeight: "700", flex: 1 },
 
   cardBody: { paddingVertical: 4 },
   lg: {
@@ -874,110 +895,110 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 10,
   },
   lgIcon: {
-    width: 32, height: 32, borderRadius: 9, backgroundColor: "#1b1b24",
+    width: 32, height: 32, borderRadius: 9, backgroundColor: th.panel2,
     alignItems: "center", justifyContent: "center",
   },
   lgIconOff: {
-    width: 32, height: 32, borderRadius: 9, backgroundColor: "#15151c",
+    width: 32, height: 32, borderRadius: 9, backgroundColor: th.panel,
     alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "#22222b", borderStyle: "dashed",
+    borderWidth: 1, borderColor: th.panel3, borderStyle: "dashed",
   },
-  lgT: { color: "#f4f4f6", fontSize: 13.5, fontWeight: "700", flexShrink: 1 },
+  lgT: { color: th.text, fontSize: 13.5, fontWeight: "700", flexShrink: 1 },
   lgTag: {
     flexDirection: "row", alignItems: "center", gap: 3,
-    backgroundColor: "rgba(232,255,71,.12)", borderRadius: 999,
+    backgroundColor: alpha(th.accent, 0.12), borderRadius: 999,
     paddingHorizontal: 7, paddingVertical: 2,
   },
-  lgTagT: { color: ACCENT, fontSize: 10, fontWeight: "800" },
-  lgS: { color: MUTED, fontSize: 11.5, marginTop: 2 },
-  lgWarn: { color: WARN, fontSize: 11, fontWeight: "700", marginTop: 3 },
-  lgCost: { color: "#f4f4f6", fontSize: 13, fontWeight: "800" },
+  lgTagT: { color: th.accent, fontSize: 10, fontWeight: "800" },
+  lgS: { color: th.muted, fontSize: 11.5, marginTop: 2 },
+  lgWarn: { color: th.warn, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  lgCost: { color: th.text, fontSize: 13, fontWeight: "800" },
 
   startBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7,
     marginHorizontal: 16, marginTop: 6, paddingVertical: 13, borderRadius: 12,
-    borderWidth: 1, borderColor: LINE, borderStyle: "dashed",
+    borderWidth: 1, borderColor: th.line, borderStyle: "dashed",
   },
-  startT: { color: ACCENT, fontSize: 13, fontWeight: "800" },
+  startT: { color: th.accent, fontSize: 13, fontWeight: "800" },
 
   emptyBox: { alignItems: "center", paddingHorizontal: 30, paddingTop: 40,
               maxWidth: 460, alignSelf: "center" },
   emptyIc: {
-    width: 62, height: 62, borderRadius: 31, backgroundColor: PANEL,
-    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: LINE,
+    width: 62, height: 62, borderRadius: 31, backgroundColor: th.panel,
+    alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: th.line,
   },
-  emptyH: { color: "#f4f4f6", fontSize: 17, fontWeight: "900", marginTop: 16 },
-  emptyT: { color: MUTED, fontSize: 13, textAlign: "center", lineHeight: 20, marginTop: 8 },
+  emptyH: { color: th.text, fontSize: 17, fontWeight: "900", marginTop: 16 },
+  emptyT: { color: th.muted, fontSize: 13, textAlign: "center", lineHeight: 20, marginTop: 8 },
   cta: {
-    marginTop: 20, backgroundColor: ACCENT, borderRadius: 12,
+    marginTop: 20, backgroundColor: th.accentFill, borderRadius: 12,
     paddingHorizontal: 26, paddingVertical: 13,
   },
-  ctaT: { color: INK, fontSize: 14, fontWeight: "900" },
+  ctaT: { color: th.accentInk, fontSize: 14, fontWeight: "900" },
   retry: {
-    marginTop: 16, backgroundColor: "#23232c", borderRadius: 10,
+    marginTop: 16, backgroundColor: th.panel3, borderRadius: 10,
     paddingHorizontal: 18, paddingVertical: 10,
   },
-  retryT: { color: "#f4f4f6", fontSize: 13, fontWeight: "700" },
+  retryT: { color: th.text, fontSize: 13, fontWeight: "700" },
   foothint: {
-    color: MUTED, fontSize: 11.5, textAlign: "center", marginTop: 20, paddingHorizontal: 30,
+    color: th.muted, fontSize: 11.5, textAlign: "center", marginTop: 20, paddingHorizontal: 30,
   },
 
   // ---- sheets
-  note: { color: MUTED, fontSize: 12.5, lineHeight: 19, marginBottom: 4 },
-  fld: { color: MUTED, fontSize: 11, fontWeight: "800", marginBottom: 6, letterSpacing: 0.4 },
+  note: { color: th.muted, fontSize: 12.5, lineHeight: 19, marginBottom: 4 },
+  fld: { color: th.muted, fontSize: 11, fontWeight: "800", marginBottom: 6, letterSpacing: 0.4 },
   input: {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: PANEL, borderWidth: 1, borderColor: LINE, borderRadius: 11,
-    paddingHorizontal: 12, paddingVertical: 12, color: "#f4f4f6", fontSize: 14,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line, borderRadius: 11,
+    paddingHorizontal: 12, paddingVertical: 12, color: th.text, fontSize: 14,
   },
-  inputT: { color: "#f4f4f6", fontSize: 14 },
-  inputPh: { color: MUTED, fontSize: 14 },
+  inputT: { color: th.text, fontSize: 14 },
+  inputPh: { color: th.muted, fontSize: 14 },
   chip: {
     paddingHorizontal: 11, paddingVertical: 7, borderRadius: 999,
-    backgroundColor: PANEL, borderWidth: 1, borderColor: LINE,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line,
   },
-  chipOn: { backgroundColor: ACCENT, borderColor: ACCENT },
-  chipT: { color: "#d6d6de", fontSize: 12, fontWeight: "700" },
-  chipTOn: { color: INK, fontWeight: "900" },
+  chipOn: { backgroundColor: th.accentFill, borderColor: th.accentFill },
+  chipT: { color: th.text2, fontSize: 12, fontWeight: "700" },
+  chipTOn: { color: th.accentInk, fontWeight: "900" },
   modeBtn: {
     flex: 1, alignItems: "center", gap: 4, paddingVertical: 11, borderRadius: 11,
-    backgroundColor: PANEL, borderWidth: 1, borderColor: LINE,
+    backgroundColor: th.panel, borderWidth: 1, borderColor: th.line,
   },
-  modeOn: { backgroundColor: ACCENT, borderColor: ACCENT },
-  modeT: { color: "#d6d6de", fontSize: 11, fontWeight: "700" },
-  modeTOn: { color: INK, fontWeight: "900" },
-  hint: { color: MUTED, fontSize: 11.5, marginTop: 14, lineHeight: 17 },
-  err: { color: "#ff6b6b", fontSize: 12.5, marginTop: 14, fontWeight: "600" },
-  foot: { padding: 14, borderTopWidth: 1, borderTopColor: "#1c1c24" },
-  btn: { backgroundColor: ACCENT, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
+  modeOn: { backgroundColor: th.accentFill, borderColor: th.accentFill },
+  modeT: { color: th.text2, fontSize: 11, fontWeight: "700" },
+  modeTOn: { color: th.accentInk, fontWeight: "900" },
+  hint: { color: th.muted, fontSize: 11.5, marginTop: 14, lineHeight: 17 },
+  err: { color: th.danger, fontSize: 12.5, marginTop: 14, fontWeight: "600" },
+  foot: { padding: 14, borderTopWidth: 1, borderTopColor: th.line2 },
+  btn: { backgroundColor: th.accentFill, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
   btnOff: { opacity: 0.6 },
-  btnT: { color: INK, fontSize: 15, fontWeight: "900" },
+  btnT: { color: th.accentInk, fontSize: 15, fontWeight: "900" },
   rmBtn: { marginTop: 18, alignItems: "center", paddingVertical: 10 },
-  rmT: { color: "#ff6b6b", fontSize: 13, fontWeight: "700" },
+  rmT: { color: th.danger, fontSize: 13, fontWeight: "700" },
 
   pickRow: {
     flexDirection: "row", alignItems: "center", gap: 12,
     paddingVertical: 11, paddingHorizontal: 16,
-    borderBottomWidth: 1, borderBottomColor: "#16161d",
+    borderBottomWidth: 1, borderBottomColor: th.panel,
   },
   thumb: {
     width: 42, height: 42, borderRadius: 10, alignItems: "center", justifyContent: "center",
   },
-  rowT: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
-  rowD: { color: MUTED, fontSize: 12, marginTop: 3 },
+  rowT: { color: th.text, fontSize: 14, fontWeight: "700" },
+  rowD: { color: th.muted, fontSize: 12, marginTop: 3 },
 
   scrim: {
-    flex: 1, backgroundColor: "rgba(0,0,0,.6)", justifyContent: "center", padding: 30,
+    flex: 1, backgroundColor: th.scrim, justifyContent: "center", padding: 30,
   },
   choice: {
-    backgroundColor: PANEL, borderRadius: 16, padding: 18,
-    borderWidth: 1, borderColor: LINE,
+    backgroundColor: th.panel, borderRadius: 16, padding: 18,
+    borderWidth: 1, borderColor: th.line,
     width: "100%", maxWidth: 420, alignSelf: "center",
   },
-  choiceT: { color: "#f4f4f6", fontSize: 15, fontWeight: "800", marginBottom: 14 },
+  choiceT: { color: th.text, fontSize: 15, fontWeight: "800", marginBottom: 14 },
   choiceBtn: {
     flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 13,
-    paddingHorizontal: 14, borderRadius: 12, backgroundColor: "#1b1b24", marginBottom: 8,
+    paddingHorizontal: 14, borderRadius: 12, backgroundColor: th.panel2, marginBottom: 8,
   },
-  choiceBT: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
+  choiceBT: { color: th.text, fontSize: 14, fontWeight: "700" },
 });

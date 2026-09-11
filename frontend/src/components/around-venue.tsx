@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Theme } from "../lib/theme";
+import { useTheme, useThemedStyles } from "../lib/use-theme";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
 import { NearbyPlaces, Place } from "../lib/api";
 import CollapsibleCard from "./collapsible-card";
 
-const ACCENT = "#e8ff47";
-const MUTED = "#9a9aa6";
-const LINE = "#26262f";
 
 type Tab = "do" | "eat";
 
@@ -76,6 +76,8 @@ function metres(m: number): string {
 }
 
 function Row({ place }: { place: Place }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const l = look(place.category);
   const [a, b] = hues(place.name + place.category);
   return (
@@ -88,7 +90,7 @@ function Row({ place }: { place: Place }) {
       <View style={styles.rowBody}>
         <Text style={styles.name} numberOfLines={1}>{place.name}</Text>
         <View style={styles.metaRow}>
-          <Ionicons name={l.icon as any} size={11} color={MUTED} />
+          <Ionicons name={l.icon as any} size={11} color={th.muted} />
           <Text style={styles.meta} numberOfLines={1}>
             {[l.word, place.cuisine ? tidy(place.cuisine) : null].filter(Boolean).join(" · ")}
             {"  ·  "}{place.walk_minutes} min walk
@@ -103,7 +105,7 @@ function Row({ place }: { place: Place }) {
           accessibilityRole="button"
           accessibilityLabel={`Directions to ${place.name}`}
         >
-          <Ionicons name="navigate" size={12} color="#101204" />
+          <Ionicons name="navigate" size={12} color={th.accentInk} />
         </Pressable>
       ) : null}
     </View>
@@ -128,6 +130,8 @@ export default function AroundVenue({
   places: NearbyPlaces | null;
   loading: boolean;
 }) {
+  const th = useTheme();
+  const styles = useThemedStyles(makeStyles);
   const [tab, setTab] = useState<Tab>("do");
 
   const venueShort = useMemo(
@@ -162,12 +166,12 @@ export default function AroundVenue({
       </View>
 
       {loading ? (
-        <View style={styles.state}><ActivityIndicator color={ACCENT} /></View>
+        <View style={styles.state}><ActivityIndicator color={th.accent} /></View>
       ) : null}
 
       {!loading && places?.status !== "ok" ? (
         <View style={styles.state}>
-          <Ionicons name="information-circle-outline" size={16} color={MUTED} />
+          <Ionicons name="information-circle-outline" size={16} color={th.muted} />
           <Text style={styles.stateText}>{places?.reason ?? "Nothing to show yet."}</Text>
         </View>
       ) : null}
@@ -178,7 +182,7 @@ export default function AroundVenue({
 
       {!loading && places?.status === "ok" && !list.length ? (
         <View style={styles.state}>
-          <Ionicons name="information-circle-outline" size={16} color={MUTED} />
+          <Ionicons name="information-circle-outline" size={16} color={th.muted} />
           {/* Said the way the mockup says it: empty rather than padded. */}
           <Text style={styles.stateText}>
             {tab === "do"
@@ -190,14 +194,14 @@ export default function AroundVenue({
 
       {places?.search_url ? (
         <Pressable style={styles.searchBtn} onPress={() => Linking.openURL(places.search_url!)}>
-          <Ionicons name="search" size={13} color={MUTED} />
+          <Ionicons name="search" size={13} color={th.muted} />
           <Text style={styles.searchText}>Search around the venue on Maps</Text>
-          <Ionicons name="open-outline" size={12} color={MUTED} />
+          <Ionicons name="open-outline" size={12} color={th.muted} />
         </Pressable>
       ) : null}
 
       <View style={styles.promise}>
-        <Ionicons name="shield-checkmark" size={13} color="#7ef0b2" />
+        <Ionicons name="shield-checkmark" size={13} color={th.success} />
         <Text style={styles.promiseText}>
           We earn nothing on these — they're here because they're close. Walk times are
           straight-line from {venueShort}, so allow a little more.
@@ -207,40 +211,40 @@ export default function AroundVenue({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (th: Theme) => StyleSheet.create({
   tabs: {
-    flexDirection: "row", backgroundColor: "#0f0f14", borderRadius: 12, padding: 3, gap: 3,
+    flexDirection: "row", backgroundColor: th.bg, borderRadius: 12, padding: 3, gap: 3,
     marginBottom: 4,
   },
   tab: { flex: 1, alignItems: "center", paddingVertical: 9, borderRadius: 10 },
-  tabOn: { backgroundColor: ACCENT },
-  tabText: { color: MUTED, fontSize: 13, fontWeight: "700" },
-  tabTextOn: { color: "#101204", fontSize: 13, fontWeight: "800" },
+  tabOn: { backgroundColor: th.accentFill },
+  tabText: { color: th.muted, fontSize: 13, fontWeight: "700" },
+  tabTextOn: { color: th.accentInk, fontSize: 13, fontWeight: "800" },
 
   row: {
     flexDirection: "row", alignItems: "center", gap: 10,
-    paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: LINE,
+    paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: th.line,
   },
   stripe: { width: 3, height: 34, borderRadius: 2 },
   rowBody: { flex: 1 },
-  name: { color: "#f4f4f6", fontSize: 14, fontWeight: "700" },
+  name: { color: th.text, fontSize: 14, fontWeight: "700" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 3 },
-  meta: { color: MUTED, fontSize: 11.5, flex: 1 },
-  dist: { color: "#c9c9d2", fontSize: 12, fontWeight: "800" },
+  meta: { color: th.muted, fontSize: 11.5, flex: 1 },
+  dist: { color: th.text3, fontSize: 12, fontWeight: "800" },
   go: {
-    width: 30, height: 30, borderRadius: 9, backgroundColor: ACCENT,
+    width: 30, height: 30, borderRadius: 9, backgroundColor: th.accentFill,
     alignItems: "center", justifyContent: "center",
   },
 
   state: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 18 },
-  stateText: { color: MUTED, fontSize: 13, flex: 1, lineHeight: 18 },
+  stateText: { color: th.muted, fontSize: 13, flex: 1, lineHeight: 18 },
 
   searchBtn: {
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
-    borderWidth: 1, borderColor: LINE, borderRadius: 11, paddingVertical: 11, marginTop: 14,
+    borderWidth: 1, borderColor: th.line, borderRadius: 11, paddingVertical: 11, marginTop: 14,
   },
-  searchText: { color: MUTED, fontSize: 12.5, fontWeight: "700" },
+  searchText: { color: th.muted, fontSize: 12.5, fontWeight: "700" },
 
   promise: { flexDirection: "row", gap: 7, marginTop: 14, alignItems: "flex-start" },
-  promiseText: { color: MUTED, fontSize: 11.5, lineHeight: 16, flex: 1 },
+  promiseText: { color: th.muted, fontSize: 11.5, lineHeight: 16, flex: 1 },
 });
